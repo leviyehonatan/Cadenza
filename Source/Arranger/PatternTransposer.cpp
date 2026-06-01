@@ -1,6 +1,7 @@
 #include "PatternTransposer.h"
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace cadenza::arranger
 {
@@ -60,6 +61,96 @@ bool isUnknownPolicy(const YamahaChannelPolicy& policy) noexcept
         || policy.ntr == YamahaNtr::Unknown
         || policy.ntt == YamahaNtt::Unknown;
 }
+
+bool isChordRole(NoteRole role) noexcept
+{
+    return role == NoteRole::ChordRoot
+        || role == NoteRole::Chord3
+        || role == NoteRole::Chord5
+        || role == NoteRole::Chord7;
+}
+
+std::optional<int> scaleModeForNtt(YamahaNtt ntt) noexcept
+{
+    switch (ntt) {
+        case YamahaNtt::NaturalMinor:  return 1;
+        case YamahaNtt::HarmonicMinor: return 2;
+        case YamahaNtt::MelodicMinor:  return 3;
+        case YamahaNtt::Dorian:        return 4;
+        default:                       return std::nullopt;
+    }
+}
+
+int rootDeltaForPolicy(const TransposeContext& ctx, const YamahaChannelPolicy& policy) noexcept
+{
+    int delta = foldedRootDelta(ctx.chord.rootPitchClass, sourceRootPitchClass(policy));
+
+    if (policy.chordRootUpperLimit) {
+        const int limitPc = ((*policy.chordRootUpperLimit % 12) + 12) % 12;
+        if (ctx.chord.rootPitchClass > limitPc)
+            delta -= 12;
+    }
+
+    return delta;
+}
+
+std::optional<int> applyPolicyNoteLimits(int pitch, const YamahaChannelPolicy& policy) noexcept
+{
+    if (!policy.noteLowLimit && !policy.noteHighLimit)
+        return clampMidi(pitch);
+
+    int low = std::clamp(policy.noteLowLimit.value_or(0), 0, 127);
+    int high = std::clamp(policy.noteHighLimit.value_or(127), 0, 127);
+    if (low > high)
+        std::swap(low, high);
+
+    while (pitch < low && pitch + 12 <= 127)
+        pitch += 12;
+    while (pitch > high && pitch - 12 >= 0)
+        pitch -= 12;
+
+    return clampMidi(std::clamp(pitch, low, high));
+}
+
+std::optional<int> transposeWithPolicyLimits(const PatternNote& note,
+                                             const TransposeContext& ctx,
+                                             const YamahaChannelPolicy& policy)
+{
+    auto played = transposeNote(note, ctx);
+    if (!played)
+        return played;
+    return applyPolicyNoteLimits(*played, policy);
+}
+
+std::optional<int> pitchWithPolicyLimits(int pitch,
+                                         const TransposeContext& ctx,
+                                         const YamahaChannelPolicy& policy) noexcept
+{
+    return applyPolicyNoteLimits(applyGlobalOffsets(pitch, ctx), policy);
+}
+
+std::optional<int> nearestPitchInScale(int pitch,
+                                       int rootPc,
+                                       int scaleMode,
+                                       const YamahaChannelPolicy& policy) noexcept
+{
+    bool allowed[12] = {};
+    for (int degree = 0; degree < 7; ++degree)
+        allowed[(rootPc + scaleSemitone(scaleMode, degree)) % 12] = true;
+
+    int best = pitch;
+    int bestDistance = 128;
+    for (int candidate = 0; candidate <= 127; ++candidate) {
+        if (!allowed[candidate % 12])
+            continue;
+        const int distance = std::abs(candidate - pitch);
+        if (distance < bestDistance || (distance == bestDistance && candidate < best)) {
+            best = candidate;
+            bestDistance = distance;
+        }
+    }
+    return applyPolicyNoteLimits(best, policy);
+}
 }
 
 int chordIntervalForRole(cadenza::midi::ChordQuality quality, NoteRole role) noexcept
@@ -106,11 +197,23 @@ int scaleSemitone(int scaleMode, int degree) noexcept
 {
     // Major scale degrees 0..6 = 0, 2, 4, 5, 7, 9, 11
     // Natural minor      0..6 = 0, 2, 3, 5, 7, 8, 10
-    static const int major[7] = { 0, 2, 4, 5, 7, 9, 11 };
-    static const int minor[7] = { 0, 2, 3, 5, 7, 8, 10 };
+    // Harmonic minor     0..6 = 0, 2, 3, 5, 7, 8, 11
+    // Melodic minor      0..6 = 0, 2, 3, 5, 7, 9, 11
+    // Dorian             0..6 = 0, 2, 3, 5, 7, 9, 10
+    static const int major[7]         = { 0, 2, 4, 5, 7, 9, 11 };
+    static const int naturalMinor[7]  = { 0, 2, 3, 5, 7, 8, 10 };
+    static const int harmonicMinor[7] = { 0, 2, 3, 5, 7, 8, 11 };
+    static const int melodicMinor[7]  = { 0, 2, 3, 5, 7, 9, 11 };
+    static const int dorian[7]        = { 0, 2, 3, 5, 7, 9, 10 };
 
     if (degree < 0 || degree > 6) return 0;
-    return (scaleMode == 1) ? minor[degree] : major[degree];
+    switch (scaleMode) {
+        case 1: return naturalMinor[degree];
+        case 2: return harmonicMinor[degree];
+        case 3: return melodicMinor[degree];
+        case 4: return dorian[degree];
+        default: return major[degree];
+    }
 }
 
 std::optional<int> transposeNote(const PatternNote& note, const TransposeContext& ctx)
@@ -164,34 +267,53 @@ std::optional<int> transposeNote(const PatternNote& note,
 
     // Drums and other absolute notes still use the existing absolute path.
     if (note.role == NoteRole::Absolute)
-        return transposeNote(note, ctx);
+        return transposeWithPolicyLimits(note, ctx, *policy);
+
+    if (auto scaleMode = scaleModeForNtt(policy->ntt); scaleMode && note.role == NoteRole::ScaleTone) {
+        auto scaleCtx = ctx;
+        scaleCtx.scaleMode = *scaleMode;
+        return transposeWithPolicyLimits(note, scaleCtx, *policy);
+    }
+
+    if (policy->ntr == YamahaNtr::RootFixed && policy->ntt == YamahaNtt::Bypass)
+        return pitchWithPolicyLimits(note.pitch, ctx, *policy);
 
     if (policy->ntt == YamahaNtt::Bypass) {
-        // Yamaha BYPASS = "root shift only": the source phrase follows the chord
-        // ROOT (no scale/chord fitting). It does NOT freeze — a melodic part must
-        // still move with the chord. (Drums use the Absolute path above.)
-        int delta = foldedRootDelta(ctx.chord.rootPitchClass, sourceRootPitchClass(*policy));
-        return clampMidi(applyGlobalOffsets(note.pitch + delta, ctx));
+        // RootTransposition + Bypass = root shift only: no chord/scale fitting.
+        return pitchWithPolicyLimits(note.pitch + rootDeltaForPolicy(ctx, *policy), ctx, *policy);
     }
 
     // ChordColor follows the chord by root transposition relative to this
     // channel's declared source root (e.g. a phrase recorded over G).
     if (note.role == NoteRole::ChordColor) {
-        int delta = foldedRootDelta(ctx.chord.rootPitchClass, sourceRootPitchClass(*policy));
-        return clampMidi(applyGlobalOffsets(note.pitch + delta, ctx));
+        const int shifted = applyGlobalOffsets(note.pitch + rootDeltaForPolicy(ctx, *policy), ctx);
+        if (auto scaleMode = scaleModeForNtt(policy->ntt))
+            return nearestPitchInScale(shifted, ctx.chord.rootPitchClass, *scaleMode, *policy);
+        return applyPolicyNoteLimits(shifted, *policy);
     }
 
     if (policy->bassOn && note.role == NoteRole::ChordRoot)
-        return transposeNote(note, ctx);
+        return transposeWithPolicyLimits(note, ctx, *policy);
 
     if (policy->ntr == YamahaNtr::RootFixed && policy->ntt == YamahaNtt::Chord)
-        return transposeNote(note, ctx);
+        return transposeWithPolicyLimits(note, ctx, *policy);
 
-    if (policy->ntr == YamahaNtr::RootTransposition && policy->ntt == YamahaNtt::Melody) {
-        const int delta = ctx.chord.rootPitchClass - sourceRootPitchClass(*policy);
-        return clampMidi(applyGlobalOffsets(note.pitch + delta, ctx));
+    if (policy->ntr == YamahaNtr::RootTransposition && policy->ntt == YamahaNtt::Chord) {
+        if (isChordRole(note.role))
+            return transposeWithPolicyLimits(note, ctx, *policy);
+        return pitchWithPolicyLimits(note.pitch + rootDeltaForPolicy(ctx, *policy), ctx, *policy);
     }
 
-    return transposeNote(note, ctx);
+    if (policy->ntr == YamahaNtr::RootTransposition && policy->ntt == YamahaNtt::Melody) {
+        return pitchWithPolicyLimits(note.pitch + rootDeltaForPolicy(ctx, *policy), ctx, *policy);
+    }
+
+    if (policy->ntr == YamahaNtr::Guitar) {
+        // TODO: implement Yamaha guitar tables. For now, keep guitar parts safe
+        // by fitting known chord tones and root-shifting color tones above.
+        return transposeWithPolicyLimits(note, ctx, *policy);
+    }
+
+    return transposeWithPolicyLimits(note, ctx, *policy);
 }
 }

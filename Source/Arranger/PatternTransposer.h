@@ -22,8 +22,8 @@ struct TransposeContext
     int keyTonicPC = 0;           // 0..11; root of the song key for scale degrees
     int globalTranspose = 0;      // semitones added on top (user transpose)
     int globalOctave = 0;         // octaves added on top (user octave)
-    // Optional scale modifier: 0 = major, 1 = minor (natural).
-    // Could be extended to modes later.
+    // Optional scale modifier: 0 = major, 1 = natural minor, 2 = harmonic minor,
+    // 3 = melodic minor, 4 = dorian.
     int scaleMode = 0;
 };
 

@@ -411,9 +411,8 @@ NoteRole assignRole(uint8_t channelZeroBased,
         return assignRole(channelZeroBased, pitch);
 
     if (policy->ntt == YamahaNtt::Bypass) {
-        // Yamaha BYPASS = "root shift only": the phrase follows the chord root
-        // (ChordColor), it does NOT freeze. (Drums are handled by the channel-9
-        // check above, so this only affects melodic parts.)
+        // BYPASS notes keep their recorded interval; PatternTransposer decides
+        // from NTR whether that means fixed pitch or root-only transposition.
         return NoteRole::ChordColor;
     }
 
@@ -651,9 +650,9 @@ YamahaNtt yamahaNttFromCtb2Raw(uint8_t value, YamahaNtr ntr) noexcept
     const uint8_t base = value & 0x7F;
     if (ntr == YamahaNtr::Guitar) {
         switch (base) {
-            case 0: return YamahaNtt::GuitarAllPurpose;
-            case 1: return YamahaNtt::GuitarStroke;
-            case 2: return YamahaNtt::GuitarArpeggio;
+            case 0: return YamahaNtt::AllPurpose;
+            case 1: return YamahaNtt::Stroke;
+            case 2: return YamahaNtt::Arpeggio;
             default: return YamahaNtt::Unknown;
         }
     }
@@ -721,15 +720,22 @@ YamahaNtt yamahaNttFromText(const std::string& value)
     if (text == "harmonic minor") return YamahaNtt::HarmonicMinor;
     if (text == "natural minor") return YamahaNtt::NaturalMinor;
     if (text == "dorian") return YamahaNtt::Dorian;
-    if (text == "guitar all purpose" || text == "all purpose") return YamahaNtt::GuitarAllPurpose;
-    if (text == "guitar stroke" || text == "stroke") return YamahaNtt::GuitarStroke;
-    if (text == "guitar arpeggio" || text == "arpeggio") return YamahaNtt::GuitarArpeggio;
+    if (text == "guitar all purpose" || text == "all purpose") return YamahaNtt::AllPurpose;
+    if (text == "guitar stroke" || text == "stroke") return YamahaNtt::Stroke;
+    if (text == "guitar arpeggio" || text == "arpeggio") return YamahaNtt::Arpeggio;
     return YamahaNtt::Unknown;
 }
 
 std::string destinationPartNameForChannel(int midiChannel)
 {
+    if (midiChannel == 9) return "rhythm2";
     if (midiChannel == 10) return "drums";
+    if (midiChannel == 11) return "bass";
+    if (midiChannel == 12) return "chord1";
+    if (midiChannel == 13) return "chord2";
+    if (midiChannel == 14) return "pad";
+    if (midiChannel == 15) return "phrase1";
+    if (midiChannel == 16) return "phrase2";
     if (midiChannel == 2) return "bass";
     if (midiChannel == 3) return "harmony";
     return "part-ch" + std::to_string(midiChannel);

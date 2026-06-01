@@ -137,19 +137,18 @@ void rangeClipping()
     expect(!transposeNote(n, ctx).has_value(), "out-of-range returns nullopt");
 }
 
-void bypassPolicyRootTransposes()
+void rootFixedBypassKeepsPhrasePitch()
 {
-    // BYPASS = "root shift only": follows the chord root (does NOT freeze).
     auto n = noteOf(NoteRole::ChordRoot, 60);
     auto policy = policyOf(YamahaNtr::RootFixed, YamahaNtt::Bypass);   // sourceRoot "C"
 
-    expect(transposeNote(n, ctxFor(0, ChordQuality::Major), &policy).value() == 60, "bypass on C: no shift");
-    expect(transposeNote(n, ctxFor(5, ChordQuality::Major), &policy).value() == 65, "bypass on F: +5 follows root");
-    expect(transposeNote(n, ctxFor(7, ChordQuality::Major), &policy).value() == 55, "bypass on G: folds down -5");
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Major), &policy).value() == 60, "RF+Bypass on C: no shift");
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major), &policy).value() == 60, "RF+Bypass on F: phrase pitch stays");
+    expect(transposeNote(n, ctxFor(7, ChordQuality::Major), &policy).value() == 60, "RF+Bypass on G: phrase pitch stays");
 
     // Global transpose/octave still stack on top of the root shift.
-    expect(transposeNote(n, ctxFor(5, ChordQuality::Major, 0, 2, 1), &policy).value() == 79,
-           "bypass + transpose +2 + octave +1");
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major, 0, 2, 1), &policy).value() == 74,
+           "RF+Bypass + transpose +2 + octave +1");
 }
 
 void rootTranspositionMelodyUsesRootDelta()
@@ -213,7 +212,6 @@ void chordColorFollowsChordByRootTransposition()
 
 void rootTranspositionBypassShiftsByRootDelta()
 {
-    // RootFixed + Bypass freezes (covered by bypassPolicyIgnoresChordChanges).
     // RootTransposition + Bypass must shift the whole phrase by the root delta.
     auto n = noteOf(NoteRole::ChordRoot, 62);
     auto policy = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Bypass, "C");
@@ -221,6 +219,40 @@ void rootTranspositionBypassShiftsByRootDelta()
     expect(transposeNote(n, ctxFor(0, ChordQuality::Major), &policy).value() == 62, "RT+Bypass on C stays");
     expect(transposeNote(n, ctxFor(2, ChordQuality::Major), &policy).value() == 64, "RT+Bypass to D shifts +2");
     expect(transposeNote(n, ctxFor(9, ChordQuality::Minor), &policy).value() == 59, "RT+Bypass to A folds -3");
+}
+
+void rootTranspositionChordPrefersChordTone()
+{
+    auto n = noteOf(NoteRole::Chord3, 64);
+    auto policy = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Chord, "C");
+
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Minor), &policy).value() == 63,
+           "RT+Chord maps source third to current minor third");
+}
+
+void scaleNttFitsScaleToneToRequestedMode()
+{
+    auto n = noteOf(NoteRole::ScaleTone, 60, 2);
+    auto naturalMinor = policyOf(YamahaNtr::RootTransposition, YamahaNtt::NaturalMinor, "C");
+    auto dorian = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Dorian, "C");
+
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Minor, 0, 0, 0, 0), &naturalMinor).value() == 63,
+           "NaturalMinor NTT lowers scale degree 3");
+
+    n.scaleDegree = 5;
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Minor, 0, 0, 0, 0), &naturalMinor).value() == 68,
+           "NaturalMinor NTT uses flat 6");
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Minor, 0, 0, 0, 0), &dorian).value() == 69,
+           "Dorian NTT uses natural 6");
+}
+
+void scaleNttFitsColorToneToNearestScaleTone()
+{
+    auto n = noteOf(NoteRole::ChordColor, 64); // E over C.
+    auto policy = policyOf(YamahaNtr::RootTransposition, YamahaNtt::NaturalMinor, "C");
+
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Minor), &policy).value() == 63,
+           "NaturalMinor NTT pulls color tone into minor scale");
 }
 
 void chordColorPolicyUsesPolicySourceRoot()
@@ -262,13 +294,16 @@ int main()
     scaleToneRespectsKey();
     scaleToneRespectsMinor();
     rangeClipping();
-    bypassPolicyRootTransposes();
+    rootFixedBypassKeepsPhrasePitch();
     rootTranspositionMelodyUsesRootDelta();
     rootFixedChordPolicyKeepsChordRoles();
     bassOnChordRootFollowsRoot();
     unknownPolicyUsesCurrentBehavior();
     chordColorFollowsChordByRootTransposition();
     rootTranspositionBypassShiftsByRootDelta();
+    rootTranspositionChordPrefersChordTone();
+    scaleNttFitsScaleToneToRequestedMode();
+    scaleNttFitsColorToneToNearestScaleTone();
     chordColorPolicyUsesPolicySourceRoot();
     drumsStayAbsoluteWithPolicy();
 

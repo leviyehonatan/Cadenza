@@ -69,6 +69,7 @@ std::string roleName(NoteRole role)
         case NoteRole::Chord3: return "chord-3";
         case NoteRole::Chord5: return "chord-5";
         case NoteRole::Chord7: return "chord-7";
+        case NoteRole::ChordColor: return "chord-color";
         case NoteRole::ScaleTone: return "scale-tone";
     }
     return "absolute";
@@ -99,9 +100,9 @@ std::string nttName(const std::optional<YamahaChannelPolicy>& policy)
         case YamahaNtt::HarmonicMinor: return "HarmonicMinor";
         case YamahaNtt::NaturalMinor: return "NaturalMinor";
         case YamahaNtt::Dorian: return "Dorian";
-        case YamahaNtt::GuitarAllPurpose: return "GuitarAllPurpose";
-        case YamahaNtt::GuitarStroke: return "GuitarStroke";
-        case YamahaNtt::GuitarArpeggio: return "GuitarArpeggio";
+        case YamahaNtt::AllPurpose: return "AllPurpose";
+        case YamahaNtt::Stroke: return "Stroke";
+        case YamahaNtt::Arpeggio: return "Arpeggio";
         case YamahaNtt::Unknown: return "Unknown";
     }
     return "Unknown";

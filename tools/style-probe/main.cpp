@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <optional>
 #include <string>
 
 using namespace cadenza::arranger;
@@ -39,6 +40,40 @@ static const char* roleName(NoteRole r)
         case NoteRole::ScaleTone:  return "scale";
     }
     return "?";
+}
+
+static const char* ntrName(YamahaNtr ntr)
+{
+    switch (ntr) {
+        case YamahaNtr::RootFixed: return "RootFixed";
+        case YamahaNtr::RootTransposition: return "RootTransposition";
+        case YamahaNtr::Guitar: return "Guitar";
+        case YamahaNtr::Unknown: return "Unknown";
+    }
+    return "Unknown";
+}
+
+static const char* nttName(YamahaNtt ntt)
+{
+    switch (ntt) {
+        case YamahaNtt::Bypass: return "Bypass";
+        case YamahaNtt::Melody: return "Melody";
+        case YamahaNtt::Chord: return "Chord";
+        case YamahaNtt::MelodicMinor: return "MelodicMinor";
+        case YamahaNtt::HarmonicMinor: return "HarmonicMinor";
+        case YamahaNtt::NaturalMinor: return "NaturalMinor";
+        case YamahaNtt::Dorian: return "Dorian";
+        case YamahaNtt::AllPurpose: return "AllPurpose";
+        case YamahaNtt::Stroke: return "Stroke";
+        case YamahaNtt::Arpeggio: return "Arpeggio";
+        case YamahaNtt::Unknown: return "Unknown";
+    }
+    return "Unknown";
+}
+
+static int valueOrMinusOne(const std::optional<int>& value)
+{
+    return value.value_or(-1);
 }
 
 int main(int argc, char** argv)
@@ -81,6 +116,18 @@ int main(int argc, char** argv)
             std::printf("  part '%s' ch=%d prog=%d perc=%d notes=%zu\n",
                         part.name.c_str(), part.midiChannel,
                         setup.program.value_or(-1), (int) setup.percussion, part.notes.size());
+            if (part.yamahaPolicy) {
+                const auto& p = *part.yamahaPolicy;
+                std::printf("      policy srcCh=%d dest=%s ntr=%s ntt=%s bassOn=%d noteRange=%d..%d chordRootUpperLimit=%d\n",
+                            p.sourceChannel,
+                            p.destinationPart.empty() ? part.name.c_str() : p.destinationPart.c_str(),
+                            ntrName(p.ntr),
+                            nttName(p.ntt),
+                            (int) p.bassOn,
+                            valueOrMinusOne(p.noteLowLimit),
+                            valueOrMinusOne(p.noteHighLimit),
+                            valueOrMinusOne(p.chordRootUpperLimit));
+            }
 
             int shown = 0, lo = 999, hi = -1;
             for (const auto& note : part.notes) {

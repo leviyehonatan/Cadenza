@@ -36,9 +36,9 @@ enum class YamahaNtt
     HarmonicMinor,
     NaturalMinor,
     Dorian,
-    GuitarAllPurpose,
-    GuitarStroke,
-    GuitarArpeggio,
+    AllPurpose,
+    Stroke,
+    Arpeggio,
     Unknown,
 };
 
