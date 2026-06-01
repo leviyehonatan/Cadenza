@@ -1,11 +1,31 @@
+# Build output
 build/
+build-*/
 out/
+probe_out/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+
+# Compiled / linker artifacts
+*.obj
+*.exe
+*.ilk
+*.pdb
+*.lib
+*.exp
+
+# IDE
 .vs/
 .vscode/
-lib/JUCE/
 *.user
 *.suo
 *.VC.db
 *.VC.opendb
-*.log
 
+# Dependencies
+lib/JUCE/
+
+# Logs
+*.log
