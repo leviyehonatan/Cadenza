@@ -910,6 +910,22 @@ CasmCtabEntry parseBinaryCtb2Entry(const std::vector<uint8_t>& payload)
     return entry;
 }
 
+// Real Yamaha Ctab/Ctb2 entries are BINARY. A legacy/text "key=value" form is
+// also supported, but it must be detected by being genuinely textual — not just
+// by containing a '=' byte. A binary entry whose note-limit (or other) byte is
+// 0x3D ('=') must NOT be mistaken for ASCII, or its policy is silently lost.
+bool looksLikeAsciiCtab(const std::vector<uint8_t>& payload) noexcept
+{
+    bool hasEquals = false;
+    for (uint8_t b : payload) {
+        if (b == '=') { hasEquals = true; continue; }
+        const bool printable = (b >= 0x20 && b < 0x7F) || b == 0x09 || b == 0x0A || b == 0x0D;
+        if (!printable)
+            return false;   // a control/high byte means this is a binary entry
+    }
+    return hasEquals;
+}
+
 std::vector<CasmCtabEntry> parseCtabPayload(const std::vector<uint8_t>& payload,
                                             const std::string& tag,
                                             CasmInfo& info,
@@ -920,7 +936,7 @@ std::vector<CasmCtabEntry> parseCtabPayload(const std::vector<uint8_t>& payload,
     const auto text = printableAscii(payload);
     std::vector<CasmCtabEntry> entries;
 
-    if (text.find('=') != std::string::npos) {
+    if (looksLikeAsciiCtab(payload)) {
         std::stringstream lines(text);
         std::string line;
         while (std::getline(lines, line)) {

@@ -555,6 +555,63 @@ void ctb2PolicyIsDecodedAndAttachedToPart()
     expect(policy.noteHighLimit && *policy.noteHighLimit == 108, "policy note high limit decoded");
 }
 
+std::vector<uint8_t> makeStyWithBinaryCtabContainingEqualsByte()
+{
+    auto sty = makeSampleSmf();
+
+    std::vector<uint8_t> sdec;
+    const std::string section = "Main A";
+    sdec.insert(sdec.end(), section.begin(), section.end());
+
+    std::vector<uint8_t> ctab(26, 0);
+    ctab[0] = 11;  // source channel 12 (chord)
+    const std::string name = "Guitar";
+    for (std::size_t i = 0; i < 8; ++i)
+        ctab[1 + i] = i < name.size() ? static_cast<uint8_t>(name[i]) : static_cast<uint8_t>(' ');
+    ctab[9] = 11;
+    ctab[18] = 0;   // source root C
+    ctab[19] = 19;  // source chord
+    ctab[20] = 1;   // NTR Root Fixed
+    ctab[21] = 2;   // NTT Chord
+    ctab[22] = 11;
+    ctab[23] = 0x3D; // low note 61 == '=' : the byte that used to misroute to ASCII
+    ctab[24] = 84;
+    ctab[25] = 1;
+
+    std::vector<uint8_t> cseg;
+    appendChunk(cseg, "Sdec", sdec);
+    appendChunk(cseg, "Ctab", ctab);
+
+    std::vector<uint8_t> casm;
+    appendChunk(casm, "CSEG", cseg);
+    appendChunk(sty, "CASM", casm);
+    return sty;
+}
+
+void binaryCtabWithEqualsByteStillParsesAsBinary()
+{
+    auto sty = makeStyWithBinaryCtabContainingEqualsByte();
+    auto r = cadenza::arranger::parseStyBytes(sty);
+    expect(r.ok, "Ctab-with-0x3D sty parses OK");
+    if (!r.ok) return;
+
+    // The 0x3D ('=') note-limit byte must NOT make the binary entry parse as ASCII.
+    const cadenza::arranger::CasmCtabEntry* entry = nullptr;
+    for (const auto& cseg : r.casm.csegs)
+        for (const auto& e : cseg.ctabEntries)
+            if (e.channel && *e.channel == 12)
+                entry = &e;
+
+    expect(entry != nullptr, "0x3D Ctab entry for channel 12 decoded (binary, channel read)");
+    if (!entry) return;
+    expect(entry->policy.has_value(), "binary policy attached (not misread as ASCII)");
+    if (!entry->policy) return;
+    expect(entry->policy->ntr == cadenza::arranger::YamahaNtr::RootFixed,
+           "0x3D Ctab NTR decoded as binary");
+    expect(entry->policy->ntt == cadenza::arranger::YamahaNtt::Chord,
+           "0x3D Ctab NTT decoded as binary");
+}
+
 void ctb2SplitRangeStillDecodesPolicy()
 {
     // Real styles (Intro/Ending B/C) encode a source-note split: byte 21 is the
@@ -825,6 +882,7 @@ int main()
     ctb2PolicyIsDecodedAndAttachedToPart();
     ctb2PolicyPreservesPlaybackLimits();
     ctb2SplitRangeStillDecodesPolicy();
+    binaryCtabWithEqualsByteStillParsesAsBinary();
     bypassPolicyFollowsByRootTransposition();
     rootFixedChordPolicyAssignsChordRoles();
     bassOnPolicyMarksPartAsBassAndRootFollowing();

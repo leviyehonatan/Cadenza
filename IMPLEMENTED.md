@@ -98,12 +98,14 @@ There are two UIs:
 - **Pad** defaults to a tighter, faster synth-strings patch with reverb/chorus cut.
 - **Bass** is anchored to one consistent low octave (E1–Eb2) so the foundation
   never jumps register or drops near-inaudible.
-- **Ctb2 split-range policies are now parsed.** SFF2 styles encode a source-note
-  split (byte 21 != 0x7F) in many sections (typically Intro/Ending B/C); the
-  parser used to drop those to the heuristic fallback. It now decodes the
-  NTR/NTT pair regardless of the split. On the 1,582-file test library this moved
-  ~1,000 styles from "best-effort" to using their real per-part Yamaha policy
-  (styles needing the fallback dropped from 344 to 238).
+- **More CASM policies are extracted (two parser fixes).** (1) Ctb2 split-range
+  entries (source-note byte 21 != 0x7F, common in Intro/Ending B/C) are now decoded
+  instead of dropped. (2) Binary Ctab/Ctb2 entries whose note-limit byte is 0x3D
+  ('=') were being misdetected as the legacy ASCII format and losing their policy;
+  ASCII is now detected by the payload being genuinely textual. Combined, on the
+  1,582-file test library the styles needing the heuristic fallback dropped from
+  344 to 21, and clean styles rose from 187 to 1,414 — most of the library now
+  plays with its real per-part Yamaha NTR/NTT behavior.
 
 ---
 
