@@ -120,6 +120,18 @@ if(CADENZA_BUILD_TESTS)
         FAIL_REGULAR_EXPRESSION "channel 10 setup owner: rhythm2"
     )
 
+    add_test(
+        NAME style_probe_stable_note_names
+        COMMAND style-probe
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/style-probe-note-range.cstyle"
+            C
+            mainA
+            2
+    )
+    set_tests_properties(style_probe_stable_note_names PROPERTIES
+        PASS_REGULAR_EXPRESSION "played range A1\\(33\\)..E3\\(52\\)"
+    )
+
     add_executable(cadenza_sty_tests
         tools/sty-converter/StyParserTests.cpp
     )

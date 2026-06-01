@@ -20,11 +20,11 @@
 
 using namespace cadenza::arranger;
 
-static const char* noteName(int midi)
+static std::string noteName(int midi)
 {
     static const char* n[12] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
-    static char buf[8];
-    if (midi < 0 || midi > 127) { std::snprintf(buf, sizeof buf, "--"); return buf; }
+    char buf[8];
+    if (midi < 0 || midi > 127) return "--";
     std::snprintf(buf, sizeof buf, "%s%d", n[midi % 12], midi / 12 - 1);
     return buf;
 }
@@ -150,15 +150,20 @@ int main(int argc, char** argv)
                 auto played = playbackNoteForPart(part, note, ctx);
                 if (played) { lo = std::min(lo, *played); hi = std::max(hi, *played); }
                 if (shown < perPart) {
+                    const auto sourceName = noteName(note.pitch);
+                    const auto playedName = played ? noteName(*played) : std::string("--");
                     std::printf("      t=%-5d src=%-4s(%3d) -> %-4s(%3d)  %s\n",
-                                note.tick, noteName(note.pitch), note.pitch,
-                                played ? noteName(*played) : "--", played.value_or(-1),
+                                note.tick, sourceName.c_str(), note.pitch,
+                                playedName.c_str(), played.value_or(-1),
                                 roleName(note.role));
                     ++shown;
                 }
             }
-            if (hi >= 0)
-                std::printf("      [played range %s(%d)..%s(%d)]\n", noteName(lo), lo, noteName(hi), hi);
+            if (hi >= 0) {
+                const auto loName = noteName(lo);
+                const auto hiName = noteName(hi);
+                std::printf("      [played range %s(%d)..%s(%d)]\n", loName.c_str(), lo, hiName.c_str(), hi);
+            }
         }
         if (!sectionWanted.empty()) break;
     }
