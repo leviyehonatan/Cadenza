@@ -34,6 +34,10 @@ There are two UIs:
 - **Split point** (default C4 / MIDI 60): below = chord zone, above = melody.
 
 ### Arranger engine
+- Parses Yamaha playback policy fields into explicit NTR/NTT enums, including
+  SFF1/Ctab NTT byte 3 as Melody + bassOn. `bassOn`, `noteLowLimit`,
+  `noteHighLimit`, and `chordRootUpperLimit` are preserved and covered by
+  focused tests.
 - Loads Yamaha **`.sty`** (SFF) directly, and our `.cstyle` JSON format.
 - Parses CASM/Ctab/Ctb2 policy, channels 9–16 mapped to the standard SFF
   accompaniment parts (sub-rhythm, drums, bass, chord1/2, pad, phrase1/2).
@@ -53,10 +57,18 @@ There are two UIs:
   and role for a given chord, **and renders the section to a `.mid`** so you can
   audition the raw arrangement in any player.
 - `plugin-probe` — loads/inspects a VST3.
+- `style-probe` also shows playback channel/percussion flag, shared-channel
+  setup owner, and stable independent note names in range/output lines.
 - Diagnostic log at `%APPDATA%/Cadenza/cadenza.log` (fresh each launch).
-- 18 unit-test suites (chord recognition, transposition, parsing, playback).
+- 20 unit-test suites (chord recognition, transposition, parsing, playback,
+  and focused style-probe diagnostics).
 
 ### Sound-quality fixes already in (CULY-ext was the test style)
+- Yamaha NTR/NTT policy now guides the transposition path: RootFixed/Bypass can
+  stay absolute, RootTransposition follows root movement, and chord/melody modes
+  use the existing chord-tone fitting rather than one generic transposition.
+- **Sub-rhythm / rhythm2 percussion routes to GM drum channel 10**, while the
+  main drums part owns channel-10 bank/program setup when both share the channel.
 - Chord-tone **voicing** uses nearest-tone placement (no octave scatter).
 - A 7th note over a plain triad folds to the root (no accidental Am7-sounds-like-C).
 - **Sub-rhythm / drum-bank parts are treated as percussion** and never pitched.
@@ -100,9 +112,9 @@ because **most arbitrary `.sty` files will not sound perfect yet**:
 - **NTT chord-fitting is simplified.** We use root transposition + nearest
   chord-tone remapping, not full Yamaha NTT scale tables. Complex chords
   (alterations, slash chords, exotic qualities) won't always voice ideally.
-- **Sub-rhythm routing.** Channel-9 drum parts are flagged percussion, but they
-  still play on a non-standard drum channel; depending on the SoundFont they may
-  not always trigger true kit sounds.
+- **Shared percussion setup is still simple.** Multiple percussion parts can now
+  share GM channel 10 with the main drums setup preferred, but future drum-kit
+  and keymap merging may still need more style-specific handling.
 - **Instrument/octave tweaks are global defaults**, not persisted per style.
   (The bass low-octave anchor and pad patch are applied at parse time.)
 - **No style editor / no save of edited styles.** Style editing UI is a placeholder.
@@ -119,8 +131,8 @@ because **most arbitrary `.sty` files will not sound perfect yet**:
    and a fallback when CASM policy is missing/garbled.
 2. **Fuller NTT**: implement Yamaha NTT scale-table chord fitting for natural
    voicings across all chord qualities.
-3. **Drum routing**: route any drum-bank part to a real percussion channel/bank
-   so sub-rhythm always plays kit sounds.
+3. **Drum polish**: improve style-specific drum-kit/keymap merging when multiple
+   percussion parts share GM channel 10.
 4. **Per-style persistence**: save instrument/octave/mixer choices per style.
 5. **Song mode**: honor ending sections and stop.
 6. **Per-part VST instruments**; then installer + Release build.
