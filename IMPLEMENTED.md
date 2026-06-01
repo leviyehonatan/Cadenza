@@ -57,6 +57,9 @@ There are two UIs:
   and role for a given chord, **and renders the section to a `.mid`** so you can
   audition the raw arrangement in any player.
 - `plugin-probe` — loads/inspects a VST3.
+- `style-probe ... --casm` — dumps the parsed CASM (CSEGs, per-channel Ctab/Ctb2
+  entries, decoded NTR/NTT, whether a policy attached, and raw bytes) for
+  debugging why a style does or doesn't pick up Yamaha policy.
 - `style-scan` — batch-parses a whole style library (recursively), classifies each
   `.sty` as OK / WARN / FAIL, separates benign notes (percussion routing) from
   real warnings (e.g. missing CASM policy -> heuristic fallback), aggregates the
@@ -95,6 +98,12 @@ There are two UIs:
 - **Pad** defaults to a tighter, faster synth-strings patch with reverb/chorus cut.
 - **Bass** is anchored to one consistent low octave (E1–Eb2) so the foundation
   never jumps register or drops near-inaudible.
+- **Ctb2 split-range policies are now parsed.** SFF2 styles encode a source-note
+  split (byte 21 != 0x7F) in many sections (typically Intro/Ending B/C); the
+  parser used to drop those to the heuristic fallback. It now decodes the
+  NTR/NTT pair regardless of the split. On the 1,582-file test library this moved
+  ~1,000 styles from "best-effort" to using their real per-part Yamaha policy
+  (styles needing the fallback dropped from 344 to 238).
 
 ---
 

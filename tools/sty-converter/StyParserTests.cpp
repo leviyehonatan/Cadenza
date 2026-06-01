@@ -265,7 +265,8 @@ std::vector<uint8_t> makeSingleSectionStyWithCtb2(uint8_t channel,
                                                   uint8_t rtr = 1,
                                                   uint8_t chordRootUpperLimit = 11,
                                                   uint8_t noteLowLimit = 24,
-                                                  uint8_t noteHighLimit = 108)
+                                                  uint8_t noteHighLimit = 108,
+                                                  uint8_t sourceHighByte = 0x7F)
 {
     auto sty = makeSingleSectionSmf(channel);
 
@@ -282,7 +283,7 @@ std::vector<uint8_t> makeSingleSectionStyWithCtb2(uint8_t channel,
     ctb2[18] = sourceRoot;
     ctb2[19] = sourceChord;
     ctb2[20] = 0;
-    ctb2[21] = 0x7F;
+    ctb2[21] = sourceHighByte;
     ctb2[28] = ntr;
     ctb2[29] = ntt;
     ctb2[30] = chordRootUpperLimit;
@@ -554,6 +555,48 @@ void ctb2PolicyIsDecodedAndAttachedToPart()
     expect(policy.noteHighLimit && *policy.noteHighLimit == 108, "policy note high limit decoded");
 }
 
+void ctb2SplitRangeStillDecodesPolicy()
+{
+    // Real styles (Intro/Ending B/C) encode a source-note split: byte 21 is the
+    // source high note (e.g. 0x5F), not the full-range 0x7F. The NTR/NTT pair at
+    // bytes 28/29 is still valid, so a policy must be attached (not fall back).
+    auto sty = makeSingleSectionStyWithCtb2(
+        /*channel*/   11,
+        /*ntr*/       0,      // Root Transposition
+        /*ntt*/       0,      // Bypass
+        /*sourceRoot*/0,
+        /*sourceChord*/19,
+        /*rtr*/       1,
+        /*chordRootUpperLimit*/ 11,
+        /*noteLowLimit*/ 28,
+        /*noteHighLimit*/ 127,
+        /*sourceHighByte*/ 0x5F);   // <-- split, was rejected before
+
+    auto r = cadenza::arranger::parseStyBytes(sty);
+    expect(r.ok, "split-range Ctb2 sty parses OK");
+    if (!r.ok) return;
+
+    const auto* mainA = r.style.findSection("mainA");
+    expect(mainA != nullptr, "split mainA found");
+    if (!mainA) return;
+
+    const cadenza::arranger::Part* part = nullptr;
+    for (const auto& p : mainA->parts)
+        if (p.midiChannel == 12)   // channel byte 11 -> MIDI channel 12
+            part = &p;
+    expect(part != nullptr, "split policy part found");
+    if (!part) return;
+
+    expect(part->yamahaPolicy.has_value(), "split-range policy attached (no fallback)");
+    if (!part->yamahaPolicy) return;
+    expect(part->yamahaPolicy->source == cadenza::arranger::YamahaPolicySource::Ctb2,
+           "split policy source is Ctb2");
+    expect(part->yamahaPolicy->ntr == cadenza::arranger::YamahaNtr::RootTransposition,
+           "split policy NTR decoded from byte 28");
+    expect(part->yamahaPolicy->ntt == cadenza::arranger::YamahaNtt::Bypass,
+           "split policy NTT decoded from byte 29");
+}
+
 void ctb2PolicyPreservesPlaybackLimits()
 {
     auto sty = makeSingleSectionStyWithCtb2(
@@ -781,6 +824,7 @@ int main()
     binaryCtb2DecodesKnownFields();
     ctb2PolicyIsDecodedAndAttachedToPart();
     ctb2PolicyPreservesPlaybackLimits();
+    ctb2SplitRangeStillDecodesPolicy();
     bypassPolicyFollowsByRootTransposition();
     rootFixedChordPolicyAssignsChordRoles();
     bassOnPolicyMarksPartAsBassAndRootFollowing();

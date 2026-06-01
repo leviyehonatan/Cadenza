@@ -877,34 +877,35 @@ CasmCtabEntry parseBinaryCtb2Entry(const std::vector<uint8_t>& payload)
     if (payload.size() < 34)
         return entry;
 
-    // Evidence from the local real styles added on 2026-05-30:
-    // Ctb2 bytes 20/21 are consistently 00/7F, so the middle-note substructure
-    // at bytes 28/29 carries the effective full-range NTR/NTT pair.
-    if (payload[20] == 0 && payload[21] == 0x7F) {
-        entry.ntrRaw = payload[28];
-        if (auto* name = ctb2NtrName(payload[28]))
-            entry.ntr = name;
+    // Bytes 20/21 are the source-note range (low/high) for this entry: 00/7F is
+    // "full range", while a split entry (e.g. Intro/Ending B/C) carries a high
+    // note like 0x5F. Either way the effective NTR/NTT pair lives in the middle
+    // substructure at bytes 28/29, so decode it unconditionally. (Earlier code
+    // wrongly required 00/7F and dropped every split entry to the fallback.)
+    if (payload[20] != 0 || payload[21] != 0x7F)
+        entry.unknownFields.push_back({ "ctb2SourceRange", hexDump({ payload[20], payload[21] }) });
 
-        entry.nttRaw = payload[29];
-        if (auto name = ctb2NttName(payload[29]))
-            entry.ntt = *name;
+    entry.ntrRaw = payload[28];
+    if (auto* name = ctb2NtrName(payload[28]))
+        entry.ntr = name;
 
-        YamahaChannelPolicy policy;
-        fillCommonPolicyFields(policy, entry, payload, YamahaPolicySource::Ctb2);
-        policy.rawNtr = payload[28];
-        policy.ntr = yamahaNtrFromRaw(payload[28]);
-        policy.rawNtt = payload[29];
-        policy.ntt = yamahaNttFromCtb2Raw(payload[29], policy.ntr);
-        policy.bassOn = (payload[29] & 0x80) != 0;
-        policy.chordRootUpperLimit = payload[30];
-        policy.noteLowLimit = payload[31];
-        policy.noteHighLimit = payload[32];
-        policy.rawRtr = payload[33];
-        policy.retriggerRule = yamahaRetriggerRuleFromRaw(payload[33]);
-        entry.policy = std::move(policy);
-    } else {
-        entry.unknownFields.push_back({ "ctb2SplitRange", hexDump({ payload[20], payload[21] }) });
-    }
+    entry.nttRaw = payload[29];
+    if (auto name = ctb2NttName(payload[29]))
+        entry.ntt = *name;
+
+    YamahaChannelPolicy policy;
+    fillCommonPolicyFields(policy, entry, payload, YamahaPolicySource::Ctb2);
+    policy.rawNtr = payload[28];
+    policy.ntr = yamahaNtrFromRaw(payload[28]);
+    policy.rawNtt = payload[29];
+    policy.ntt = yamahaNttFromCtb2Raw(payload[29], policy.ntr);
+    policy.bassOn = (payload[29] & 0x80) != 0;
+    policy.chordRootUpperLimit = payload[30];
+    policy.noteLowLimit = payload[31];
+    policy.noteHighLimit = payload[32];
+    policy.rawRtr = payload[33];
+    policy.retriggerRule = yamahaRetriggerRuleFromRaw(payload[33]);
+    entry.policy = std::move(policy);
 
     return entry;
 }

@@ -82,9 +82,15 @@ int main(int argc, char** argv)
     if (argc < 2) { std::printf("usage: style-probe <file.sty|.cstyle> [chord=C] [section] [n=10]\n"); return 2; }
 
     const std::string path = argv[1];
-    const std::string chordStr = argc > 2 ? argv[2] : "C";
-    const std::string sectionWanted = argc > 3 ? argv[3] : "";
-    const int perPart = argc > 4 ? std::atoi(argv[4]) : 10;
+    bool dumpCasm = false;
+    std::vector<std::string> rest;
+    for (int i = 2; i < argc; ++i) {
+        if (std::string(argv[i]) == "--casm") dumpCasm = true;
+        else rest.push_back(argv[i]);
+    }
+    const std::string chordStr = rest.size() > 0 ? rest[0] : "C";
+    const std::string sectionWanted = rest.size() > 1 ? rest[1] : "";
+    const int perPart = rest.size() > 2 ? std::atoi(rest[2].c_str()) : 10;
 
     Style style;
     const bool isSty = path.size() > 4 &&
@@ -92,6 +98,35 @@ int main(int argc, char** argv)
     if (isSty) {
         auto r = parseStyFile(path);
         if (!r.ok) { std::printf("parse failed: %s\n", r.error.c_str()); return 1; }
+        if (dumpCasm) {
+            const auto& casm = r.casm;
+            std::printf("CASM: found=%d csegs=%zu ctabEntries=%zu warnings=%zu\n",
+                        (int) casm.found, casm.csegs.size(), casm.ctabEntryCount, casm.warnings.size());
+            for (const auto& cseg : casm.csegs) {
+                std::printf("  CSEG section='%s' id='%s' entries=%zu\n",
+                            cseg.sectionName.value_or("(none)").c_str(),
+                            cseg.sectionId.c_str(), cseg.ctabEntries.size());
+                for (const auto& e : cseg.ctabEntries) {
+                    std::printf("    ch=%s ntrRaw=%d nttRaw=%d ntr='%s' ntt='%s' policy=%s",
+                        e.channel ? std::to_string(*e.channel).c_str() : "?",
+                        e.ntrRaw ? (int) *e.ntrRaw : -1, e.nttRaw ? (int) *e.nttRaw : -1,
+                        e.ntr.value_or("-").c_str(), e.ntt.value_or("-").c_str(),
+                        e.policy ? "YES" : "no");
+                    if (e.policy)
+                        std::printf(" [%s/%s rawNtr=%d rawNtt=%d bass=%d]",
+                            ntrName(e.policy->ntr), nttName(e.policy->ntt),
+                            e.policy->rawNtr ? (int) *e.policy->rawNtr : -1,
+                            e.policy->rawNtt ? (int) *e.policy->rawNtt : -1,
+                            (int) e.policy->bassOn);
+                    std::printf(" rawLen=%zu\n", e.raw.size());
+                    std::printf("      raw:");
+                    for (std::size_t bi = 0; bi < e.raw.size() && bi < 40; ++bi)
+                        std::printf(" %02X", e.raw[bi]);
+                    std::printf("\n");
+                }
+            }
+            return 0;
+        }
         style = std::move(r.style);
     } else {
         auto r = loadStyleFromFile(path);
