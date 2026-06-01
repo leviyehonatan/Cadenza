@@ -106,6 +106,17 @@ add_executable(style-probe
 )
 target_link_libraries(style-probe PRIVATE cadenza_core)
 
+add_executable(style-scan
+    tools/style-scan/main.cpp
+)
+target_link_libraries(style-scan PRIVATE cadenza_core)
+if(MSVC)
+    # /EHa lets _set_se_translator turn native faults (access violations in the
+    # parser on a malformed .sty) into catchable C++ exceptions so the batch
+    # scan survives a bad file instead of aborting the whole run.
+    target_compile_options(style-scan PRIVATE /EHa)
+endif()
+
 if(CADENZA_BUILD_TESTS)
     add_test(
         NAME style_probe_shared_setup_owner

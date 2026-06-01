@@ -57,6 +57,13 @@ There are two UIs:
   and role for a given chord, **and renders the section to a `.mid`** so you can
   audition the raw arrangement in any player.
 - `plugin-probe` — loads/inspects a VST3.
+- `style-scan` — batch-parses a whole style library (recursively), classifies each
+  `.sty` as OK / WARN / FAIL, separates benign notes (percussion routing) from
+  real warnings (e.g. missing CASM policy -> heuristic fallback), aggregates the
+  top reasons, and writes a per-file CSV report. Crash-safe: survives Unicode
+  filenames and native parser faults on malformed files. Usage:
+  `style-scan <dir|file> [...] [--csv report.csv]`. (On a 1,582-file library:
+  ~98% parsed to a playable style; failures were non-Yamaha/Korg-format or empty.)
 - `style-probe` also shows playback channel/percussion flag, shared-channel
   setup owner, and stable independent note names in range/output lines.
 - `style-probe` opens with a **parse-diagnostics summary**: `Diagnostics: none`
