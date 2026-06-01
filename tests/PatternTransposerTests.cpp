@@ -221,6 +221,38 @@ void rootTranspositionBypassShiftsByRootDelta()
     expect(transposeNote(n, ctxFor(9, ChordQuality::Minor), &policy).value() == 59, "RT+Bypass to A folds -3");
 }
 
+void noteLowLimitFoldsIntoAllowedRange()
+{
+    auto n = noteOf(NoteRole::ChordColor, 40);
+    auto policy = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Bypass, "C");
+    policy.noteLowLimit = 48;
+    policy.noteHighLimit = 72;
+
+    expect(transposeNote(n, ctxFor(7, ChordQuality::Major), &policy).value() == 59,
+           "noteLowLimit folds low root-transposed phrase up by octaves");
+}
+
+void noteHighLimitFoldsIntoAllowedRange()
+{
+    auto n = noteOf(NoteRole::ChordColor, 84);
+    auto policy = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Bypass, "C");
+    policy.noteLowLimit = 48;
+    policy.noteHighLimit = 76;
+
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major), &policy).value() == 65,
+           "noteHighLimit folds high root-transposed phrase down by octaves");
+}
+
+void chordRootUpperLimitShiftsRootDeltaDown()
+{
+    auto n = noteOf(NoteRole::ChordColor, 60);
+    auto policy = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Bypass, "C");
+    policy.chordRootUpperLimit = 3;
+
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major), &policy).value() == 53,
+           "root above chordRootUpperLimit shifts root delta down an octave");
+}
+
 void rootTranspositionChordPrefersChordTone()
 {
     auto n = noteOf(NoteRole::Chord3, 64);
@@ -228,6 +260,17 @@ void rootTranspositionChordPrefersChordTone()
 
     expect(transposeNote(n, ctxFor(0, ChordQuality::Minor), &policy).value() == 63,
            "RT+Chord maps source third to current minor third");
+}
+
+void rootTranspositionChordWithLimitsKeepsChordToneInRange()
+{
+    auto n = noteOf(NoteRole::Chord3, 76);
+    auto policy = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Chord, "C");
+    policy.noteLowLimit = 52;
+    policy.noteHighLimit = 64;
+
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Minor), &policy).value() == 63,
+           "RT+Chord folds fitted minor third inside note limits");
 }
 
 void scaleNttFitsScaleToneToRequestedMode()
@@ -301,7 +344,11 @@ int main()
     unknownPolicyUsesCurrentBehavior();
     chordColorFollowsChordByRootTransposition();
     rootTranspositionBypassShiftsByRootDelta();
+    noteLowLimitFoldsIntoAllowedRange();
+    noteHighLimitFoldsIntoAllowedRange();
+    chordRootUpperLimitShiftsRootDeltaDown();
     rootTranspositionChordPrefersChordTone();
+    rootTranspositionChordWithLimitsKeepsChordToneInRange();
     scaleNttFitsScaleToneToRequestedMode();
     scaleNttFitsColorToneToNearestScaleTone();
     chordColorPolicyUsesPolicySourceRoot();

@@ -262,7 +262,10 @@ std::vector<uint8_t> makeSingleSectionStyWithCtb2(uint8_t channel,
                                                   uint8_t ntt,
                                                   uint8_t sourceRoot = 0,
                                                   uint8_t sourceChord = 19,
-                                                  uint8_t rtr = 1)
+                                                  uint8_t rtr = 1,
+                                                  uint8_t chordRootUpperLimit = 11,
+                                                  uint8_t noteLowLimit = 24,
+                                                  uint8_t noteHighLimit = 108)
 {
     auto sty = makeSingleSectionSmf(channel);
 
@@ -282,9 +285,9 @@ std::vector<uint8_t> makeSingleSectionStyWithCtb2(uint8_t channel,
     ctb2[21] = 0x7F;
     ctb2[28] = ntr;
     ctb2[29] = ntt;
-    ctb2[30] = 11;
-    ctb2[31] = 24;
-    ctb2[32] = 108;
+    ctb2[30] = chordRootUpperLimit;
+    ctb2[31] = noteLowLimit;
+    ctb2[32] = noteHighLimit;
     ctb2[33] = rtr;
 
     std::vector<uint8_t> cseg;
@@ -526,6 +529,45 @@ void ctb2PolicyIsDecodedAndAttachedToPart()
     expect(policy.noteHighLimit && *policy.noteHighLimit == 108, "policy note high limit decoded");
 }
 
+void ctb2PolicyPreservesPlaybackLimits()
+{
+    auto sty = makeSingleSectionStyWithCtb2(
+        4,
+        0,
+        0x81,
+        0,
+        19,
+        1,
+        3,
+        52,
+        76);
+    auto r = cadenza::arranger::parseStyBytes(sty);
+    expect(r.ok, "limit policy Ctb2 sty parses OK");
+    if (!r.ok) return;
+
+    const auto* mainA = r.style.findSection("mainA");
+    expect(mainA != nullptr, "limit policy mainA found");
+    if (!mainA) return;
+
+    const cadenza::arranger::Part* part = nullptr;
+    for (const auto& p : mainA->parts)
+        if (p.midiChannel == 5)
+            part = &p;
+    expect(part != nullptr, "limit policy part found");
+    if (!part) return;
+
+    expect(part->yamahaPolicy.has_value(), "limit policy attached");
+    if (!part->yamahaPolicy) return;
+
+    const auto& policy = *part->yamahaPolicy;
+    expect(policy.chordRootUpperLimit && *policy.chordRootUpperLimit == 3,
+           "custom chord root upper limit decoded");
+    expect(policy.noteLowLimit && *policy.noteLowLimit == 52,
+           "custom note low limit decoded");
+    expect(policy.noteHighLimit && *policy.noteHighLimit == 76,
+           "custom note high limit decoded");
+}
+
 void bypassPolicyFollowsByRootTransposition()
 {
     // BYPASS = "root shift only" -> melodic notes follow the chord root (ChordColor),
@@ -673,6 +715,7 @@ int main()
     binaryCtabDecodesKnownFields();
     binaryCtb2DecodesKnownFields();
     ctb2PolicyIsDecodedAndAttachedToPart();
+    ctb2PolicyPreservesPlaybackLimits();
     bypassPolicyFollowsByRootTransposition();
     rootFixedChordPolicyAssignsChordRoles();
     bassOnPolicyMarksPartAsBassAndRootFollowing();
