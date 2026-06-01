@@ -215,10 +215,9 @@ void StyleEngine::applySectionChannelSetup(const Section& section)
     std::set<int> configuredChannels;
 
     for (const auto& part : section.parts) {
-        if (!configuredChannels.insert(part.midiChannel).second)
-            continue;
-
         const auto setup = playbackSetupForPart(part);
+        if (!configuredChannels.insert(setup.cadenzaChannel).second)
+            continue;
 
         if (setup.bankMsb)
             m_engine.controlChange(setup.cadenzaChannel, 0, *setup.bankMsb);
@@ -240,7 +239,8 @@ void StyleEngine::applySectionChannelSetup(const Section& section)
         juce::Logger::writeToLog(
             juce::String("[Cadenza] Style part setup section=") + juce::String(section.name)
             + " part=" + juce::String(setup.partName)
-            + " ch=" + juce::String(setup.cadenzaChannel)
+            + " sourceCh=" + juce::String(setup.sourceChannel)
+            + " playbackCh=" + juce::String(setup.cadenzaChannel)
             + " synthCh=" + (setup.synthChannel ? juce::String(*setup.synthChannel) : juce::String("invalid"))
             + " bankMsb=" + optionalIntText(setup.bankMsb)
             + " bankLsb=" + optionalIntText(setup.bankLsb)
@@ -256,7 +256,8 @@ void StyleEngine::applySectionChannelSetup(const Section& section)
             juce::Logger::writeToLog(
                 juce::String("[Cadenza] Drum part diagnostics section=") + juce::String(section.name)
                 + " part=" + juce::String(setup.partName)
-                + " sourceCh=" + juce::String(setup.cadenzaChannel)
+                + " sourceCh=" + juce::String(setup.sourceChannel)
+                + " playbackCh=" + juce::String(setup.cadenzaChannel)
                 + " synthCh=" + (setup.synthChannel ? juce::String(*setup.synthChannel) : juce::String("invalid"))
                 + " bankMsb=" + optionalIntText(setup.bankMsb)
                 + " bankLsb=" + optionalIntText(setup.bankLsb)
@@ -269,7 +270,8 @@ void StyleEngine::applySectionChannelSetup(const Section& section)
                     juce::String("[Cadenza] WARNING: Drum notes include pitches outside common GM drum range 35..81; ")
                     + "section=" + juce::String(section.name)
                     + " part=" + juce::String(setup.partName)
-                    + " sourceCh=" + juce::String(setup.cadenzaChannel)
+                    + " sourceCh=" + juce::String(setup.sourceChannel)
+                    + " playbackCh=" + juce::String(setup.cadenzaChannel)
                     + " firstNotes=" + firstDrumNoteText(part));
             }
         }
@@ -307,7 +309,8 @@ void StyleEngine::firePatternNotesAtTick(int tickInSection)
             if (!maybeMidi) continue;
 
             const int midi = *maybeMidi;
-            const bool percussion = part.percussion || part.midiChannel == 10;
+            const int channel = playbackChannelForPart(part);
+            const bool percussion = part.percussion || channel == 10;
             if (percussion) {
                 const auto remap = drumNoteForPlayback(part, note.pitch);
                 if (remap.remapped) {
@@ -321,11 +324,11 @@ void StyleEngine::firePatternNotesAtTick(int tickInSection)
                 }
             }
 
-            m_engine.noteOn(part.midiChannel, midi, note.velocity);
+            m_engine.noteOn(channel, midi, note.velocity);
 
             // Schedule a note-off after `duration` ticks. Keep source pointers so
             // sustained notes can be re-voiced if the chord changes mid-hold.
-            m_active.push_back(ActiveNote{ part.midiChannel, midi,
+            m_active.push_back(ActiveNote{ channel, midi,
                                            std::max(1, note.duration), note.velocity,
                                            &part, &note });
         }
@@ -349,7 +352,7 @@ void StyleEngine::revoiceActiveNotes(const Style& style)
 
     for (auto& a : m_active) {
         if (a.part == nullptr || a.src == nullptr) continue;
-        if (a.part->percussion || a.part->midiChannel == 10) continue;  // never re-pitch drums
+        if (a.part->percussion || playbackChannelForPart(*a.part) == 10) continue;  // never re-pitch drums
         if (a.src->role == NoteRole::Absolute) continue;                // fixed parts don't follow
         if (a.ticksRemaining < sustainThreshold) continue;              // leave short notes alone
 

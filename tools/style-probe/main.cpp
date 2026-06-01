@@ -113,8 +113,11 @@ int main(int argc, char** argv)
                     section.name.c_str(), section.barCount, section.parts.size());
         for (const auto& part : section.parts) {
             const auto setup = playbackSetupForPart(part);
-            std::printf("  part '%s' ch=%d prog=%d perc=%d notes=%zu\n",
-                        part.name.c_str(), part.midiChannel,
+            const char* role = part.name.c_str();
+            if (part.yamahaPolicy && !part.yamahaPolicy->destinationPart.empty())
+                role = part.yamahaPolicy->destinationPart.c_str();
+            std::printf("  part '%s' srcCh=%d role=%s playCh=%d prog=%d perc=%d notes=%zu\n",
+                        part.name.c_str(), setup.sourceChannel, role, setup.cadenzaChannel,
                         setup.program.value_or(-1), (int) setup.percussion, part.notes.size());
             if (part.yamahaPolicy) {
                 const auto& p = *part.yamahaPolicy;

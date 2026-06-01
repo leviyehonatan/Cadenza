@@ -138,6 +138,38 @@ void drumPartKeepsItsBank()
     expect(setup.percussion, "still flagged percussion");
 }
 
+void percussionSubRhythmRoutesToDrumChannel()
+{
+    Part p;
+    p.name = "rhythm2";
+    p.midiChannel = 9;
+    p.percussion = true;
+    p.bankMsb = 127;
+    p.bankLsb = 0;
+    p.program = 0;
+
+    const auto setup = playbackSetupForPart(p);
+    expect(setup.sourceChannel == 9, "rhythm2 setup retains source channel");
+    expect(setup.cadenzaChannel == 10, "rhythm2 setup routes to Cadenza drum channel");
+    expect(setup.synthChannel && *setup.synthChannel == 9, "rhythm2 setup routes to synth drum channel");
+    expect(setup.percussion, "rhythm2 setup remains percussion");
+}
+
+void melodicPartDoesNotRouteToDrumChannel()
+{
+    Part p;
+    p.name = "chord1";
+    p.midiChannel = 12;
+    p.percussion = false;
+    p.program = 27;
+
+    const auto setup = playbackSetupForPart(p);
+    expect(setup.sourceChannel == 12, "melodic setup source channel");
+    expect(setup.cadenzaChannel == 12, "melodic setup keeps playback channel");
+    expect(setup.synthChannel && *setup.synthChannel == 11, "melodic setup keeps synth channel");
+    expect(!setup.percussion, "melodic setup is not percussion");
+}
+
 void playbackSetupMarksDrumChannelAsPercussion()
 {
     Part p;
@@ -231,6 +263,26 @@ void drumPlaybackBypassesChordTranspositionAndThenRemaps()
     expect(playback && *playback == 37, "drum playback bypasses chord transposition and applies drum remap");
 }
 
+void percussionSubRhythmBypassesChordTransposition()
+{
+    Part p;
+    p.name = "rhythm2";
+    p.midiChannel = 9;
+    p.percussion = true;
+    p.bankMsb = 127;
+
+    PatternNote note;
+    note.pitch = 42;
+    note.role = NoteRole::ChordRoot;
+
+    TransposeContext ctx;
+    ctx.chord.rootPitchClass = 9;
+    ctx.chord.quality = cadenza::midi::ChordQuality::Minor;
+
+    const auto playback = playbackNoteForPart(p, note, ctx);
+    expect(playback && *playback == 42, "rhythm2 percussion bypasses chord transposition");
+}
+
 std::string readText(const std::filesystem::path& path)
 {
     std::ifstream in(path);
@@ -304,6 +356,58 @@ void playbackDiagnosticsExportCsvMidiAndSummary()
 
     std::filesystem::remove_all(outDir);
 }
+
+void playbackDiagnosticsRoutesPercussionEventsToDrumChannel()
+{
+    Style style;
+    style.name = "Rhythm2 Routing Test";
+    style.id = "rhythm2-routing-test";
+    style.beatsPerBar = 4;
+    style.ticksPerBeat = 120;
+
+    Section section;
+    section.name = "mainA";
+    section.barCount = 1;
+
+    Part rhythm2;
+    rhythm2.name = "rhythm2";
+    rhythm2.midiChannel = 9;
+    rhythm2.instrument = "XG Percussion";
+    rhythm2.percussion = true;
+    rhythm2.bankMsb = 127;
+    rhythm2.bankLsb = 0;
+    rhythm2.program = 0;
+    rhythm2.notes.push_back(PatternNote{ 0, 60, 42, 90, NoteRole::Absolute, 0 });
+
+    Part chord1;
+    chord1.name = "chord1";
+    chord1.midiChannel = 12;
+    chord1.instrument = "Guitar";
+    chord1.program = 27;
+    chord1.notes.push_back(PatternNote{ 0, 60, 64, 80, NoteRole::Chord3, 0 });
+
+    section.parts.push_back(std::move(rhythm2));
+    section.parts.push_back(std::move(chord1));
+    style.sections.push_back(std::move(section));
+
+    TransposeContext ctx;
+    ctx.chord.rootPitchClass = 9;
+    ctx.chord.quality = cadenza::midi::ChordQuality::Minor;
+
+    const auto outDir = std::filesystem::temp_directory_path() / "cadenza_rhythm2_routing_test";
+    std::filesystem::remove_all(outDir);
+
+    const auto result = exportPlaybackDiagnostics(style, "mainA", ctx, outDir.string(), 1);
+    expect(result.ok, "rhythm2 diagnostic export succeeds");
+
+    const auto csv = readText(outDir / "cadenza_playback_events.csv");
+    expect(csv.find("0,10,42,42,90,60,rhythm2,absolute,127/0/0") != std::string::npos,
+           "rhythm2 diagnostic event routes to drum channel 10");
+    expect(csv.find("0,12,60,64,80,60,chord1,chord-3,-/-/27") != std::string::npos,
+           "melodic diagnostic event keeps channel 12");
+
+    std::filesystem::remove_all(outDir);
+}
 }
 
 int main()
@@ -315,13 +419,17 @@ int main()
     playbackSetupCarriesBankProgramAndSynthChannel();
     melodicPartForcesGmBankZero();
     drumPartKeepsItsBank();
+    percussionSubRhythmRoutesToDrumChannel();
+    melodicPartDoesNotRouteToDrumChannel();
     playbackSetupMarksDrumChannelAsPercussion();
     gmDrumNotesStayUnchanged();
     yamahaXgKnownProblemNoteRemaps();
     unknownYamahaXgNotesStayUnchanged();
     nonDrumPartsNeverRemap();
     drumPlaybackBypassesChordTranspositionAndThenRemaps();
+    percussionSubRhythmBypassesChordTransposition();
     playbackDiagnosticsExportCsvMidiAndSummary();
+    playbackDiagnosticsRoutesPercussionEventsToDrumChannel();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All RuntimePlayback tests passed\n";

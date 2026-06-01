@@ -288,7 +288,7 @@ std::vector<std::string> suspiciousIssues(const Section& section,
     int notesOutsideExpected = 0;
 
     for (const auto& part : section.parts) {
-        channels.insert(part.midiChannel);
+        channels.insert(playbackChannelForPart(part));
         if (part.program) {
             programs.insert(*part.program);
             if (!part.percussion && *part.program >= 0 && *part.program <= 7)
@@ -345,7 +345,7 @@ bool writeSummary(const std::filesystem::path& path,
     std::map<std::string, int> instruments;
     std::set<int> drumNotes;
     for (const auto& part : section.parts) {
-        channels.insert(part.midiChannel);
+        channels.insert(playbackChannelForPart(part));
         instruments[part.instrument.empty() ? "(unknown)" : part.instrument]++;
     }
     for (const auto& ev : events)
@@ -414,11 +414,12 @@ PlaybackDiagnosticResult exportPlaybackDiagnostics(const Style& style,
                 if (!playback)
                     continue;
 
-                const bool percussion = part.percussion || part.midiChannel == 10;
+                const int channel = playbackChannelForPart(part);
+                const bool percussion = part.percussion || channel == 10;
                 const auto drum = percussion ? drumNoteForPlayback(part, note.pitch) : DrumNoteRemap{};
                 DiagnosticEvent ev;
                 ev.tick = tick;
-                ev.channel = part.midiChannel;
+                ev.channel = channel;
                 ev.sourceNote = note.pitch;
                 ev.playbackNote = *playback;
                 ev.velocity = note.velocity;

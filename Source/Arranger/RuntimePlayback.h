@@ -16,7 +16,8 @@ namespace cadenza::arranger
 struct PartPlaybackSetup
 {
     std::string partName;
-    int cadenzaChannel = 0;
+    int sourceChannel = 0;
+    int cadenzaChannel = 0;  // playback channel, using 1-based Cadenza channel numbers.
     std::optional<int> synthChannel;
     std::optional<int> bankMsb;
     std::optional<int> bankLsb;
@@ -29,6 +30,7 @@ struct PartPlaybackSetup
     int noteCount = 0;
 };
 
+int playbackChannelForPart(const Part& part) noexcept;
 PartPlaybackSetup playbackSetupForPart(const Part& part);
 void applyStyleTimingToTransport(cadenza::audio::Transport& transport,
                                  const Style& style,

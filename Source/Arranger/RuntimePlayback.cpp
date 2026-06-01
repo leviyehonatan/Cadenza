@@ -12,12 +12,19 @@ bool hasKnownYamahaPolicy(const Part& part)
 }
 }
 
+int playbackChannelForPart(const Part& part) noexcept
+{
+    const bool percussion = part.percussion || cadenza::audio::isCadenzaDrumChannel(part.midiChannel);
+    return percussion ? 10 : part.midiChannel;
+}
+
 PartPlaybackSetup playbackSetupForPart(const Part& part)
 {
     PartPlaybackSetup setup;
     setup.partName = part.name;
-    setup.cadenzaChannel = part.midiChannel;
-    setup.synthChannel = cadenza::audio::synthChannelFromCadenzaChannel(part.midiChannel);
+    setup.sourceChannel = part.midiChannel;
+    setup.cadenzaChannel = playbackChannelForPart(part);
+    setup.synthChannel = cadenza::audio::synthChannelFromCadenzaChannel(setup.cadenzaChannel);
     setup.bankMsb = part.bankMsb;
     setup.bankLsb = part.bankLsb;
     setup.program = part.program;
