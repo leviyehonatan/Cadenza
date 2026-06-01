@@ -317,6 +317,41 @@ void chordColorPolicyUsesPolicySourceRoot()
            "ChordColor unknown policy uses ctx-only root transposition");
 }
 
+// Color/phrase notes should fit the QUALITY of the chord the player holds, not
+// just root-shift. A C-major source phrase over a minor chord must take the
+// minor 3rd, over a dominant chord the b7, etc. (clean-room chord-scale fit).
+void colorToneFitsPlayedChordQuality()
+{
+    // E (the major 3rd over C) used as a color tone. No policy -> ctx-only path.
+    auto major3 = noteOf(NoteRole::ChordColor, 64);
+
+    // Over a plain major chord it stays diatonic.
+    expect(transposeNote(major3, ctxFor(0, ChordQuality::Major)).value() == 64,
+           "color E over C major stays E");
+
+    // Over A minor it should bend to the minor 3rd (C), not the clashing C#.
+    expect(transposeNote(major3, ctxFor(9, ChordQuality::Minor)).value() == 60,
+           "color E over Am fits minor 3rd C (not C#)");
+
+    // The major 7th (B) over a dominant chord should fit the b7.
+    auto maj7 = noteOf(NoteRole::ChordColor, 71);
+    expect(transposeNote(maj7, ctxFor(7, ChordQuality::Dominant7)).value() == 65,
+           "color B over G7 fits the b7 (F)");
+}
+
+void colorTonePolicyChordModeFitsPlayedQuality()
+{
+    // A Chord-NTT part whose CASM declares no scale mode should still fit the
+    // played chord's quality (the runtime path for most real styles).
+    auto major3 = noteOf(NoteRole::ChordColor, 64);
+    auto policy = policyOf(YamahaNtr::RootFixed, YamahaNtt::Chord, "C");
+
+    expect(transposeNote(major3, ctxFor(9, ChordQuality::Minor), &policy).value() == 60,
+           "Chord-NTT color E over Am fits minor 3rd C");
+    expect(transposeNote(major3, ctxFor(0, ChordQuality::Major), &policy).value() == 64,
+           "Chord-NTT color E over C major stays E");
+}
+
 void drumsStayAbsoluteWithPolicy()
 {
     auto n = noteOf(NoteRole::Absolute, 36);
@@ -352,6 +387,8 @@ int main()
     scaleNttFitsScaleToneToRequestedMode();
     scaleNttFitsColorToneToNearestScaleTone();
     chordColorPolicyUsesPolicySourceRoot();
+    colorToneFitsPlayedChordQuality();
+    colorTonePolicyChordModeFitsPlayedQuality();
     drumsStayAbsoluteWithPolicy();
 
     if (failures != 0) return EXIT_FAILURE;

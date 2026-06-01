@@ -81,6 +81,27 @@ std::optional<int> scaleModeForNtt(YamahaNtt ntt) noexcept
     }
 }
 
+// Scale to fit non-chord (color/phrase) tones to, chosen from the QUALITY of the
+// chord the player is holding. This is what makes a major-key source phrase sound
+// right over minor / dominant / etc. chords instead of keeping a clashing 3rd/7th.
+// Returns nullopt for qualities without a clean 7-note fit (dim/aug/power) so those
+// keep simple root transposition.
+std::optional<int> scaleModeForChordQuality(cadenza::midi::ChordQuality quality) noexcept
+{
+    using Q = cadenza::midi::ChordQuality;
+    switch (quality) {
+        case Q::Major:
+        case Q::Major7:
+        case Q::Sus2:
+        case Q::Sus4:        return 0;   // Ionian (major)
+        case Q::Dominant7:   return 5;   // Mixolydian (major with b7)
+        case Q::Minor:
+        case Q::Minor7:      return 4;   // Dorian (neutral minor for phrases)
+        case Q::MinorMajor7: return 3;   // Melodic minor
+        default:             return std::nullopt;  // dim/aug/power/single: no snap
+    }
+}
+
 int rootDeltaForPolicy(const TransposeContext& ctx, const YamahaChannelPolicy& policy) noexcept
 {
     int delta = foldedRootDelta(ctx.chord.rootPitchClass, sourceRootPitchClass(policy));
@@ -129,17 +150,16 @@ std::optional<int> pitchWithPolicyLimits(int pitch,
     return applyPolicyNoteLimits(applyGlobalOffsets(pitch, ctx), policy);
 }
 
-std::optional<int> nearestPitchInScale(int pitch,
-                                       int rootPc,
-                                       int scaleMode,
-                                       const YamahaChannelPolicy& policy) noexcept
+// Nearest in-range (0..127) pitch whose pitch class is in the given scale.
+// Ties resolve to the lower candidate.
+int snapToScale(int pitch, int rootPc, int scaleMode) noexcept
 {
     bool allowed[12] = {};
     for (int degree = 0; degree < 7; ++degree)
-        allowed[(rootPc + scaleSemitone(scaleMode, degree)) % 12] = true;
+        allowed[((rootPc + scaleSemitone(scaleMode, degree)) % 12 + 12) % 12] = true;
 
-    int best = pitch;
-    int bestDistance = 128;
+    int best = std::clamp(pitch, 0, 127);
+    int bestDistance = 256;
     for (int candidate = 0; candidate <= 127; ++candidate) {
         if (!allowed[candidate % 12])
             continue;
@@ -149,7 +169,15 @@ std::optional<int> nearestPitchInScale(int pitch,
             bestDistance = distance;
         }
     }
-    return applyPolicyNoteLimits(best, policy);
+    return best;
+}
+
+std::optional<int> nearestPitchInScale(int pitch,
+                                       int rootPc,
+                                       int scaleMode,
+                                       const YamahaChannelPolicy& policy) noexcept
+{
+    return applyPolicyNoteLimits(snapToScale(pitch, rootPc, scaleMode), policy);
 }
 }
 
@@ -205,6 +233,7 @@ int scaleSemitone(int scaleMode, int degree) noexcept
     static const int harmonicMinor[7] = { 0, 2, 3, 5, 7, 8, 11 };
     static const int melodicMinor[7]  = { 0, 2, 3, 5, 7, 9, 11 };
     static const int dorian[7]        = { 0, 2, 3, 5, 7, 9, 10 };
+    static const int mixolydian[7]    = { 0, 2, 4, 5, 7, 9, 10 };
 
     if (degree < 0 || degree > 6) return 0;
     switch (scaleMode) {
@@ -212,6 +241,7 @@ int scaleSemitone(int scaleMode, int degree) noexcept
         case 2: return harmonicMinor[degree];
         case 3: return melodicMinor[degree];
         case 4: return dorian[degree];
+        case 5: return mixolydian[degree];
         default: return major[degree];
     }
 }
@@ -236,12 +266,16 @@ std::optional<int> transposeNote(const PatternNote& note, const TransposeContext
         return n;
     }
 
-    // ChordColor: a non-chord source tone. Keep the recorded voicing intact and
-    // shift the whole phrase by the folded chord-root delta (source root = C in
-    // the no-policy path, matching the importer's C-major source convention).
+    // ChordColor: a non-chord source tone. Shift the phrase by the folded chord-
+    // root delta (source root = C here), then fit it to the played chord's scale
+    // so a major-key phrase takes the minor 3rd / dominant b7 / etc. instead of
+    // clashing. Exotic qualities (dim/aug/power) skip the snap and just root-shift.
     if (note.role == NoteRole::ChordColor) {
         int delta = foldedRootDelta(ctx.chord.rootPitchClass, 0);
-        return clampMidi(applyGlobalOffsets(note.pitch + delta, ctx));
+        int shifted = applyGlobalOffsets(note.pitch + delta, ctx);
+        if (auto mode = scaleModeForChordQuality(ctx.chord.quality))
+            return snapToScale(shifted, ctx.chord.rootPitchClass, *mode);
+        return clampMidi(shifted);
     }
 
     // Chord roles: ChordRoot / Chord3 / Chord5 / Chord7.
@@ -284,10 +318,16 @@ std::optional<int> transposeNote(const PatternNote& note,
     }
 
     // ChordColor follows the chord by root transposition relative to this
-    // channel's declared source root (e.g. a phrase recorded over G).
+    // channel's declared source root (e.g. a phrase recorded over G). It is then
+    // fit to a scale: the CASM-declared NTT scale if any, otherwise a scale
+    // derived from the QUALITY of the chord the player is holding, so phrases sit
+    // in key on minor / dominant / etc. chords.
     if (note.role == NoteRole::ChordColor) {
         const int shifted = applyGlobalOffsets(note.pitch + rootDeltaForPolicy(ctx, *policy), ctx);
-        if (auto scaleMode = scaleModeForNtt(policy->ntt))
+        auto scaleMode = scaleModeForNtt(policy->ntt);
+        if (!scaleMode)
+            scaleMode = scaleModeForChordQuality(ctx.chord.quality);
+        if (scaleMode)
             return nearestPitchInScale(shifted, ctx.chord.rootPitchClass, *scaleMode, *policy);
         return applyPolicyNoteLimits(shifted, *policy);
     }

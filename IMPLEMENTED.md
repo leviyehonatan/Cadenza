@@ -77,6 +77,12 @@ There are two UIs:
   main drums part owns channel-10 bank/program setup when both share the channel.
 - Chord-tone **voicing** uses nearest-tone placement (no octave scatter).
 - A 7th note over a plain triad folds to the root (no accidental Am7-sounds-like-C).
+- **Color/phrase notes fit the played chord's quality.** Non-chord-tone notes are
+  shifted by chord root then snapped to a scale derived from the chord quality
+  (Ionian for maj, Mixolydian for dom7, Dorian for min, melodic-minor for mMaj7),
+  so a major-key phrase takes the minor 3rd / dominant b7 over those chords
+  instead of clashing. Applies in both the CASM-policy path and the fallback
+  path; exotic qualities (dim/aug/power) keep simple root transposition.
 - **Sub-rhythm / drum-bank parts are treated as percussion** and never pitched.
 - **Pad** defaults to a tighter, faster synth-strings patch with reverb/chorus cut.
 - **Bass** is anchored to one consistent low octave (E1–Eb2) so the foundation
@@ -115,9 +121,10 @@ because **most arbitrary `.sty` files will not sound perfect yet**:
 - **Style coverage is partial.** The engine handles common SFF layouts, but with
   thousands of community styles many will mis-parse, play wrong instruments, or
   voice oddly. There is no per-style validation/repair pass.
-- **NTT chord-fitting is simplified.** We use root transposition + nearest
-  chord-tone remapping, not full Yamaha NTT scale tables. Complex chords
-  (alterations, slash chords, exotic qualities) won't always voice ideally.
+- **NTT chord-fitting is approximate.** Chord tones and color/phrase tones now fit
+  the played chord's quality via per-quality scales, but this is a clean-room
+  approximation, not the full Yamaha NTT tables. Diminished/augmented colors and
+  slash chords still won't always voice ideally.
 - **Shared percussion setup is still simple.** Multiple percussion parts can now
   share GM channel 10 with the main drums setup preferred, but future drum-kit
   and keymap merging may still need more style-specific handling.
