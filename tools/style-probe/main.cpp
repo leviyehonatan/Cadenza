@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <map>
 #include <optional>
 #include <string>
 
@@ -111,6 +112,18 @@ int main(int argc, char** argv)
         if (!sectionWanted.empty() && section.name != sectionWanted) continue;
         std::printf("\n== section %s (bars=%d, parts=%zu) ==\n",
                     section.name.c_str(), section.barCount, section.parts.size());
+        std::map<int, int> playbackChannelUseCount;
+        for (const auto& part : section.parts)
+            ++playbackChannelUseCount[playbackChannelForPart(part)];
+        for (const auto& setup : playbackSetupsForSection(section)) {
+            if (playbackChannelUseCount[setup.cadenzaChannel] > 1) {
+                std::printf("  channel %d setup owner: %s bankMsb=%d program=%d\n",
+                            setup.cadenzaChannel,
+                            setup.partName.c_str(),
+                            valueOrMinusOne(setup.bankMsb),
+                            valueOrMinusOne(setup.program));
+            }
+        }
         for (const auto& part : section.parts) {
             const auto setup = playbackSetupForPart(part);
             const char* role = part.name.c_str();

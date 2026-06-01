@@ -107,6 +107,19 @@ add_executable(style-probe
 target_link_libraries(style-probe PRIVATE cadenza_core)
 
 if(CADENZA_BUILD_TESTS)
+    add_test(
+        NAME style_probe_shared_setup_owner
+        COMMAND style-probe
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/style-probe-shared-drums.cstyle"
+            C
+            mainA
+            1
+    )
+    set_tests_properties(style_probe_shared_setup_owner PROPERTIES
+        PASS_REGULAR_EXPRESSION "channel 10 setup owner: drums bankMsb=120 program=8"
+        FAIL_REGULAR_EXPRESSION "channel 10 setup owner: rhythm2"
+    )
+
     add_executable(cadenza_sty_tests
         tools/sty-converter/StyParserTests.cpp
     )
