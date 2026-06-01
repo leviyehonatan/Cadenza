@@ -1,0 +1,278 @@
+#include "Arranger/PatternTransposer.h"
+
+#include <cstdlib>
+#include <iostream>
+#include <string>
+
+namespace
+{
+int failures = 0;
+void expect(bool cond, const std::string& msg) {
+    if (cond) return;
+    ++failures;
+    std::cerr << "FAIL: " << msg << '\n';
+}
+
+using namespace cadenza::arranger;
+using cadenza::midi::Chord;
+using cadenza::midi::ChordQuality;
+
+TransposeContext ctxFor(int rootPc, ChordQuality q, int keyTonic = 0, int transpose = 0, int oct = 0, int mode = 0)
+{
+    TransposeContext c;
+    c.chord.rootPitchClass = rootPc;
+    c.chord.quality = q;
+    c.keyTonicPC = keyTonic;
+    c.globalTranspose = transpose;
+    c.globalOctave = oct;
+    c.scaleMode = mode;
+    return c;
+}
+
+PatternNote noteOf(NoteRole role, int pitch, int degree = 0)
+{
+    PatternNote n;
+    n.role = role;
+    n.pitch = pitch;
+    n.scaleDegree = degree;
+    return n;
+}
+
+YamahaChannelPolicy policyOf(YamahaNtr ntr, YamahaNtt ntt, const std::string& sourceRoot = "C")
+{
+    YamahaChannelPolicy policy;
+    policy.source = YamahaPolicySource::Ctb2;
+    policy.sourceChannel = 2;
+    policy.sourceRoot = sourceRoot;
+    policy.sourceChord = "Maj";
+    policy.ntr = ntr;
+    policy.ntt = ntt;
+    return policy;
+}
+
+void absolutePassesThrough()
+{
+    auto n = noteOf(NoteRole::Absolute, 60);
+    auto ctx = ctxFor(0, ChordQuality::Major);
+    expect(transposeNote(n, ctx).value() == 60, "absolute = 60");
+
+    ctx.globalTranspose = 3;
+    expect(transposeNote(n, ctx).value() == 63, "absolute + transpose +3");
+
+    ctx.globalOctave = -1; ctx.globalTranspose = 0;
+    expect(transposeNote(n, ctx).value() == 48, "absolute - 1 octave");
+}
+
+void chordRootFollowsChord()
+{
+    // Notes move to the NEAREST chord tone (within -5..+6 semitones of the source),
+    // preserving voicing rather than snapping into the source note's octave.
+    auto n = noteOf(NoteRole::ChordRoot, 60);  // C5
+
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Major)).value() == 60, "C root stays C5");
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major)).value() == 65, "F root -> nearest F (F5, +5)");
+    expect(transposeNote(n, ctxFor(7, ChordQuality::Minor)).value() == 55, "G root -> nearest G (G4, -5)");
+}
+
+void chord3rdReflectsQuality()
+{
+    auto n = noteOf(NoteRole::Chord3, 60);
+
+    auto majC = transposeNote(n, ctxFor(0, ChordQuality::Major));
+    auto minC = transposeNote(n, ctxFor(0, ChordQuality::Minor));
+    expect(majC.value() == 64, "C major 3rd = E");
+    expect(minC.value() == 63, "C minor 3rd = Eb");
+}
+
+void chord5thAndDimAug()
+{
+    // Nearest-tone placement from source C5 (pitch 60).
+    auto n = noteOf(NoteRole::Chord5, 60);
+
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Major)).value() == 55, "C major 5th = G (nearest G4, -5)");
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Diminished)).value() == 66, "C dim 5th = Gb (+6)");
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Augmented)).value() == 56, "C aug 5th = G# (nearest, -4)");
+}
+
+void chord7thReflectsQuality()
+{
+    // Nearest-tone placement from source C5 (pitch 60); the 7th sits just below.
+    auto n = noteOf(NoteRole::Chord7, 60);
+
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Major7)).value() == 59, "Cmaj7 -> B4 (-1)");
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Dominant7)).value() == 58, "C7 -> Bb4 (-2)");
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Minor7)).value() == 58, "Cm7 -> Bb4 (-2)");
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Diminished7)).value() == 57, "Cdim7 -> A4 (-3)");
+}
+
+void scaleToneRespectsKey()
+{
+    // Key of C major, degree 0 (tonic) at octave 5
+    auto n = noteOf(NoteRole::ScaleTone, 60, 0);
+    auto ctx = ctxFor(0, ChordQuality::Major, /*keyTonic=*/0);
+
+    expect(transposeNote(n, ctx).value() == 60, "C major degree 0 = C");
+
+    n.scaleDegree = 4;
+    expect(transposeNote(n, ctx).value() == 67, "C major degree 4 = G");
+
+    n.scaleDegree = 6;
+    expect(transposeNote(n, ctx).value() == 71, "C major degree 6 = B");
+}
+
+void scaleToneRespectsMinor()
+{
+    auto n = noteOf(NoteRole::ScaleTone, 60, 2);  // 3rd of scale
+    auto ctxMajor = ctxFor(0, ChordQuality::Major, 0, 0, 0, /*mode=*/0);
+    auto ctxMinor = ctxFor(0, ChordQuality::Major, 0, 0, 0, /*mode=*/1);
+
+    expect(transposeNote(n, ctxMajor).value() == 64, "major mode 3rd = E");
+    expect(transposeNote(n, ctxMinor).value() == 63, "minor mode 3rd = Eb");
+}
+
+void rangeClipping()
+{
+    auto n = noteOf(NoteRole::Absolute, 60);
+    auto ctx = ctxFor(0, ChordQuality::Major, 0, 0, 100);   // way over range
+    expect(!transposeNote(n, ctx).has_value(), "out-of-range returns nullopt");
+}
+
+void bypassPolicyRootTransposes()
+{
+    // BYPASS = "root shift only": follows the chord root (does NOT freeze).
+    auto n = noteOf(NoteRole::ChordRoot, 60);
+    auto policy = policyOf(YamahaNtr::RootFixed, YamahaNtt::Bypass);   // sourceRoot "C"
+
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Major), &policy).value() == 60, "bypass on C: no shift");
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major), &policy).value() == 65, "bypass on F: +5 follows root");
+    expect(transposeNote(n, ctxFor(7, ChordQuality::Major), &policy).value() == 55, "bypass on G: folds down -5");
+
+    // Global transpose/octave still stack on top of the root shift.
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major, 0, 2, 1), &policy).value() == 79,
+           "bypass + transpose +2 + octave +1");
+}
+
+void rootTranspositionMelodyUsesRootDelta()
+{
+    auto n = noteOf(NoteRole::Chord3, 64);
+    auto policy = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Melody, "C");
+
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Minor), &policy).value() == 69, "melody C source to F shifts +5");
+    expect(transposeNote(n, ctxFor(2, ChordQuality::Dominant7), &policy).value() == 66, "melody C source to D shifts +2");
+
+    n.pitch = 126;
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major), &policy).value() == 127, "melody shift clamps high");
+}
+
+void rootFixedChordPolicyKeepsChordRoles()
+{
+    auto n = noteOf(NoteRole::Chord3, 60);
+    auto policy = policyOf(YamahaNtr::RootFixed, YamahaNtt::Chord);
+
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Major), &policy).value() == 64, "RootFixed+Chord major third");
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Minor), &policy).value() == 63, "RootFixed+Chord minor third");
+}
+
+void bassOnChordRootFollowsRoot()
+{
+    auto n = noteOf(NoteRole::ChordRoot, 48);
+    auto policy = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Melody);
+    policy.bassOn = true;
+
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major), &policy).value() == 53, "bass-on chord-root follows F root");
+}
+
+void unknownPolicyUsesCurrentBehavior()
+{
+    auto n = noteOf(NoteRole::Chord3, 60);
+    auto policy = policyOf(YamahaNtr::Unknown, YamahaNtt::Unknown);
+
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Major), &policy).value() == 64, "unknown policy keeps current major third");
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Minor), &policy).value() == 63, "unknown policy keeps current minor third");
+}
+
+void chordColorFollowsChordByRootTransposition()
+{
+    // A non-chord source tone (e.g. a 9th/6th in a piano/guitar phrase) must
+    // move with the chord instead of freezing. It shifts by the folded root
+    // delta (-5..+6 semitones), preserving the recorded interval/voicing.
+    auto n = noteOf(NoteRole::ChordColor, 62);  // D above middle C
+
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Major)).value() == 62, "ChordColor on C source stays put");
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major)).value() == 67, "ChordColor to F shifts +5");
+    expect(transposeNote(n, ctxFor(9, ChordQuality::Minor)).value() == 59, "ChordColor to A folds down -3");
+    expect(transposeNote(n, ctxFor(7, ChordQuality::Major)).value() == 57, "ChordColor to G folds down -5");
+
+    // global transpose stacks on top of the chord shift
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major, 0, 2)).value() == 69, "ChordColor + global transpose");
+
+    // high notes clamp rather than vanish
+    auto high = noteOf(NoteRole::ChordColor, 125);
+    expect(transposeNote(high, ctxFor(5, ChordQuality::Major)).value() == 127, "ChordColor clamps high");
+}
+
+void rootTranspositionBypassShiftsByRootDelta()
+{
+    // RootFixed + Bypass freezes (covered by bypassPolicyIgnoresChordChanges).
+    // RootTransposition + Bypass must shift the whole phrase by the root delta.
+    auto n = noteOf(NoteRole::ChordRoot, 62);
+    auto policy = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Bypass, "C");
+
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Major), &policy).value() == 62, "RT+Bypass on C stays");
+    expect(transposeNote(n, ctxFor(2, ChordQuality::Major), &policy).value() == 64, "RT+Bypass to D shifts +2");
+    expect(transposeNote(n, ctxFor(9, ChordQuality::Minor), &policy).value() == 59, "RT+Bypass to A folds -3");
+}
+
+void chordColorPolicyUsesPolicySourceRoot()
+{
+    auto n = noteOf(NoteRole::ChordColor, 62);
+
+    auto cPolicy = policyOf(YamahaNtr::RootFixed, YamahaNtt::Chord, "C");
+    expect(transposeNote(n, ctxFor(2, ChordQuality::Major), &cPolicy).value() == 64,
+           "ChordColor C-source to D shifts +2");
+
+    auto gPolicy = policyOf(YamahaNtr::RootFixed, YamahaNtt::Chord, "G");
+    auto g = noteOf(NoteRole::ChordColor, 67);
+    expect(transposeNote(g, ctxFor(0, ChordQuality::Major), &gPolicy).value() == 72,
+           "ChordColor G-source to C folds +5");
+
+    // unknown policy falls back to the ctx-only path (source root C)
+    auto unknown = policyOf(YamahaNtr::Unknown, YamahaNtt::Unknown);
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major), &unknown).value() == 67,
+           "ChordColor unknown policy uses ctx-only root transposition");
+}
+
+void drumsStayAbsoluteWithPolicy()
+{
+    auto n = noteOf(NoteRole::Absolute, 36);
+    auto policy = policyOf(YamahaNtr::RootFixed, YamahaNtt::Chord);
+    policy.bassOn = true;
+
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major), &policy).value() == 36, "drum absolute stays unchanged with policy");
+}
+}
+
+int main()
+{
+    absolutePassesThrough();
+    chordRootFollowsChord();
+    chord3rdReflectsQuality();
+    chord5thAndDimAug();
+    chord7thReflectsQuality();
+    scaleToneRespectsKey();
+    scaleToneRespectsMinor();
+    rangeClipping();
+    bypassPolicyRootTransposes();
+    rootTranspositionMelodyUsesRootDelta();
+    rootFixedChordPolicyKeepsChordRoles();
+    bassOnChordRootFollowsRoot();
+    unknownPolicyUsesCurrentBehavior();
+    chordColorFollowsChordByRootTransposition();
+    rootTranspositionBypassShiftsByRootDelta();
+    chordColorPolicyUsesPolicySourceRoot();
+    drumsStayAbsoluteWithPolicy();
+
+    if (failures != 0) return EXIT_FAILURE;
+    std::cout << "All PatternTransposer tests passed\n";
+    return EXIT_SUCCESS;
+}

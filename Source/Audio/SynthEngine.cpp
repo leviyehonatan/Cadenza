@@ -1,0 +1,160 @@
+#include "SynthEngine.h"
+
+#if defined(CADENZA_HAVE_FLUIDSYNTH)
+  #include <fluidsynth.h>
+  #include <mutex>
+#endif
+
+namespace cadenza::audio
+{
+// ============================================================
+// NullSynthEngine — logs to JUCE Logger; produces silence.
+// ============================================================
+void NullSynthEngine::renderBlock(juce::AudioBuffer<float>& buffer)
+{
+    buffer.clear();
+}
+
+void NullSynthEngine::noteOn(int channel, int note, int velocity)
+{
+    juce::Logger::writeToLog("[NullSynth] noteOn ch=" + juce::String(channel)
+                             + " n=" + juce::String(note)
+                             + " v=" + juce::String(velocity));
+}
+
+void NullSynthEngine::noteOff(int channel, int note)
+{
+    juce::Logger::writeToLog("[NullSynth] noteOff ch=" + juce::String(channel)
+                             + " n=" + juce::String(note));
+}
+
+void NullSynthEngine::programChange(int channel, int program)
+{
+    juce::Logger::writeToLog("[NullSynth] programChange ch=" + juce::String(channel)
+                             + " pg=" + juce::String(program));
+}
+
+void NullSynthEngine::controlChange(int channel, int controller, int value)
+{
+    juce::Logger::writeToLog("[NullSynth] controlChange ch=" + juce::String(channel)
+                             + " cc=" + juce::String(controller)
+                             + " value=" + juce::String(value));
+}
+
+void NullSynthEngine::allNotesOff()
+{
+    juce::Logger::writeToLog("[NullSynth] allNotesOff");
+}
+
+// ============================================================
+// FluidSynthEngine — wraps fluidsynth (if available)
+// ============================================================
+#if defined(CADENZA_HAVE_FLUIDSYNTH)
+
+class FluidSynthEngine final : public SynthEngine
+{
+public:
+    FluidSynthEngine() {
+        m_settings = new_fluid_settings();
+        if (m_settings) {
+            // Configure for offline-rendering style (we render into JUCE's buffer ourselves).
+            fluid_settings_setstr(m_settings, "audio.driver", "file");
+            fluid_settings_setnum(m_settings, "synth.gain", 0.6);
+            fluid_settings_setint(m_settings, "synth.audio-channels", 1);
+            fluid_settings_setint(m_settings, "synth.lock-memory", 0);
+            fluid_settings_setint(m_settings, "synth.drums-channel.active", 1);
+            m_synth = new_fluid_synth(m_settings);
+            juce::Logger::writeToLog("[Cadenza] FluidSynth GM drum channel active: synth channel 9");
+        }
+    }
+
+    ~FluidSynthEngine() override {
+        if (m_synth) delete_fluid_synth(m_synth);
+        if (m_settings) delete_fluid_settings(m_settings);
+    }
+
+    void prepare(double sampleRate, int /*blockSize*/) override {
+        SynthEngine::prepare(sampleRate, 0);
+        if (m_settings) {
+            fluid_settings_setnum(m_settings, "synth.sample-rate", sampleRate);
+        }
+    }
+
+    void renderBlock(juce::AudioBuffer<float>& buffer) override {
+        buffer.clear();
+        if (!m_synth) return;
+
+        const int n = buffer.getNumSamples();
+        float* left  = buffer.getWritePointer(0);
+        float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : left;
+
+        // fluid_synth_write_float writes interleaved into two separate float arrays.
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        fluid_synth_write_float(m_synth, n, left, 0, 1, right, 0, 1);
+    }
+
+    void noteOn(int channel, int note, int velocity) override {
+        if (!m_synth) return;
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        fluid_synth_noteon(m_synth, channel, note, velocity);
+    }
+
+    void noteOff(int channel, int note) override {
+        if (!m_synth) return;
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        fluid_synth_noteoff(m_synth, channel, note);
+    }
+
+    void programChange(int channel, int program) override {
+        if (!m_synth) return;
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        fluid_synth_program_change(m_synth, channel, program);
+    }
+
+    void controlChange(int channel, int controller, int value) override {
+        if (!m_synth) return;
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        fluid_synth_cc(m_synth, channel, controller, value);
+    }
+
+    void allNotesOff() override {
+        if (!m_synth) return;
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        for (int ch = 0; ch < 16; ++ch) fluid_synth_all_notes_off(m_synth, ch);
+    }
+
+    bool loadSoundFont(const std::string& path) override {
+        if (!m_synth) return false;
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_soundFontId >= 0) {
+            fluid_synth_sfunload(m_synth, m_soundFontId, 1);
+            m_soundFontId = -1;
+        }
+        m_soundFontId = fluid_synth_sfload(m_synth, path.c_str(), 1);
+        return m_soundFontId >= 0;
+    }
+
+    const char* engineName() const noexcept override { return "FluidSynthEngine"; }
+    bool supportsSoundFonts() const noexcept override { return true; }
+
+private:
+    fluid_settings_t* m_settings = nullptr;
+    fluid_synth_t*    m_synth = nullptr;
+    int               m_soundFontId = -1;
+    std::mutex        m_mutex;
+};
+
+#endif
+
+// ============================================================
+// Factory
+// ============================================================
+std::unique_ptr<SynthEngine> createSynthEngine()
+{
+#if defined(CADENZA_HAVE_FLUIDSYNTH)
+    return std::make_unique<FluidSynthEngine>();
+#else
+    return std::make_unique<NullSynthEngine>();
+#endif
+}
+}

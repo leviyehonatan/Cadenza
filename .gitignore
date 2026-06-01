@@ -1,0 +1,11 @@
+build/
+out/
+.vs/
+.vscode/
+lib/JUCE/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+*.log
+
