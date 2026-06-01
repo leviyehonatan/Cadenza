@@ -339,6 +339,26 @@ void colorToneFitsPlayedChordQuality()
            "color B over G7 fits the b7 (F)");
 }
 
+// Symmetric / exotic qualities also fit: half-diminished uses Locrian, while
+// diminished and augmented snap to their actual chord tones (no clean 7-note scale).
+void colorToneFitsExoticQualities()
+{
+    // C# color over C diminished -> nearest chord tone (C, since dim = C Eb Gb A).
+    auto n = noteOf(NoteRole::ChordColor, 61);
+    expect(transposeNote(n, ctxFor(0, ChordQuality::Diminished)).value() == 60,
+           "color C# over Cdim snaps to chord tone C");
+
+    // E color over C half-diminished -> Locrian (C Db Eb F Gb Ab Bb) -> Eb.
+    auto e = noteOf(NoteRole::ChordColor, 64);
+    expect(transposeNote(e, ctxFor(0, ChordQuality::HalfDiminished7)).value() == 63,
+           "color E over Cm7b5 fits Locrian (Eb)");
+
+    // C# color over C augmented -> chord tone (C E G#) -> C.
+    auto cs = noteOf(NoteRole::ChordColor, 61);
+    expect(transposeNote(cs, ctxFor(0, ChordQuality::Augmented)).value() == 60,
+           "color C# over Caug snaps to chord tone C");
+}
+
 void colorTonePolicyChordModeFitsPlayedQuality()
 {
     // A Chord-NTT part whose CASM declares no scale mode should still fit the
@@ -388,6 +408,7 @@ int main()
     scaleNttFitsColorToneToNearestScaleTone();
     chordColorPolicyUsesPolicySourceRoot();
     colorToneFitsPlayedChordQuality();
+    colorToneFitsExoticQualities();
     colorTonePolicyChordModeFitsPlayedQuality();
     drumsStayAbsoluteWithPolicy();
 

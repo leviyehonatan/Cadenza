@@ -94,11 +94,12 @@ std::optional<int> scaleModeForChordQuality(cadenza::midi::ChordQuality quality)
         case Q::Major7:
         case Q::Sus2:
         case Q::Sus4:        return 0;   // Ionian (major)
-        case Q::Dominant7:   return 5;   // Mixolydian (major with b7)
+        case Q::Dominant7:      return 5;   // Mixolydian (major with b7)
         case Q::Minor:
-        case Q::Minor7:      return 4;   // Dorian (neutral minor for phrases)
-        case Q::MinorMajor7: return 3;   // Melodic minor
-        default:             return std::nullopt;  // dim/aug/power/single: no snap
+        case Q::Minor7:         return 4;   // Dorian (neutral minor for phrases)
+        case Q::MinorMajor7:    return 3;   // Melodic minor
+        case Q::HalfDiminished7:return 6;   // Locrian
+        default:                return std::nullopt;  // dim/aug/power/single
     }
 }
 
@@ -150,14 +151,9 @@ std::optional<int> pitchWithPolicyLimits(int pitch,
     return applyPolicyNoteLimits(applyGlobalOffsets(pitch, ctx), policy);
 }
 
-// Nearest in-range (0..127) pitch whose pitch class is in the given scale.
-// Ties resolve to the lower candidate.
-int snapToScale(int pitch, int rootPc, int scaleMode) noexcept
+// Nearest in-range (0..127) pitch whose pitch class is allowed. Ties -> lower.
+int snapToAllowed(int pitch, const bool allowed[12]) noexcept
 {
-    bool allowed[12] = {};
-    for (int degree = 0; degree < 7; ++degree)
-        allowed[((rootPc + scaleSemitone(scaleMode, degree)) % 12 + 12) % 12] = true;
-
     int best = std::clamp(pitch, 0, 127);
     int bestDistance = 256;
     for (int candidate = 0; candidate <= 127; ++candidate) {
@@ -172,12 +168,41 @@ int snapToScale(int pitch, int rootPc, int scaleMode) noexcept
     return best;
 }
 
+int snapToScale(int pitch, int rootPc, int scaleMode) noexcept
+{
+    bool allowed[12] = {};
+    for (int degree = 0; degree < 7; ++degree)
+        allowed[((rootPc + scaleSemitone(scaleMode, degree)) % 12 + 12) % 12] = true;
+    return snapToAllowed(pitch, allowed);
+}
+
 std::optional<int> nearestPitchInScale(int pitch,
                                        int rootPc,
                                        int scaleMode,
                                        const YamahaChannelPolicy& policy) noexcept
 {
     return applyPolicyNoteLimits(snapToScale(pitch, rootPc, scaleMode), policy);
+}
+
+// Fit a (already root-shifted) color/phrase pitch to the chord the player holds:
+// a 7-note scale for tonal qualities, the actual chord tones for symmetric ones
+// (dim/aug), or unchanged for qualities with no harmonic info (power/single).
+int fitColorToneToChord(int pitch, int rootPc, cadenza::midi::ChordQuality quality) noexcept
+{
+    using Q = cadenza::midi::ChordQuality;
+
+    if (auto mode = scaleModeForChordQuality(quality))
+        return snapToScale(pitch, rootPc, *mode);
+
+    bool allowed[12] = {};
+    auto add = [&](int interval) { allowed[((rootPc + interval) % 12 + 12) % 12] = true; };
+    switch (quality) {
+        case Q::Diminished:  add(0); add(3); add(6); add(9); break;  // dim7 tones
+        case Q::Diminished7: add(0); add(3); add(6); add(9); break;
+        case Q::Augmented:   add(0); add(4); add(8);          break;
+        default:             return std::clamp(pitch, 0, 127);       // power/single
+    }
+    return snapToAllowed(pitch, allowed);
 }
 }
 
@@ -234,6 +259,7 @@ int scaleSemitone(int scaleMode, int degree) noexcept
     static const int melodicMinor[7]  = { 0, 2, 3, 5, 7, 9, 11 };
     static const int dorian[7]        = { 0, 2, 3, 5, 7, 9, 10 };
     static const int mixolydian[7]    = { 0, 2, 4, 5, 7, 9, 10 };
+    static const int locrian[7]       = { 0, 1, 3, 5, 6, 8, 10 };
 
     if (degree < 0 || degree > 6) return 0;
     switch (scaleMode) {
@@ -242,6 +268,7 @@ int scaleSemitone(int scaleMode, int degree) noexcept
         case 3: return melodicMinor[degree];
         case 4: return dorian[degree];
         case 5: return mixolydian[degree];
+        case 6: return locrian[degree];
         default: return major[degree];
     }
 }
@@ -273,9 +300,7 @@ std::optional<int> transposeNote(const PatternNote& note, const TransposeContext
     if (note.role == NoteRole::ChordColor) {
         int delta = foldedRootDelta(ctx.chord.rootPitchClass, 0);
         int shifted = applyGlobalOffsets(note.pitch + delta, ctx);
-        if (auto mode = scaleModeForChordQuality(ctx.chord.quality))
-            return snapToScale(shifted, ctx.chord.rootPitchClass, *mode);
-        return clampMidi(shifted);
+        return fitColorToneToChord(shifted, ctx.chord.rootPitchClass, ctx.chord.quality);
     }
 
     // Chord roles: ChordRoot / Chord3 / Chord5 / Chord7.
@@ -324,12 +349,11 @@ std::optional<int> transposeNote(const PatternNote& note,
     // in key on minor / dominant / etc. chords.
     if (note.role == NoteRole::ChordColor) {
         const int shifted = applyGlobalOffsets(note.pitch + rootDeltaForPolicy(ctx, *policy), ctx);
-        auto scaleMode = scaleModeForNtt(policy->ntt);
-        if (!scaleMode)
-            scaleMode = scaleModeForChordQuality(ctx.chord.quality);
-        if (scaleMode)
-            return nearestPitchInScale(shifted, ctx.chord.rootPitchClass, *scaleMode, *policy);
-        return applyPolicyNoteLimits(shifted, *policy);
+        // A CASM-declared NTT scale wins; otherwise fit to the played chord quality.
+        if (auto nttMode = scaleModeForNtt(policy->ntt))
+            return nearestPitchInScale(shifted, ctx.chord.rootPitchClass, *nttMode, *policy);
+        const int fitted = fitColorToneToChord(shifted, ctx.chord.rootPitchClass, ctx.chord.quality);
+        return applyPolicyNoteLimits(fitted, *policy);
     }
 
     if (policy->bassOn && note.role == NoteRole::ChordRoot)
