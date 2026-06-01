@@ -132,6 +132,42 @@ if(CADENZA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "played range A1\\(33\\)..E3\\(52\\)"
     )
 
+    add_test(
+        NAME style_probe_diagnostics_none
+        COMMAND style-probe
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/style-probe-note-range.cstyle"
+            C
+            mainA
+            1
+    )
+    set_tests_properties(style_probe_diagnostics_none PROPERTIES
+        PASS_REGULAR_EXPRESSION "Diagnostics: none"
+    )
+
+    add_test(
+        NAME style_probe_diagnostics_one_warning
+        COMMAND style-probe
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/style-probe-one-warning.cstyle"
+            C
+            mainA
+            1
+    )
+    set_tests_properties(style_probe_diagnostics_one_warning PROPERTIES
+        PASS_REGULAR_EXPRESSION "Diagnostics: 1 warning"
+    )
+
+    add_test(
+        NAME style_probe_diagnostics_plural_warnings
+        COMMAND style-probe
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/style-probe-two-warnings.cstyle"
+            C
+            mainA
+            1
+    )
+    set_tests_properties(style_probe_diagnostics_plural_warnings PROPERTIES
+        PASS_REGULAR_EXPRESSION "Diagnostics: 2 warnings"
+    )
+
     add_executable(cadenza_sty_tests
         tools/sty-converter/StyParserTests.cpp
     )

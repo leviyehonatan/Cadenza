@@ -93,6 +93,11 @@ LoadResult loadStyleFromJson(const std::string& json)
     style.name         = root.get("name").asString();
     style.defaultTempo = root.get("tempo").asInt(style.defaultTempo);
     style.ticksPerBeat = root.get("ticksPerBeat").asInt(style.ticksPerBeat);
+    for (const auto& warning : root.get("parseWarnings").asArray()) {
+        const auto text = warning.asString();
+        if (!text.empty())
+            style.parseWarnings.push_back(text);
+    }
 
     const auto& ts = root.get("timeSignature").asArray();
     if (ts.size() == 2) {
@@ -157,6 +162,12 @@ std::string saveStyleToJson(const Style& style, bool pretty)
     root["name"]         = J::Value::string(style.name);
     root["tempo"]        = J::Value::number(style.defaultTempo);
     root["ticksPerBeat"] = J::Value::number(style.ticksPerBeat);
+    if (!style.parseWarnings.empty()) {
+        J::Array warnings;
+        for (const auto& warning : style.parseWarnings)
+            warnings.push_back(J::Value::string(warning));
+        root["parseWarnings"] = J::Value::array(std::move(warnings));
+    }
 
     J::Array ts;
     ts.push_back(J::Value::number(style.beatsPerBar));

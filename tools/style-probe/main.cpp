@@ -108,7 +108,9 @@ int main(int argc, char** argv)
     if (style.parseWarnings.empty()) {
         std::printf("Diagnostics: none\n");
     } else {
-        std::printf("Diagnostics:\n");
+        std::printf("Diagnostics: %zu warning%s\n",
+                    style.parseWarnings.size(),
+                    style.parseWarnings.size() == 1 ? "" : "s");
         for (const auto& warning : style.parseWarnings)
             std::printf("- warning: %s\n", warning.c_str());
     }
