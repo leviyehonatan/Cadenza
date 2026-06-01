@@ -455,6 +455,31 @@ void binaryCtabDecodesKnownFields()
     expect(hasHexDump, "verbose binary Ctab hex dump logged");
 }
 
+void sff1CtabNttByte3MapsToMelodyBassOn()
+{
+    auto sty = makeSampleStyWithBinaryCtab();
+    auto r = cadenza::arranger::parseStyBytes(sty);
+    expect(r.ok, "SFF1 Ctab NTT=3 sty parses OK");
+    if (!r.ok) return;
+
+    expect(!r.casm.csegs.empty(), "SFF1 Ctab CSEG exists");
+    if (r.casm.csegs.empty()) return;
+    expect(!r.casm.csegs[0].ctabEntries.empty(), "SFF1 Ctab entry exists");
+    if (r.casm.csegs[0].ctabEntries.empty()) return;
+
+    const auto& entry = r.casm.csegs[0].ctabEntries[0];
+    expect(entry.policy.has_value(), "SFF1 Ctab policy attached");
+    if (!entry.policy) return;
+
+    using cadenza::arranger::YamahaNtt;
+    using cadenza::arranger::YamahaPolicySource;
+    const auto& policy = *entry.policy;
+    expect(policy.source == YamahaPolicySource::Ctab, "SFF1 Ctab policy source");
+    expect(policy.rawNtt && *policy.rawNtt == 3, "SFF1 Ctab raw NTT byte 3 retained");
+    expect(policy.ntt == YamahaNtt::Melody, "SFF1 Ctab NTT byte 3 maps to Melody");
+    expect(policy.bassOn, "SFF1 Ctab NTT byte 3 sets bassOn");
+}
+
 void binaryCtb2DecodesKnownFields()
 {
     auto sty = makeSampleStyWithBinaryCtb2();
@@ -713,6 +738,7 @@ int main()
     drumsAreAbsolute();
     casmChunkIsDetectedAndParsed();
     binaryCtabDecodesKnownFields();
+    sff1CtabNttByte3MapsToMelodyBassOn();
     binaryCtb2DecodesKnownFields();
     ctb2PolicyIsDecodedAndAttachedToPart();
     ctb2PolicyPreservesPlaybackLimits();
