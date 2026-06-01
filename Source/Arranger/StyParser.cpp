@@ -1132,6 +1132,17 @@ YamahaChannelPolicy fallbackYamahaPolicy(int midiChannel)
     return policy;
 }
 
+void addParseWarning(Style& style, const std::string& warning)
+{
+    if (std::find(style.parseWarnings.begin(), style.parseWarnings.end(), warning) == style.parseWarnings.end())
+        style.parseWarnings.push_back(warning);
+}
+
+bool isUnknownDestinationRole(const std::string& role)
+{
+    return role.rfind("part-ch", 0) == 0;
+}
+
 YamahaStyleFormat inferYamahaFormat(const CasmInfo& casm) noexcept
 {
     bool hasCtab = false;
@@ -1216,6 +1227,11 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
     style.ticksPerBeat = ticksPerQuarter;
     style.yamahaFormat = inferYamahaFormat(result.casm);
 
+    for (const auto& warning : result.casm.warnings)
+        addParseWarning(style, warning);
+    if (!result.casm.found)
+        addParseWarning(style, "missing CASM policy, using fallback role mapping");
+
     // Flatten all notes from all tracks for easier section splitting.
     struct FlatNote {
         uint64_t startTick;
@@ -1294,8 +1310,31 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
 
             Part part;
             part.midiChannel = ch + 1;  // SMF channels are 0-based; Cadenza uses 1-based for display.
-            part.yamahaPolicy = findYamahaPolicy(result.casm, section.name, part.midiChannel)
-                .value_or(fallbackYamahaPolicy(part.midiChannel));
+            const auto parsedPolicy = findYamahaPolicy(result.casm, section.name, part.midiChannel);
+            part.yamahaPolicy = parsedPolicy.value_or(fallbackYamahaPolicy(part.midiChannel));
+            if (!parsedPolicy) {
+                addParseWarning(style,
+                    "section " + section.name + " channel " + std::to_string(part.midiChannel)
+                    + " missing NTR/NTT policy, using fallback role mapping");
+            } else if (part.yamahaPolicy) {
+                const auto& policy = *part.yamahaPolicy;
+                if (!policy.sourceRoot || !policy.sourceChord) {
+                    addParseWarning(style,
+                        "section " + section.name + " channel " + std::to_string(part.midiChannel)
+                        + " missing source chord root/type, using C major defaults");
+                }
+                if (policy.ntr == YamahaNtr::Unknown || policy.ntt == YamahaNtt::Unknown) {
+                    addParseWarning(style,
+                        "section " + section.name + " channel " + std::to_string(part.midiChannel)
+                        + " has unknown NTR/NTT policy, using heuristic role mapping");
+                }
+            }
+
+            if (part.yamahaPolicy && isUnknownDestinationRole(part.yamahaPolicy->destinationPart)) {
+                addParseWarning(style,
+                    "section " + section.name + " channel " + std::to_string(part.midiChannel)
+                    + " destination role unknown/unmapped: " + part.yamahaPolicy->destinationPart);
+            }
 
             auto preset = dominantPreset(
                 [&]() {
@@ -1357,6 +1396,12 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
 
             if (drumBank)
                 part.percussion = true;
+
+            if (part.percussion && part.midiChannel != 10) {
+                addParseWarning(style,
+                    "channel " + std::to_string(part.midiChannel)
+                    + " percussion detected, routing to GM drum playback channel 10");
+            }
 
             // The pad often sits an octave too high; drop it one octave at playback.
             // (The bass is instead anchored to a fixed low octave in playbackNoteForPart.)

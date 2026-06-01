@@ -727,6 +727,45 @@ void malformedCasmDoesNotCrash()
     expect(r.casm.found, "malformed CASM still detected");
     expect(!r.casm.warnings.empty(), "malformed CASM warning recorded");
 }
+
+bool hasStyleWarning(const cadenza::arranger::Style& style, const std::string& text)
+{
+    for (const auto& warning : style.parseWarnings)
+        if (warning.find(text) != std::string::npos)
+            return true;
+    return false;
+}
+
+void missingCasmReportsParseWarning()
+{
+    auto smf = makeSampleSmf();
+    auto r = cadenza::arranger::parseStyBytes(smf);
+    expect(r.ok, "missing CASM style parses OK");
+    if (!r.ok) return;
+
+    expect(hasStyleWarning(r.style, "missing CASM policy"), "missing CASM warning stored on style");
+    expect(hasStyleWarning(r.style, "channel 2 missing NTR/NTT"), "fallback channel warning stored on style");
+}
+
+void completePolicyDoesNotReportParseWarnings()
+{
+    auto sty = makeSingleSectionStyWithCtb2(11, 0, 2);
+    auto r = cadenza::arranger::parseStyBytes(sty);
+    expect(r.ok, "complete policy style parses OK");
+    if (!r.ok) return;
+
+    expect(r.style.parseWarnings.empty(), "complete CASM policy has no parse warnings");
+}
+
+void unmappedPolicyChannelReportsWarning()
+{
+    auto sty = makeSingleSectionStyWithCtb2(6, 0, 2);
+    auto r = cadenza::arranger::parseStyBytes(sty);
+    expect(r.ok, "unmapped channel policy style parses OK");
+    if (!r.ok) return;
+
+    expect(hasStyleWarning(r.style, "destination role unknown"), "unmapped destination role warning stored on style");
+}
 }
 
 int main()
@@ -748,6 +787,9 @@ int main()
     unknownPolicyFallsBackToHeuristic();
     drumsRemainAbsoluteEvenWithPolicy();
     malformedCasmDoesNotCrash();
+    missingCasmReportsParseWarning();
+    completePolicyDoesNotReportParseWarnings();
+    unmappedPolicyChannelReportsWarning();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All StyParser tests passed\n";

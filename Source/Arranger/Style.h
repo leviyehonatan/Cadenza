@@ -140,6 +140,7 @@ struct Style
     int beatUnit = 4;        // denominator of time signature
     int ticksPerBeat = 960;  // PPQ
     YamahaStyleFormat yamahaFormat = YamahaStyleFormat::Unknown;
+    std::vector<std::string> parseWarnings;
     std::vector<Section> sections;
 
     const Section* findSection(const std::string& name) const noexcept;

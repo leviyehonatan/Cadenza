@@ -105,6 +105,13 @@ int main(int argc, char** argv)
     std::printf("Style: %s  ppq=%d  sections=%zu  chord=%s(root=%d)\n",
                 style.name.c_str(), style.ticksPerBeat, style.sections.size(),
                 chordStr.c_str(), chord->rootPitchClass);
+    if (style.parseWarnings.empty()) {
+        std::printf("Diagnostics: none\n");
+    } else {
+        std::printf("Diagnostics:\n");
+        for (const auto& warning : style.parseWarnings)
+            std::printf("- warning: %s\n", warning.c_str());
+    }
 
     const TransposeContext ctx = makeStylePlaybackContext(*chord, /*key=*/0, /*transpose=*/0);
 
