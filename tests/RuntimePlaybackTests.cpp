@@ -170,6 +170,79 @@ void melodicPartDoesNotRouteToDrumChannel()
     expect(!setup.percussion, "melodic setup is not percussion");
 }
 
+void drumChannelSetupPrefersMainDrumsOverRhythm2()
+{
+    Section section;
+    section.name = "mainA";
+
+    Part rhythm2;
+    rhythm2.name = "rhythm2";
+    rhythm2.midiChannel = 9;
+    rhythm2.percussion = true;
+    rhythm2.bankMsb = 127;
+    rhythm2.bankLsb = 0;
+    rhythm2.program = 0;
+
+    Part drums;
+    drums.name = "drums";
+    drums.midiChannel = 10;
+    drums.percussion = true;
+    drums.bankMsb = 120;
+    drums.bankLsb = 0;
+    drums.program = 8;
+    drums.volume = 110;
+
+    Part chord1;
+    chord1.name = "chord1";
+    chord1.midiChannel = 12;
+    chord1.program = 27;
+
+    section.parts.push_back(std::move(rhythm2));
+    section.parts.push_back(std::move(drums));
+    section.parts.push_back(std::move(chord1));
+
+    const auto setups = playbackSetupsForSection(section);
+    const PartPlaybackSetup* drumSetup = nullptr;
+    const PartPlaybackSetup* chordSetup = nullptr;
+    for (const auto& setup : setups) {
+        if (setup.cadenzaChannel == 10)
+            drumSetup = &setup;
+        if (setup.cadenzaChannel == 12)
+            chordSetup = &setup;
+    }
+
+    expect(drumSetup != nullptr, "drum channel setup exists");
+    expect(drumSetup && drumSetup->partName == "drums", "main drums setup wins over rhythm2");
+    expect(drumSetup && drumSetup->sourceChannel == 10, "main drums source channel retained");
+    expect(drumSetup && drumSetup->program && *drumSetup->program == 8, "main drums kit program wins");
+    expect(drumSetup && drumSetup->bankMsb && *drumSetup->bankMsb == 120, "main drums bank wins");
+    expect(chordSetup != nullptr, "melodic setup still exists on its own channel");
+    expect(chordSetup && chordSetup->partName == "chord1", "melodic setup is preserved");
+}
+
+void drumChannelSetupUsesRhythm2WhenAlone()
+{
+    Section section;
+    section.name = "mainA";
+
+    Part rhythm2;
+    rhythm2.name = "rhythm2";
+    rhythm2.midiChannel = 9;
+    rhythm2.percussion = true;
+    rhythm2.bankMsb = 127;
+    rhythm2.bankLsb = 0;
+    rhythm2.program = 0;
+
+    section.parts.push_back(std::move(rhythm2));
+
+    const auto setups = playbackSetupsForSection(section);
+    expect(setups.size() == 1, "rhythm2-alone section has one setup");
+    expect(setups[0].partName == "rhythm2", "rhythm2 setup is used when alone");
+    expect(setups[0].sourceChannel == 9, "rhythm2 source channel retained");
+    expect(setups[0].cadenzaChannel == 10, "rhythm2 routes setup to drum channel");
+    expect(setups[0].program && *setups[0].program == 0, "rhythm2 kit program retained");
+}
+
 void playbackSetupMarksDrumChannelAsPercussion()
 {
     Part p;
@@ -421,6 +494,8 @@ int main()
     drumPartKeepsItsBank();
     percussionSubRhythmRoutesToDrumChannel();
     melodicPartDoesNotRouteToDrumChannel();
+    drumChannelSetupPrefersMainDrumsOverRhythm2();
+    drumChannelSetupUsesRhythm2WhenAlone();
     playbackSetupMarksDrumChannelAsPercussion();
     gmDrumNotesStayUnchanged();
     yamahaXgKnownProblemNoteRemaps();

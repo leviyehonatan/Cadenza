@@ -2,6 +2,8 @@
 #include "../Audio/MidiChannel.h"
 #include "../Audio/Transport.h"
 
+#include <algorithm>
+
 namespace cadenza::arranger
 {
 namespace
@@ -9,6 +11,27 @@ namespace
 bool hasKnownYamahaPolicy(const Part& part)
 {
     return part.yamahaPolicy && part.yamahaPolicy->source != YamahaPolicySource::Fallback;
+}
+
+std::string destinationRoleForPart(const Part& part)
+{
+    if (part.yamahaPolicy && !part.yamahaPolicy->destinationPart.empty())
+        return part.yamahaPolicy->destinationPart;
+    return part.name;
+}
+
+int channelSetupPriority(const Part& part) noexcept
+{
+    const bool percussion = part.percussion || cadenza::audio::isCadenzaDrumChannel(part.midiChannel);
+    if (!percussion)
+        return 0;
+
+    const auto role = destinationRoleForPart(part);
+    if (role == "drums")
+        return 30;
+    if (role == "rhythm2")
+        return 20;
+    return 10;
 }
 }
 
@@ -48,6 +71,39 @@ PartPlaybackSetup playbackSetupForPart(const Part& part)
     }
     setup.noteCount = static_cast<int>(part.notes.size());
     return setup;
+}
+
+std::vector<PartPlaybackSetup> playbackSetupsForSection(const Section& section)
+{
+    struct ChosenSetup
+    {
+        PartPlaybackSetup setup;
+        int priority = 0;
+    };
+
+    std::vector<ChosenSetup> chosen;
+    for (const auto& part : section.parts) {
+        const auto setup = playbackSetupForPart(part);
+        const int priority = channelSetupPriority(part);
+
+        auto it = std::find_if(chosen.begin(), chosen.end(), [&](const ChosenSetup& item) {
+            return item.setup.cadenzaChannel == setup.cadenzaChannel;
+        });
+
+        if (it == chosen.end()) {
+            chosen.push_back({ setup, priority });
+            continue;
+        }
+
+        if (priority > it->priority)
+            *it = { setup, priority };
+    }
+
+    std::vector<PartPlaybackSetup> result;
+    result.reserve(chosen.size());
+    for (const auto& item : chosen)
+        result.push_back(item.setup);
+    return result;
 }
 
 void applyStyleTimingToTransport(cadenza::audio::Transport& transport,

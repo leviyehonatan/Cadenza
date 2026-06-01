@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace cadenza::audio
 {
@@ -32,6 +33,7 @@ struct PartPlaybackSetup
 
 int playbackChannelForPart(const Part& part) noexcept;
 PartPlaybackSetup playbackSetupForPart(const Part& part);
+std::vector<PartPlaybackSetup> playbackSetupsForSection(const Section& section);
 void applyStyleTimingToTransport(cadenza::audio::Transport& transport,
                                  const Style& style,
                                  bool applyTempo = true);

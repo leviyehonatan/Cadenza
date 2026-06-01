@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <optional>
-#include <set>
 #include <sstream>
 
 namespace cadenza::arranger
@@ -212,12 +211,16 @@ void StyleEngine::onTick(int ticksAdvanced, cadenza::audio::Transport& transport
 
 void StyleEngine::applySectionChannelSetup(const Section& section)
 {
-    std::set<int> configuredChannels;
+    const auto setups = playbackSetupsForSection(section);
 
-    for (const auto& part : section.parts) {
-        const auto setup = playbackSetupForPart(part);
-        if (!configuredChannels.insert(setup.cadenzaChannel).second)
-            continue;
+    for (const auto& setup : setups) {
+        const Part* part = nullptr;
+        for (const auto& candidate : section.parts) {
+            if (candidate.midiChannel == setup.sourceChannel && candidate.name == setup.partName) {
+                part = &candidate;
+                break;
+            }
+        }
 
         if (setup.bankMsb)
             m_engine.controlChange(setup.cadenzaChannel, 0, *setup.bankMsb);
@@ -263,16 +266,16 @@ void StyleEngine::applySectionChannelSetup(const Section& section)
                 + " bankLsb=" + optionalIntText(setup.bankLsb)
                 + " program=" + optionalIntText(setup.program)
                 + " percussion=" + juce::String(setup.percussion ? "true" : "false")
-                + " firstNotes=" + firstDrumNoteText(part));
+                + " firstNotes=" + (part != nullptr ? firstDrumNoteText(*part) : juce::String("-")));
 
-            if (drumNotesLookSuspicious(part)) {
+            if (part != nullptr && drumNotesLookSuspicious(*part)) {
                 juce::Logger::writeToLog(
                     juce::String("[Cadenza] WARNING: Drum notes include pitches outside common GM drum range 35..81; ")
                     + "section=" + juce::String(section.name)
                     + " part=" + juce::String(setup.partName)
                     + " sourceCh=" + juce::String(setup.sourceChannel)
                     + " playbackCh=" + juce::String(setup.cadenzaChannel)
-                    + " firstNotes=" + firstDrumNoteText(part));
+                    + " firstNotes=" + firstDrumNoteText(*part));
             }
         }
     }

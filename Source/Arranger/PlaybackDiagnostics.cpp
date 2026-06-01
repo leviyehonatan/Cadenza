@@ -170,8 +170,7 @@ bool writeMidi(const std::filesystem::path& path,
                const std::vector<DiagnosticEvent>& events)
 {
     std::vector<MidiEvent> midi;
-    for (const auto& part : section.parts) {
-        const auto setup = playbackSetupForPart(part);
+    for (const auto& setup : playbackSetupsForSection(section)) {
         if (setup.bankMsb) addCc(midi, 0, setup.cadenzaChannel, 0, *setup.bankMsb);
         if (setup.bankLsb) addCc(midi, 0, setup.cadenzaChannel, 32, *setup.bankLsb);
         if (setup.program) addProgram(midi, 0, setup.cadenzaChannel, *setup.program);
