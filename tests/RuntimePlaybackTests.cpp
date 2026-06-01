@@ -10,6 +10,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -364,6 +365,29 @@ std::string readText(const std::filesystem::path& path)
     return out.str();
 }
 
+std::vector<unsigned char> readBinary(const std::filesystem::path& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    return { std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+}
+
+int countMidiBytes(const std::vector<unsigned char>& bytes, std::initializer_list<unsigned char> pattern)
+{
+    const std::vector<unsigned char> needle(pattern);
+    if (needle.empty() || bytes.size() < needle.size())
+        return 0;
+
+    int count = 0;
+    for (std::size_t i = 0; i + needle.size() <= bytes.size(); ++i) {
+        bool match = true;
+        for (std::size_t j = 0; j < needle.size(); ++j)
+            match = match && bytes[i + j] == needle[j];
+        if (match)
+            ++count;
+    }
+    return count;
+}
+
 void playbackDiagnosticsExportCsvMidiAndSummary()
 {
     Style style;
@@ -426,6 +450,65 @@ void playbackDiagnosticsExportCsvMidiAndSummary()
     expect(summary.find("section: mainA") != std::string::npos, "summary includes section");
     expect(summary.find("parts: 2") != std::string::npos, "summary includes part count");
     expect(summary.find("Drum Notes") != std::string::npos, "summary includes drum notes");
+
+    std::filesystem::remove_all(outDir);
+}
+
+void playbackDiagnosticsMidiSetupPrefersMainDrumsOnSharedChannel()
+{
+    Style style;
+    style.name = "Shared Drum Setup Test";
+    style.id = "shared-drum-setup-test";
+    style.beatsPerBar = 4;
+    style.ticksPerBeat = 120;
+
+    Section section;
+    section.name = "mainA";
+    section.barCount = 1;
+
+    Part rhythm2;
+    rhythm2.name = "rhythm2";
+    rhythm2.midiChannel = 9;
+    rhythm2.percussion = true;
+    rhythm2.bankMsb = 127;
+    rhythm2.bankLsb = 0;
+    rhythm2.program = 0;
+    rhythm2.notes.push_back(PatternNote{ 0, 60, 42, 90, NoteRole::Absolute, 0 });
+
+    Part drums;
+    drums.name = "drums";
+    drums.midiChannel = 10;
+    drums.percussion = true;
+    drums.bankMsb = 120;
+    drums.bankLsb = 0;
+    drums.program = 8;
+    drums.notes.push_back(PatternNote{ 60, 60, 36, 100, NoteRole::Absolute, 0 });
+
+    section.parts.push_back(std::move(rhythm2));
+    section.parts.push_back(std::move(drums));
+    style.sections.push_back(std::move(section));
+
+    TransposeContext ctx;
+    ctx.chord.rootPitchClass = 0;
+    ctx.chord.quality = cadenza::midi::ChordQuality::Major;
+
+    const auto outDir = std::filesystem::temp_directory_path() / "cadenza_shared_drum_setup_test";
+    std::filesystem::remove_all(outDir);
+
+    const auto result = exportPlaybackDiagnostics(style, "mainA", ctx, outDir.string(), 1);
+    expect(result.ok, "shared drum setup diagnostic export succeeds");
+
+    const auto midi = readBinary(outDir / "cadenza_playback.mid");
+    expect(countMidiBytes(midi, { 0xB9, 0x00, 120 }) == 1, "MIDI channel 10 bank MSB uses main drums");
+    expect(countMidiBytes(midi, { 0xC9, 8 }) == 1, "MIDI channel 10 program uses main drums kit");
+    expect(countMidiBytes(midi, { 0xB9, 0x00, 127 }) == 0, "rhythm2 bank does not override channel 10 setup");
+    expect(countMidiBytes(midi, { 0xC9, 0 }) == 0, "rhythm2 program does not override channel 10 setup");
+
+    const auto csv = readText(outDir / "cadenza_playback_events.csv");
+    expect(csv.find("0,10,42,42,90,60,rhythm2") != std::string::npos,
+           "rhythm2 still emits notes on channel 10");
+    expect(csv.find("60,10,36,36,100,60,drums") != std::string::npos,
+           "main drums still emits notes on channel 10");
 
     std::filesystem::remove_all(outDir);
 }
@@ -504,6 +587,7 @@ int main()
     drumPlaybackBypassesChordTranspositionAndThenRemaps();
     percussionSubRhythmBypassesChordTransposition();
     playbackDiagnosticsExportCsvMidiAndSummary();
+    playbackDiagnosticsMidiSetupPrefersMainDrumsOnSharedChannel();
     playbackDiagnosticsRoutesPercussionEventsToDrumChannel();
 
     if (failures != 0) return EXIT_FAILURE;
