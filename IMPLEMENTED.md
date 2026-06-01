@@ -59,9 +59,15 @@ There are two UIs:
 - `plugin-probe` — loads/inspects a VST3.
 - `style-probe` also shows playback channel/percussion flag, shared-channel
   setup owner, and stable independent note names in range/output lines.
+- `style-probe` opens with a **parse-diagnostics summary**: `Diagnostics: none`
+  when the style parsed cleanly, otherwise `Diagnostics: N warning(s)` followed
+  by one `- warning: ...` line per issue (e.g. `channel 9 percussion detected,
+  routing to GM drum playback channel 10`). Warnings come from
+  `style.parseWarnings` so unsupported/auto-corrected style features are visible
+  at a glance.
 - Diagnostic log at `%APPDATA%/Cadenza/cadenza.log` (fresh each launch).
-- 20 unit-test suites (chord recognition, transposition, parsing, playback,
-  and focused style-probe diagnostics).
+- 23 unit-test suites (chord recognition, transposition, parsing, playback,
+  and focused style-probe diagnostics — none / single / plural warning cases).
 
 ### Sound-quality fixes already in (CULY-ext was the test style)
 - Yamaha NTR/NTT policy now guides the transposition path: RootFixed/Bypass can
