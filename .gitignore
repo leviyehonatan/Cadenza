@@ -3,6 +3,7 @@ build/
 build-*/
 out/
 probe_out/
+style-scan-report.csv
 
 # CMake
 CMakeCache.txt
