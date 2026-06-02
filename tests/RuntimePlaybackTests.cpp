@@ -105,6 +105,44 @@ void playbackSetupCarriesBankProgramAndSynthChannel()
     expect(setup.noteCount == 1, "setup note count");
 }
 
+void mixDefaultsFillInWhenStyleOmitsThem()
+{
+    // A melodic comp part with no mix info should get a wide-ish pan + ambience.
+    Part chord1;
+    chord1.name = "chord1";
+    chord1.midiChannel = 12;
+    chord1.program = 27;
+    chord1.notes.push_back(PatternNote{ 0, 480, 60, 90, NoteRole::ChordRoot, 0 });
+
+    const auto s1 = playbackSetupForPart(chord1);
+    expect(s1.volume && *s1.volume == 100, "default volume 100");
+    expect(s1.pan && *s1.pan == 48, "chord1 panned slightly left");
+    expect(s1.reverb && *s1.reverb == 30, "melodic default reverb 30");
+    expect(s1.chorus && *s1.chorus == 16, "chord part default chorus 16");
+
+    // Drums centered, lighter reverb, no chorus.
+    Part drums;
+    drums.name = "drums";
+    drums.midiChannel = 10;
+    drums.percussion = true;
+    drums.notes.push_back(PatternNote{ 0, 60, 36, 100, NoteRole::Absolute, 0 });
+
+    const auto s2 = playbackSetupForPart(drums);
+    expect(s2.pan && *s2.pan == 64, "drums centered");
+    expect(s2.reverb && *s2.reverb == 18, "drums lighter reverb 18");
+    expect(s2.chorus && *s2.chorus == 0, "drums no chorus");
+
+    // Explicit style values are never overridden by defaults.
+    Part explicitPart;
+    explicitPart.name = "pad";
+    explicitPart.midiChannel = 14;
+    explicitPart.pan = 100;
+    explicitPart.reverb = 5;
+    const auto s3 = playbackSetupForPart(explicitPart);
+    expect(s3.pan && *s3.pan == 100, "explicit pan preserved");
+    expect(s3.reverb && *s3.reverb == 5, "explicit reverb preserved");
+}
+
 void melodicPartForcesGmBankZero()
 {
     // A melodic part carrying Yamaha XG/GS variation banks must play on GM bank 0
@@ -573,6 +611,7 @@ int main()
     partPresetMetadataDefaultsSafely();
     drumPartCanCarryPresetAndPercussionFlag();
     playbackSetupCarriesBankProgramAndSynthChannel();
+    mixDefaultsFillInWhenStyleOmitsThem();
     melodicPartForcesGmBankZero();
     drumPartKeepsItsBank();
     percussionSubRhythmRoutesToDrumChannel();

@@ -41,6 +41,25 @@ int playbackChannelForPart(const Part& part) noexcept
     return percussion ? 10 : part.midiChannel;
 }
 
+namespace
+{
+// Gentle stereo placement by role (0..127, 64 = center). Bass and drums stay
+// centered (standard mixing); comping/phrase parts spread left/right.
+int defaultPanForPart(const std::string& name) noexcept
+{
+    if (name == "chord1" || name == "phrase1" || name == "guitar")  return 48;
+    if (name == "chord2" || name == "phrase2")                      return 80;
+    if (name == "pad" || name == "harmony" || name == "strings")    return 54;
+    return 64;  // drums, bass, rhythm2, melody, unknown
+}
+
+int defaultChorusForPart(const std::string& name) noexcept
+{
+    if (name == "pad" || name == "chord1" || name == "chord2")  return 16;
+    return 0;
+}
+}
+
 PartPlaybackSetup playbackSetupForPart(const Part& part)
 {
     PartPlaybackSetup setup;
@@ -69,6 +88,14 @@ PartPlaybackSetup playbackSetupForPart(const Part& part)
         setup.bankMsb = 0;
         setup.bankLsb = 0;
     }
+    // Mix defaults when the style omits them, so the band sounds wide and
+    // natural (placed across the stereo field, with light ambience) rather than
+    // dry and dead-center. Explicit style values are always preserved above.
+    if (!setup.volume) setup.volume = 100;
+    if (!setup.pan)    setup.pan    = defaultPanForPart(part.name);
+    if (!setup.reverb) setup.reverb = setup.percussion ? 18 : 30;
+    if (!setup.chorus) setup.chorus = defaultChorusForPart(part.name);
+
     setup.noteCount = static_cast<int>(part.notes.size());
     return setup;
 }
