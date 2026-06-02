@@ -51,6 +51,9 @@ There are two UIs:
 - Section switching (intro / main A–D / fill / break / ending).
 - Per-channel **mixer**: volume, mute, solo, and instrument (program) pick.
   Bass/drums/etc. get sensible role-based default instruments.
+- **Per-style mixer memory**: instrument/volume/mute/solo tweaks are saved per
+  style id (in settings.json under `styleMixes`) and re-applied on top of the
+  style defaults whenever that style is loaded again.
 
 ### Tooling
 - `style-probe` — loads a `.sty`/`.cstyle`, prints per-part source→played pitch
@@ -149,8 +152,6 @@ because **most arbitrary `.sty` files will not sound perfect yet**:
 - **Shared percussion setup is still simple.** Multiple percussion parts can now
   share GM channel 10 with the main drums setup preferred, but future drum-kit
   and keymap merging may still need more style-specific handling.
-- **Instrument/octave tweaks are global defaults**, not persisted per style.
-  (The bass low-octave anchor and pad patch are applied at parse time.)
 - **No style editor / no save of edited styles.** Style editing UI is a placeholder.
 - **VST3 hosting is master-effect only** — no per-part VST instruments with MIDI
   routing yet.
@@ -167,7 +168,6 @@ because **most arbitrary `.sty` files will not sound perfect yet**:
    voicings across all chord qualities.
 3. **Drum polish**: improve style-specific drum-kit/keymap merging when multiple
    percussion parts share GM channel 10.
-4. **Per-style persistence**: save instrument/octave/mixer choices per style.
 5. **Song mode**: honor ending sections and stop.
 6. **Per-part VST instruments**; then installer + Release build.
 

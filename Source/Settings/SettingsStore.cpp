@@ -42,6 +42,28 @@ bool SettingsStore::load()
     m_state.chordArrangerEnabled = root.get("chordArrangerEnabled").asBool(m_state.chordArrangerEnabled);
     m_state.chordMemoryEnabled = root.get("chordMemoryEnabled").asBool(m_state.chordMemoryEnabled);
     m_state.syncroStopOnRelease = root.get("syncroStopOnRelease").asBool(m_state.syncroStopOnRelease);
+
+    m_state.styleMixes.clear();
+    const auto& styleMixes = root.get("styleMixes");
+    if (styleMixes.isObject()) {
+        for (const auto& [styleId, arrVal] : styleMixes.asObject()) {
+            if (!arrVal.isArray())
+                continue;
+            std::vector<StyleChannelMix> channels;
+            for (const auto& e : arrVal.asArray()) {
+                if (!e.isObject())
+                    continue;
+                StyleChannelMix m;
+                m.channel = e.get("channel").asInt(0);
+                m.program = e.get("program").asInt(-1);
+                m.volume  = e.get("volume").asInt(-1);
+                m.mute    = e.get("mute").asBool(false);
+                m.solo    = e.get("solo").asBool(false);
+                channels.push_back(m);
+            }
+            m_state.styleMixes[styleId] = std::move(channels);
+        }
+    }
     return true;
 }
 
@@ -66,6 +88,22 @@ bool SettingsStore::save() const
     root["chordArrangerEnabled"] = J::Value::boolean(m_state.chordArrangerEnabled);
     root["chordMemoryEnabled"] = J::Value::boolean(m_state.chordMemoryEnabled);
     root["syncroStopOnRelease"] = J::Value::boolean(m_state.syncroStopOnRelease);
+
+    J::Object styleMixes;
+    for (const auto& [styleId, channels] : m_state.styleMixes) {
+        J::Array arr;
+        for (const auto& m : channels) {
+            J::Object o;
+            o["channel"] = J::Value::number(m.channel);
+            o["program"] = J::Value::number(m.program);
+            o["volume"]  = J::Value::number(m.volume);
+            o["mute"]    = J::Value::boolean(m.mute);
+            o["solo"]    = J::Value::boolean(m.solo);
+            arr.push_back(J::Value::object(std::move(o)));
+        }
+        styleMixes[styleId] = J::Value::array(std::move(arr));
+    }
+    root["styleMixes"] = J::Value::object(std::move(styleMixes));
 
     std::ofstream out(m_path, std::ios::binary);
     if (!out.good()) return false;

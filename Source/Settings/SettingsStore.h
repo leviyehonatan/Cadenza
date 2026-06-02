@@ -3,11 +3,23 @@
 
 #pragma once
 
+#include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace cadenza::settings
 {
+// One mixer strip's saved state for a style. -1 means "keep the style default".
+struct StyleChannelMix
+{
+    int  channel = 0;
+    int  program = -1;
+    int  volume  = -1;
+    bool mute    = false;
+    bool solo    = false;
+};
+
 struct Settings
 {
     int bpm = 120;
@@ -27,6 +39,11 @@ struct Settings
     bool chordArrangerEnabled = true;
     bool chordMemoryEnabled = false;
     bool syncroStopOnRelease = true;
+
+    // Per-style mixer overrides keyed by style id. Applied on top of the style's
+    // own defaults when a style is (re)loaded, so the player's instrument/volume/
+    // mute/solo tweaks persist per style.
+    std::map<std::string, std::vector<StyleChannelMix>> styleMixes;
 };
 
 class SettingsStore

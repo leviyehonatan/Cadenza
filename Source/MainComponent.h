@@ -56,6 +56,8 @@ private:
     void buildNativePanel();
     void updateNativePanelStyle();   // push current style name + sections + mixer to the panel
     void applyMixerState();          // send each channel's effective volume (CC7) to the synth
+    void applyStyleMix(const std::string& styleId);  // apply saved per-style mixer overrides
+    void persistStyleMix();          // save current mixer strips for the current style
     void exportPlaybackDiagnostics();
     bool loadAndApplyStyleFile(const juce::File& file);
     bool loadAndApplySongFile(const juce::File& file);

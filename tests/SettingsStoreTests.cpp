@@ -52,6 +52,10 @@ void saveAndReload()
         s.state().chordArrangerEnabled = false;
         s.state().chordMemoryEnabled = true;
         s.state().syncroStopOnRelease = false;
+        s.state().styleMixes["8-beat-pop"] = {
+            { /*channel*/ 12, /*program*/ 27, /*volume*/ 90, /*mute*/ false, /*solo*/ true },
+            { /*channel*/ 14, /*program*/ 48, /*volume*/ -1, /*mute*/ true,  /*solo*/ false },
+        };
         expect(s.save(), "save returns true");
     }
 
@@ -68,6 +72,18 @@ void saveAndReload()
         expect(!s.state().chordArrangerEnabled, "chordArrangerEnabled round-trip");
         expect(s.state().chordMemoryEnabled, "chordMemoryEnabled round-trip");
         expect(!s.state().syncroStopOnRelease, "syncroStopOnRelease round-trip");
+
+        const auto it = s.state().styleMixes.find("8-beat-pop");
+        expect(it != s.state().styleMixes.end(), "styleMixes has the style");
+        if (it != s.state().styleMixes.end()) {
+            expect(it->second.size() == 2, "styleMixes channel count round-trip");
+            expect(it->second[0].channel == 12 && it->second[0].program == 27
+                   && it->second[0].volume == 90 && it->second[0].solo,
+                   "styleMixes channel 12 round-trip");
+            expect(it->second[1].channel == 14 && it->second[1].mute
+                   && it->second[1].volume == -1,
+                   "styleMixes channel 14 round-trip (mute + unset volume)");
+        }
     }
 
     std::filesystem::remove(path);

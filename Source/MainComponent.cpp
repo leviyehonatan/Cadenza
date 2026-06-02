@@ -1089,18 +1089,22 @@ void MainComponent::buildNativePanel()
     cb.onMixerVolume = [this](int channel, int volume) {
         m_mixer.setVolume(channel, volume);
         applyMixerState();
+        persistStyleMix();
     };
     cb.onMixerMute = [this](int channel, bool mute) {
         m_mixer.setMute(channel, mute);
         applyMixerState();
+        persistStyleMix();
     };
     cb.onMixerSolo = [this](int channel, bool solo) {
         m_mixer.setSolo(channel, solo);
         applyMixerState();
+        persistStyleMix();
     };
     cb.onMixerInstrument = [this](int channel, int program) {
         m_mixer.setProgram(channel, program);
         applyMixerState();   // re-asserts program + volume on the channel
+        persistStyleMix();
         if (m_panel)
             m_panel->setMixerInstrumentName(channel, juce::String(cadenza::midi::gmInstrumentName(program)));
     };
@@ -1237,6 +1241,10 @@ void MainComponent::updateNativePanelStyle()
         m_mixer.setProgram(s.channel, s.program);
     }
 
+    // Re-apply the player's saved per-style tweaks on top of the defaults.
+    if (m_settings)
+        applyStyleMix(m_settings->state().lastStyleId);
+
     m_panel->setMixerChannels(labels);
     for (int ch : channels) {
         m_panel->updateMixerStrip(ch, m_mixer.volume(ch), m_mixer.mute(ch), m_mixer.solo(ch));
@@ -1257,6 +1265,50 @@ void MainComponent::applyMixerState()
         m_audio.programChange(c.channel, c.program);
         m_audio.controlChange(c.channel, 7 /*CC7 volume*/, m_mixer.effectiveVolume(c.channel));
     }
+}
+
+void MainComponent::applyStyleMix(const std::string& styleId)
+{
+    if (!m_settings || styleId.empty())
+        return;
+    const auto it = m_settings->state().styleMixes.find(styleId);
+    if (it == m_settings->state().styleMixes.end())
+        return;
+
+    // Apply the player's saved tweaks on top of the style's own defaults.
+    for (const auto& m : it->second) {
+        if (!m_mixer.has(m.channel))
+            continue;   // only channels this style actually uses
+        if (m.program >= 0) m_mixer.setProgram(m.channel, m.program);
+        if (m.volume  >= 0) m_mixer.setVolume(m.channel, m.volume);
+        m_mixer.setMute(m.channel, m.mute);
+        m_mixer.setSolo(m.channel, m.solo);
+    }
+}
+
+void MainComponent::persistStyleMix()
+{
+    if (!m_settings)
+        return;
+    const std::string styleId = m_settings->state().lastStyleId;
+    if (styleId.empty())
+        return;
+
+    const int melodyChannel = m_midi.melodyChannel();  // persists via melodyProgram, skip here
+    std::vector<cadenza::settings::StyleChannelMix> mix;
+    for (const auto& c : m_mixer.channels()) {
+        if (c.channel == melodyChannel)
+            continue;
+        cadenza::settings::StyleChannelMix m;
+        m.channel = c.channel;
+        m.program = m_mixer.program(c.channel);
+        m.volume  = m_mixer.volume(c.channel);
+        m.mute    = m_mixer.mute(c.channel);
+        m.solo    = m_mixer.solo(c.channel);
+        mix.push_back(m);
+    }
+    m_settings->state().styleMixes[styleId] = std::move(mix);
+    saveSettings();
 }
 
 void MainComponent::handleBridgePayload(const juce::var& payload)
