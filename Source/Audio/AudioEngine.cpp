@@ -21,6 +21,7 @@ void AudioEngine::prepareToPlay(int samplesPerBlock, double sampleRate)
     if (m_synth) m_synth->prepare(sampleRate, 0);
     m_masterEffect.prepare(sampleRate, samplesPerBlock > 0 ? samplesPerBlock : 512);
     m_masterEq.prepare(sampleRate, 2);
+    m_masterGlue.prepare(sampleRate);
 }
 
 void AudioEngine::releaseResources()
@@ -54,8 +55,12 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         [&] {  // 3) metronome clicks on top
             m_metronome.renderBlock(view, m_transport);
         },
-        [&] {  // 4) master 3-band EQ shapes the tone, then the insert effect
-            m_masterEq.process(view.getArrayOfWritePointers(), view.getNumChannels(), view.getNumSamples());
+        [&] {  // 4) master chain: EQ -> Airwindows console glue -> insert effect
+            float* const* chans = view.getArrayOfWritePointers();
+            const int nc = view.getNumChannels();
+            const int ns = view.getNumSamples();
+            m_masterEq.process(chans, nc, ns);     // tone + tame peaks
+            m_masterGlue.process(chans, nc, ns);   // analog console depth/glue
             m_effectMidi.clear();
             m_masterEffect.process(view, m_effectMidi);
         });

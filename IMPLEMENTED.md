@@ -111,6 +111,12 @@ There are two UIs:
   the final mix, gains persisted in settings (`eqLowDb`/`eqMidDb`/`eqHighDb`,
   default +4 / 0 / +2 for low-end body + air). Tunable by editing those values;
   live on-screen sliders are a planned follow-up.
+- **Analog console glue** on the master buss: the DSP from Airwindows
+  *Console7Buss* (MIT) is ported in (`MasterGlue`), adding gentle saturation /
+  harmonic depth so the clean GM render sounds less flat/sterile. Master chain
+  order: EQ → console glue → soft limiter → optional VST3 insert.
+- **Soft limiter** (always on) rounds peaks so a hot full band never hard-clips
+  into a crunchy distortion; synth gain leaves headroom for it.
 - **Far more CASM policies are extracted (three fixes).** (1) Ctb2 split-range
   entries (source-note byte 21 != 0x7F, common in Intro/Ending B/C) are now decoded
   instead of dropped. (2) Binary Ctab/Ctb2 entries whose note-limit byte is 0x3D

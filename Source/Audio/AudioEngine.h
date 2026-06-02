@@ -5,6 +5,7 @@
 #pragma once
 
 #include "MasterEq.h"
+#include "MasterGlue.h"
 #include "Metronome.h"
 #include "PluginHost.h"
 #include "SynthEngine.h"
@@ -74,6 +75,7 @@ private:
     Transport m_transport;
     PluginHost m_masterEffect;
     MasterEq   m_masterEq;
+    MasterGlue m_masterGlue;
     juce::MidiBuffer m_effectMidi;   // scratch (empty) MIDI for effect processing
 
     juce::AudioDeviceManager  m_deviceManager;
