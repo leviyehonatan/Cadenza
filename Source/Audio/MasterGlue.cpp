@@ -25,7 +25,11 @@ inline float softClip(float x) noexcept
 void MasterGlue::prepare(double sampleRate) noexcept
 {
     m_sampleRate = sampleRate > 0 ? sampleRate : 44100.0;
-    A = 1.0;
+    // Trim so inputgain (= A*1.03) is exactly unity. The stock A=1.0 applies a
+    // +3% makeup as x1.03 PER SAMPLE; on the near-silent dither floor the asin is
+    // ~linear so that makeup compounds into a runaway DC/noise build-up. Unity
+    // keeps the console colour without the runaway.
+    A = 1.0 / 1.03;
     gainchase = -1.0;
     chasespeed = 64.0;
     for (int x = 0; x < 15; ++x) { biquadA[x] = 0.0; biquadB[x] = 0.0; }

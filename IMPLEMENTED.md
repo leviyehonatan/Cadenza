@@ -112,9 +112,10 @@ There are two UIs:
   default +4 / 0 / +2 for low-end body + air). Tunable by editing those values;
   live on-screen sliders are a planned follow-up.
 - **Analog console glue** on the master buss: the DSP from Airwindows
-  *Console7Buss* (MIT) is ported in (`MasterGlue`), adding gentle saturation /
-  harmonic depth so the clean GM render sounds less flat/sterile. Master chain
-  order: EQ → console glue → soft limiter → optional VST3 insert.
+  *Console7Buss* (MIT) is ported in (`MasterGlue`). **Currently disabled by
+  default** — in the live chain it interacted badly (broke playback), so it's kept
+  for a future, properly-verified pass. Master chain order when on:
+  EQ → console glue → soft limiter → optional VST3 insert.
 - **Soft limiter** (always on) rounds peaks so a hot full band never hard-clips
   into a crunchy distortion; synth gain leaves headroom for it.
 - **Far more CASM policies are extracted (three fixes).** (1) Ctb2 split-range

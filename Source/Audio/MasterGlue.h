@@ -24,11 +24,13 @@ public:
     void process(float* const* channels, int numChannels, int numSamples) noexcept;
 
 private:
-    std::atomic<bool> m_enabled { true };
+    // Disabled by default: the Console7Buss makeup/dither interacts badly in the
+    // live chain (broke playback in-app); kept for a future, properly-verified pass.
+    std::atomic<bool> m_enabled { false };
     double m_sampleRate = 44100.0;
 
     // Airwindows Console7Buss state.
-    double A = 1.0;            // "Master" trim (unity)
+    double A = 1.0 / 1.03;     // "Master" trim set so makeup gain is unity (see prepare)
     double gainchase = -1.0;
     double chasespeed = 64.0;
     double biquadA[15] = {};

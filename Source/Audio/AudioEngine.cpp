@@ -60,7 +60,7 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             const int nc = view.getNumChannels();
             const int ns = view.getNumSamples();
             m_masterEq.process(chans, nc, ns);     // tone + tame peaks
-            m_masterGlue.process(chans, nc, ns);   // analog console depth/glue
+            m_masterGlue.process(chans, nc, ns);   // console glue (no-op: disabled by default)
             m_effectMidi.clear();
             m_masterEffect.process(view, m_effectMidi);
         });
