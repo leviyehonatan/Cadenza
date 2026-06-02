@@ -1121,6 +1121,18 @@ void MainComponent::buildNativePanel()
             m_audio.noteOn(10, padNotes[index], 112);
     };
 
+    cb.onEqChanged = [this](int lowDb, int midDb, int highDb) {
+        m_audio.setEqGains(static_cast<float>(lowDb),
+                           static_cast<float>(midDb),
+                           static_cast<float>(highDb));
+        if (m_settings) {
+            m_settings->state().eqLowDb  = lowDb;
+            m_settings->state().eqMidDb  = midDb;
+            m_settings->state().eqHighDb = highDb;
+            saveSettings();
+        }
+    };
+
     cb.nudgeTranspose = [this](int delta) {
         const int t = m_state.setTranspose(m_state.transpose() + delta);
         m_styleEngine.setGlobalTranspose(t);                 // transpose affects style (unchanged)
@@ -1179,6 +1191,10 @@ void MainComponent::buildNativePanel()
                              m_state.chordSourceEnabled("memory"),
                              m_state.syncroStopOnRelease(),
                              m_state.chordSourceEnabled("bass"));
+    if (m_settings) {
+        const auto& st = m_settings->state();
+        m_panel->setEqGains(st.eqLowDb, st.eqMidDb, st.eqHighDb);
+    }
     resized();
 }
 

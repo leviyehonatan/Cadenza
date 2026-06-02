@@ -113,6 +113,31 @@ NativePanel::NativePanel()
         m_pads.push_back(std::move(pad));
     }
 
+    // Master EQ: three knobs (Low / Mid / High), -12..+12 dB.
+    styleCaption(m_eqCaption, "Master EQ (dB)");
+    addAndMakeVisible(m_eqCaption);
+    auto setupEqKnob = [this](juce::Slider& s) {
+        s.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        s.setRange(-12.0, 12.0, 1.0);
+        s.setValue(0.0, juce::dontSendNotification);
+        s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 46, 16);
+        s.onValueChange = [this] {
+            if (m_cb.onEqChanged)
+                m_cb.onEqChanged((int) m_eqLow.getValue(),
+                                 (int) m_eqMid.getValue(),
+                                 (int) m_eqHigh.getValue());
+        };
+        addAndMakeVisible(s);
+    };
+    setupEqKnob(m_eqLow); setupEqKnob(m_eqMid); setupEqKnob(m_eqHigh);
+    auto eqLabel = [this](juce::Label& l, const juce::String& t) {
+        l.setText(t, juce::dontSendNotification);
+        l.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        l.setJustificationType(juce::Justification::centred);
+        addAndMakeVisible(l);
+    };
+    eqLabel(m_eqLowCap, "Low"); eqLabel(m_eqMidCap, "Mid"); eqLabel(m_eqHighCap, "High");
+
     // --- wire control callbacks (message thread) ---
     m_play.onClick          = [this] { if (m_cb.togglePlay)    m_cb.togglePlay(); };
     m_openStyle.onClick     = [this] { if (m_cb.openStyle)     m_cb.openStyle(); };
@@ -301,6 +326,13 @@ void NativePanel::setToggleStates(bool arranger, bool chordMemory, bool syncroSt
     m_fingeredOnBass.setToggleState(fingeredOnBass, juce::dontSendNotification);
 }
 
+void NativePanel::setEqGains(int lowDb, int midDb, int highDb)
+{
+    m_eqLow.setValue(lowDb,  juce::dontSendNotification);
+    m_eqMid.setValue(midDb,  juce::dontSendNotification);
+    m_eqHigh.setValue(highDb, juce::dontSendNotification);
+}
+
 void NativePanel::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xff1c1f26));
@@ -385,6 +417,23 @@ void NativePanel::resized()
         m_chordMemory.setBounds(r.removeFromLeft(tw));
         m_syncroStop.setBounds(r.removeFromLeft(tw));
         m_fingeredOnBass.setBounds(r.removeFromLeft(tw));
+    }
+    area.removeFromTop(gap);
+
+    // Master EQ row: caption + 3 labelled knobs.
+    {
+        auto r = area.removeFromTop(64);
+        m_eqCaption.setBounds(r.removeFromLeft(110).withTrimmedTop(24));
+        const int kw = 64;
+        auto placeKnob = [&](juce::Slider& s, juce::Label& cap) {
+            auto col = r.removeFromLeft(kw);
+            cap.setBounds(col.removeFromTop(14));
+            s.setBounds(col);
+            r.removeFromLeft(6);
+        };
+        placeKnob(m_eqLow, m_eqLowCap);
+        placeKnob(m_eqMid, m_eqMidCap);
+        placeKnob(m_eqHigh, m_eqHighCap);
     }
     area.removeFromTop(gap);
 

@@ -109,8 +109,9 @@ There are two UIs:
   no bone-dry parts. Richer style reverb/pan values are kept as-is.
 - **Master 3-band EQ** (low shelf 120 Hz / mid peak 900 Hz / high shelf 9 kHz) on
   the final mix, gains persisted in settings (`eqLowDb`/`eqMidDb`/`eqHighDb`,
-  default +4 / 0 / +2 for low-end body + air). Tunable by editing those values;
-  live on-screen sliders are a planned follow-up.
+  default +4 / 0 / +2 for low-end body + air). **Live on-screen knobs** (Low/Mid/
+  High, -12..+12 dB) on the panel let the player tune by ear in real time; changes
+  persist to settings immediately.
 - **Analog console glue** on the master buss: the DSP from Airwindows
   *Console7Buss* (MIT) is ported in (`MasterGlue`). **Currently disabled by
   default** — in the live chain it interacted badly (broke playback), so it's kept
