@@ -117,10 +117,10 @@ void mixDefaultsFillInWhenStyleOmitsThem()
     const auto s1 = playbackSetupForPart(chord1);
     expect(s1.volume && *s1.volume == 100, "default volume 100");
     expect(s1.pan && *s1.pan == 48, "chord1 panned slightly left");
-    expect(s1.reverb && *s1.reverb == 30, "melodic default reverb 30");
+    expect(s1.reverb && *s1.reverb == 25, "melodic reverb floor 25 when unset");
     expect(s1.chorus && *s1.chorus == 16, "chord part default chorus 16");
 
-    // Drums centered, lighter reverb, no chorus.
+    // Drums centered, lighter reverb floor, no chorus.
     Part drums;
     drums.name = "drums";
     drums.midiChannel = 10;
@@ -129,18 +129,26 @@ void mixDefaultsFillInWhenStyleOmitsThem()
 
     const auto s2 = playbackSetupForPart(drums);
     expect(s2.pan && *s2.pan == 64, "drums centered");
-    expect(s2.reverb && *s2.reverb == 18, "drums lighter reverb 18");
+    expect(s2.reverb && *s2.reverb == 12, "drums reverb floor 12");
     expect(s2.chorus && *s2.chorus == 0, "drums no chorus");
 
-    // Explicit style values are never overridden by defaults.
-    Part explicitPart;
-    explicitPart.name = "pad";
-    explicitPart.midiChannel = 14;
-    explicitPart.pan = 100;
-    explicitPart.reverb = 5;
-    const auto s3 = playbackSetupForPart(explicitPart);
+    // A style that sends reverb=0 is floored up (no bone-dry parts); pan is kept.
+    Part dryPart;
+    dryPart.name = "chord2";
+    dryPart.midiChannel = 13;
+    dryPart.pan = 100;
+    dryPart.reverb = 0;
+    const auto s3 = playbackSetupForPart(dryPart);
     expect(s3.pan && *s3.pan == 100, "explicit pan preserved");
-    expect(s3.reverb && *s3.reverb == 5, "explicit reverb preserved");
+    expect(s3.reverb && *s3.reverb == 25, "explicit reverb=0 raised to floor");
+
+    // A richer explicit reverb above the floor is preserved.
+    Part wetPart;
+    wetPart.name = "pad";
+    wetPart.midiChannel = 14;
+    wetPart.reverb = 55;
+    const auto s4 = playbackSetupForPart(wetPart);
+    expect(s4.reverb && *s4.reverb == 55, "explicit reverb above floor preserved");
 }
 
 void melodicPartForcesGmBankZero()

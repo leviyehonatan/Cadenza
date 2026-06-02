@@ -88,13 +88,17 @@ PartPlaybackSetup playbackSetupForPart(const Part& part)
         setup.bankMsb = 0;
         setup.bankLsb = 0;
     }
-    // Mix defaults when the style omits them, so the band sounds wide and
-    // natural (placed across the stereo field, with light ambience) rather than
-    // dry and dead-center. Explicit style values are always preserved above.
+    // Mix defaults so the band sounds wide and natural instead of dry and dead-
+    // center. Volume/pan/chorus fill in only when the style omits them.
     if (!setup.volume) setup.volume = 100;
     if (!setup.pan)    setup.pan    = defaultPanForPart(part.name);
-    if (!setup.reverb) setup.reverb = setup.percussion ? 18 : 30;
     if (!setup.chorus) setup.chorus = defaultChorusForPart(part.name);
+
+    // Reverb FLOOR (not just a default): many styles set CC91=0 and rely on the
+    // keyboard's always-on global reverb for ambience. Raise anything below the
+    // floor so no part plays bone-dry; richer style values are kept as-is.
+    const int reverbFloor = setup.percussion ? 12 : 25;
+    setup.reverb = std::max(setup.reverb.value_or(reverbFloor), reverbFloor);
 
     setup.noteCount = static_cast<int>(part.notes.size());
     return setup;

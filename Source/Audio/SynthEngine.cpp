@@ -59,12 +59,23 @@ public:
         if (m_settings) {
             // Configure for offline-rendering style (we render into JUCE's buffer ourselves).
             fluid_settings_setstr(m_settings, "audio.driver", "file");
-            fluid_settings_setnum(m_settings, "synth.gain", 0.6);
+            fluid_settings_setnum(m_settings, "synth.gain", 0.8);   // a touch more body/level
             fluid_settings_setint(m_settings, "synth.audio-channels", 1);
             fluid_settings_setint(m_settings, "synth.lock-memory", 0);
             fluid_settings_setint(m_settings, "synth.drums-channel.active", 1);
+
+            // Ambience: drive an explicit hall-ish reverb + light chorus so the
+            // band has depth and air instead of the dry, dead "GM default" sound.
+            // Parts still control how much they send via CC91/CC93.
+            fluid_settings_setint(m_settings, "synth.reverb.active", 1);
+            fluid_settings_setint(m_settings, "synth.chorus.active", 1);
+            fluid_settings_setnum(m_settings, "synth.reverb.room-size", 0.75);
+            fluid_settings_setnum(m_settings, "synth.reverb.damp", 0.30);
+            fluid_settings_setnum(m_settings, "synth.reverb.width", 0.90);
+            fluid_settings_setnum(m_settings, "synth.reverb.level", 0.80);
+
             m_synth = new_fluid_synth(m_settings);
-            juce::Logger::writeToLog("[Cadenza] FluidSynth GM drum channel active: synth channel 9");
+            juce::Logger::writeToLog("[Cadenza] FluidSynth GM drum channel active: synth channel 9; reverb+chorus on");
         }
     }
 

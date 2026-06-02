@@ -101,10 +101,12 @@ There are two UIs:
 - **Pad** defaults to a tighter, faster synth-strings patch with reverb/chorus cut.
 - **Bass** is anchored to one consistent low octave (E1–Eb2) so the foundation
   never jumps register or drops near-inaudible.
-- **Mix defaults for fullness.** When a style omits mix data, parts get a gentle
-  stereo pan by role (bass/drums centered, comps/phrases spread L/R, pad slightly
-  wide) plus light reverb (and chorus on pad/chord parts), so the band sounds wide
-  and natural instead of dry and dead-center. Explicit style values are preserved.
+- **Mix for fullness/ambience.** The synth runs an explicit hall reverb + chorus
+  (so the band has depth, not the dry "GM default" sound). Parts get a gentle
+  stereo pan by role (bass/drums centered, comps/phrases spread L/R, pad wide).
+  Reverb is **floored** per part: many styles send CC91=0 expecting the keyboard's
+  global reverb, so anything below the floor (25 melodic / 12 drums) is raised —
+  no bone-dry parts. Richer style reverb/pan values are kept as-is.
 - **Far more CASM policies are extracted (three fixes).** (1) Ctb2 split-range
   entries (source-note byte 21 != 0x7F, common in Intro/Ending B/C) are now decoded
   instead of dropped. (2) Binary Ctab/Ctb2 entries whose note-limit byte is 0x3D
