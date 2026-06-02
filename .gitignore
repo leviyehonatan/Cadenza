@@ -4,6 +4,7 @@ build-*/
 out/
 probe_out/
 style-scan-report.csv
+graphify-out/
 
 # CMake
 CMakeCache.txt
