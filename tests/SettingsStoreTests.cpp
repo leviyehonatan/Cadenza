@@ -52,6 +52,9 @@ void saveAndReload()
         s.state().chordArrangerEnabled = false;
         s.state().chordMemoryEnabled = true;
         s.state().syncroStopOnRelease = false;
+        s.state().eqLowDb = 6;
+        s.state().eqMidDb = -2;
+        s.state().eqHighDb = 3;
         s.state().styleMixes["8-beat-pop"] = {
             { /*channel*/ 12, /*program*/ 27, /*volume*/ 90, /*mute*/ false, /*solo*/ true },
             { /*channel*/ 14, /*program*/ 48, /*volume*/ -1, /*mute*/ true,  /*solo*/ false },
@@ -72,6 +75,8 @@ void saveAndReload()
         expect(!s.state().chordArrangerEnabled, "chordArrangerEnabled round-trip");
         expect(s.state().chordMemoryEnabled, "chordMemoryEnabled round-trip");
         expect(!s.state().syncroStopOnRelease, "syncroStopOnRelease round-trip");
+        expect(s.state().eqLowDb == 6 && s.state().eqMidDb == -2 && s.state().eqHighDb == 3,
+               "EQ gains round-trip");
 
         const auto it = s.state().styleMixes.find("8-beat-pop");
         expect(it != s.state().styleMixes.end(), "styleMixes has the style");

@@ -217,6 +217,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
             Source/Audio/SynthEngine.cpp
             Source/Audio/Metronome.cpp
             Source/Audio/AudioEngine.cpp
+            Source/Audio/MasterEq.cpp
             Source/Audio/PluginHost.cpp
             Source/Midi/MidiRouter.cpp
             Source/Arranger/StyleEngine.cpp

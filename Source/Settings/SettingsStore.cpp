@@ -42,6 +42,9 @@ bool SettingsStore::load()
     m_state.chordArrangerEnabled = root.get("chordArrangerEnabled").asBool(m_state.chordArrangerEnabled);
     m_state.chordMemoryEnabled = root.get("chordMemoryEnabled").asBool(m_state.chordMemoryEnabled);
     m_state.syncroStopOnRelease = root.get("syncroStopOnRelease").asBool(m_state.syncroStopOnRelease);
+    m_state.eqLowDb  = root.get("eqLowDb").asInt(m_state.eqLowDb);
+    m_state.eqMidDb  = root.get("eqMidDb").asInt(m_state.eqMidDb);
+    m_state.eqHighDb = root.get("eqHighDb").asInt(m_state.eqHighDb);
 
     m_state.styleMixes.clear();
     const auto& styleMixes = root.get("styleMixes");
@@ -88,6 +91,9 @@ bool SettingsStore::save() const
     root["chordArrangerEnabled"] = J::Value::boolean(m_state.chordArrangerEnabled);
     root["chordMemoryEnabled"] = J::Value::boolean(m_state.chordMemoryEnabled);
     root["syncroStopOnRelease"] = J::Value::boolean(m_state.syncroStopOnRelease);
+    root["eqLowDb"]  = J::Value::number(m_state.eqLowDb);
+    root["eqMidDb"]  = J::Value::number(m_state.eqMidDb);
+    root["eqHighDb"] = J::Value::number(m_state.eqHighDb);
 
     J::Object styleMixes;
     for (const auto& [styleId, channels] : m_state.styleMixes) {

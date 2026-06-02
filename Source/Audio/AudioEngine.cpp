@@ -20,6 +20,7 @@ void AudioEngine::prepareToPlay(int samplesPerBlock, double sampleRate)
     m_metronome.prepare(sampleRate);
     if (m_synth) m_synth->prepare(sampleRate, 0);
     m_masterEffect.prepare(sampleRate, samplesPerBlock > 0 ? samplesPerBlock : 512);
+    m_masterEq.prepare(sampleRate, 2);
 }
 
 void AudioEngine::releaseResources()
@@ -53,7 +54,8 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         [&] {  // 3) metronome clicks on top
             m_metronome.renderBlock(view, m_transport);
         },
-        [&] {  // 4) master insert effect processes the final mix
+        [&] {  // 4) master 3-band EQ shapes the tone, then the insert effect
+            m_masterEq.process(view.getArrayOfWritePointers(), view.getNumChannels(), view.getNumSamples());
             m_effectMidi.clear();
             m_masterEffect.process(view, m_effectMidi);
         });

@@ -89,6 +89,12 @@ MainComponent::MainComponent()
     // Start audio before installing hooks so noteOn arrivals have somewhere to go.
     m_audio.startAudioDevice();
     m_audio.setBpm(static_cast<double>(m_state.bpm()));
+    if (m_settings) {
+        const auto& st = m_settings->state();
+        m_audio.setEqGains(static_cast<float>(st.eqLowDb),
+                           static_cast<float>(st.eqMidDb),
+                           static_cast<float>(st.eqHighDb));
+    }
     juce::Logger::writeToLog("[Cadenza] Synth engine: " + juce::String(m_audio.synthEngineName()));
     if (!m_audio.supportsSoundFonts()) {
         juce::Logger::writeToLog("[Cadenza] WARNING: NullSynthEngine is active; SoundFont loading is unavailable and playback will be silent/log-only.");

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "MasterEq.h"
 #include "Metronome.h"
 #include "PluginHost.h"
 #include "SynthEngine.h"
@@ -48,6 +49,9 @@ public:
 
     // SoundFont loading (no-op for NullSynthEngine).
     bool loadSoundFont(const std::string& path);
+
+    // Master 3-band EQ (low/mid/high gain in dB) applied to the final mix.
+    void setEqGains(float lowDb, float midDb, float highDb) { m_masterEq.setGains(lowDb, midDb, highDb); }
     const char* synthEngineName() const noexcept;
     bool supportsSoundFonts() const noexcept;
 
@@ -69,6 +73,7 @@ private:
     Metronome m_metronome;
     Transport m_transport;
     PluginHost m_masterEffect;
+    MasterEq   m_masterEq;
     juce::MidiBuffer m_effectMidi;   // scratch (empty) MIDI for effect processing
 
     juce::AudioDeviceManager  m_deviceManager;

@@ -107,6 +107,10 @@ There are two UIs:
   Reverb is **floored** per part: many styles send CC91=0 expecting the keyboard's
   global reverb, so anything below the floor (25 melodic / 12 drums) is raised —
   no bone-dry parts. Richer style reverb/pan values are kept as-is.
+- **Master 3-band EQ** (low shelf 120 Hz / mid peak 900 Hz / high shelf 9 kHz) on
+  the final mix, gains persisted in settings (`eqLowDb`/`eqMidDb`/`eqHighDb`,
+  default +4 / 0 / +2 for low-end body + air). Tunable by editing those values;
+  live on-screen sliders are a planned follow-up.
 - **Far more CASM policies are extracted (three fixes).** (1) Ctb2 split-range
   entries (source-note byte 21 != 0x7F, common in Intro/Ending B/C) are now decoded
   instead of dropped. (2) Binary Ctab/Ctb2 entries whose note-limit byte is 0x3D

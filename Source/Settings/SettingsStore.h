@@ -40,6 +40,12 @@ struct Settings
     bool chordMemoryEnabled = false;
     bool syncroStopOnRelease = true;
 
+    // Master 3-band EQ gains in dB. Default adds low-end body + a little air so
+    // the GM mix isn't flat/thin; the player can retune these.
+    int eqLowDb = 4;
+    int eqMidDb = 0;
+    int eqHighDb = 2;
+
     // Per-style mixer overrides keyed by style id. Applied on top of the style's
     // own defaults when a style is (re)loaded, so the player's instrument/volume/
     // mute/solo tweaks persist per style.
