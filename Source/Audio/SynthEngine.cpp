@@ -59,7 +59,7 @@ public:
         if (m_settings) {
             // Configure for offline-rendering style (we render into JUCE's buffer ourselves).
             fluid_settings_setstr(m_settings, "audio.driver", "file");
-            fluid_settings_setnum(m_settings, "synth.gain", 0.8);   // a touch more body/level
+            fluid_settings_setnum(m_settings, "synth.gain", 0.5);   // headroom; master limiter catches peaks
             fluid_settings_setint(m_settings, "synth.audio-channels", 1);
             fluid_settings_setint(m_settings, "synth.lock-memory", 0);
             fluid_settings_setint(m_settings, "synth.drums-channel.active", 1);
