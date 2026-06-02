@@ -60,7 +60,10 @@ std::string safePathString(const fs::path& p)
 // intended. Today that's the percussion-routing note (a feature, not a problem).
 bool isBenignWarning(const std::string& w)
 {
-    return w.find("percussion detected, routing") != std::string::npos;
+    // Percussion auto-routing and sibling-section policy inheritance are both
+    // successful outcomes (real behavior / real Yamaha policy), not defects.
+    return w.find("percussion detected, routing") != std::string::npos
+        || w.find("inherited NTR/NTT policy") != std::string::npos;
 }
 
 std::string normalizeMessage(const std::string& msg)

@@ -612,6 +612,80 @@ void binaryCtabWithEqualsByteStillParsesAsBinary()
            "0x3D Ctab NTT decoded as binary");
 }
 
+// Two main sections, both with a channel-12 part, but CASM defines channel 12
+// only for "Main A". Main B should inherit Main A's policy (same family).
+std::vector<uint8_t> makeTwoMainSectionStyWithCasmOnlyForMainA()
+{
+    std::vector<uint8_t> smf;
+    pushTag(smf, "MThd"); pushU32(smf, 6);
+    pushU16(smf, 1); pushU16(smf, 2); pushU16(smf, 480);
+
+    std::vector<uint8_t> t0;
+    pushTempo(t0, 0, 500000);
+    pushMarker(t0, 0, "Main A");
+    pushMarker(t0, 1920, "Main B");
+    pushEndOfTrack(t0, 1920);
+    appendTrack(smf, t0);
+
+    std::vector<uint8_t> t1;
+    pushProgramChange(t1, 0, 11, 27);     // channel 12 (zero-based 11)
+    pushNoteOn (t1, 0,    11, 60, 100);   // Main A note
+    pushNoteOff(t1, 480,  11, 60);
+    pushNoteOn (t1, 1440, 11, 62, 100);   // reaches tick 1920 = Main B
+    pushNoteOff(t1, 480,  11, 62);
+    pushEndOfTrack(t1, 0);
+    appendTrack(smf, t1);
+
+    std::vector<uint8_t> sdec;
+    const std::string section = "Main A";
+    sdec.insert(sdec.end(), section.begin(), section.end());
+
+    std::vector<uint8_t> ctab(26, 0);
+    ctab[0] = 11;   // source channel 12
+    ctab[18] = 0;   // source root C
+    ctab[19] = 19;  // source chord
+    ctab[20] = 1;   // NTR Root Fixed
+    ctab[21] = 2;   // NTT Chord
+    ctab[22] = 11; ctab[23] = 24; ctab[24] = 84; ctab[25] = 1;
+
+    std::vector<uint8_t> cseg;
+    appendChunk(cseg, "Sdec", sdec);
+    appendChunk(cseg, "Ctab", ctab);
+    std::vector<uint8_t> casm;
+    appendChunk(casm, "CSEG", cseg);
+    appendChunk(smf, "CASM", casm);
+    return smf;
+}
+
+void siblingSectionInheritsPolicy()
+{
+    auto sty = makeTwoMainSectionStyWithCasmOnlyForMainA();
+    auto r = cadenza::arranger::parseStyBytes(sty);
+    expect(r.ok, "sibling-inheritance sty parses OK");
+    if (!r.ok) return;
+
+    auto ch12In = [&](const char* sec) -> const cadenza::arranger::Part* {
+        const auto* s = r.style.findSection(sec);
+        if (!s) return nullptr;
+        for (const auto& p : s->parts)
+            if (p.midiChannel == 12) return &p;
+        return nullptr;
+    };
+
+    const auto* a = ch12In("mainA");
+    const auto* b = ch12In("mainB");
+    expect(a && a->yamahaPolicy.has_value(), "Main A has its own policy");
+    expect(b != nullptr, "Main B has a channel-12 part");
+    if (!b || !b->yamahaPolicy) { expect(false, "Main B policy missing"); return; }
+
+    // Main B had no CASM entry, but should inherit Main A's real policy rather
+    // than the C-major heuristic fallback.
+    expect(b->yamahaPolicy->source != cadenza::arranger::YamahaPolicySource::Fallback,
+           "Main B inherited a real policy (not heuristic fallback)");
+    expect(b->yamahaPolicy->ntt == cadenza::arranger::YamahaNtt::Chord,
+           "Main B inherited NTT=Chord from Main A");
+}
+
 void ctb2SplitRangeStillDecodesPolicy()
 {
     // Real styles (Intro/Ending B/C) encode a source-note split: byte 21 is the
@@ -883,6 +957,7 @@ int main()
     ctb2PolicyPreservesPlaybackLimits();
     ctb2SplitRangeStillDecodesPolicy();
     binaryCtabWithEqualsByteStillParsesAsBinary();
+    siblingSectionInheritsPolicy();
     bypassPolicyFollowsByRootTransposition();
     rootFixedChordPolicyAssignsChordRoles();
     bassOnPolicyMarksPartAsBassAndRootFollowing();

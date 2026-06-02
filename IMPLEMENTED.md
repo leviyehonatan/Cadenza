@@ -98,14 +98,16 @@ There are two UIs:
 - **Pad** defaults to a tighter, faster synth-strings patch with reverb/chorus cut.
 - **Bass** is anchored to one consistent low octave (E1–Eb2) so the foundation
   never jumps register or drops near-inaudible.
-- **More CASM policies are extracted (two parser fixes).** (1) Ctb2 split-range
+- **Far more CASM policies are extracted (three fixes).** (1) Ctb2 split-range
   entries (source-note byte 21 != 0x7F, common in Intro/Ending B/C) are now decoded
   instead of dropped. (2) Binary Ctab/Ctb2 entries whose note-limit byte is 0x3D
-  ('=') were being misdetected as the legacy ASCII format and losing their policy;
-  ASCII is now detected by the payload being genuinely textual. Combined, on the
-  1,582-file test library the styles needing the heuristic fallback dropped from
-  344 to 21, and clean styles rose from 187 to 1,414 — most of the library now
-  plays with its real per-part Yamaha NTR/NTT behavior.
+  ('=') were misdetected as legacy ASCII and lost their policy; ASCII is now
+  detected by the payload being genuinely textual. (3) A section with no policy for
+  a channel now inherits that channel's real policy from a sibling section
+  (preferring the same family: intro/ending/main/fill) instead of the heuristic.
+  Combined, on the 1,582-file test library the styles needing the C-major heuristic
+  fallback dropped from 344 to 13, and clean styles rose from 187 to 1,422 — nearly
+  the whole library now plays with its real per-part Yamaha NTR/NTT behavior.
 
 ---
 

@@ -1138,6 +1138,75 @@ std::optional<YamahaChannelPolicy> findYamahaPolicy(const CasmInfo& casm,
     return std::nullopt;
 }
 
+// Coarse section family so a section with no policy can borrow from a relative:
+// intro/ending/main/fill/break. Intros behave like intros (often Bypass), so we
+// prefer a same-family donor before any other section.
+std::string sectionFamily(const std::string& id)
+{
+    const std::string n = normalise(id);
+    auto starts = [&](const char* p) { return n.rfind(p, 0) == 0; };
+    if (starts("intro"))  return "intro";
+    if (starts("ending")) return "ending";
+    if (starts("fill"))   return "fill";
+    if (starts("break"))  return "break";
+    if (starts("main"))   return "main";
+    return n;
+}
+
+bool csegHasFamily(const CasmCseg& cseg, const std::string& family)
+{
+    if (!cseg.sectionName)
+        return false;
+    std::stringstream ss(*cseg.sectionName);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        token = trimAscii(token);
+        if (token.empty())
+            continue;
+        std::string id = token;
+        if (auto mapped = mapSectionMarker(token))
+            id = *mapped;
+        if (sectionFamily(id) == family)
+            return true;
+    }
+    return false;
+}
+
+// When a section defines no policy for a channel, reuse that channel's REAL
+// policy from another section (preferring the same family) instead of dropping
+// to the generic C-major heuristic. Sets sameFamily=true if the donor matched.
+std::optional<YamahaChannelPolicy> findSiblingYamahaPolicy(const CasmInfo& casm,
+                                                           const std::string& sectionId,
+                                                           int midiChannel,
+                                                           bool& sameFamily)
+{
+    const std::string family = sectionFamily(sectionId);
+    std::optional<YamahaChannelPolicy> anyMatch;
+
+    for (const auto& cseg : casm.csegs) {
+        const YamahaChannelPolicy* found = nullptr;
+        for (const auto& entry : cseg.ctabEntries) {
+            if (entry.policy
+                && (entry.policy->sourceChannel == midiChannel
+                    || (entry.channel && *entry.channel == midiChannel))) {
+                found = &*entry.policy;
+                break;
+            }
+        }
+        if (!found)
+            continue;
+        if (csegHasFamily(cseg, family)) {
+            sameFamily = true;
+            return *found;
+        }
+        if (!anyMatch)
+            anyMatch = *found;
+    }
+
+    sameFamily = false;
+    return anyMatch;
+}
+
 YamahaChannelPolicy fallbackYamahaPolicy(int midiChannel)
 {
     YamahaChannelPolicy policy;
@@ -1327,12 +1396,28 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
 
             Part part;
             part.midiChannel = ch + 1;  // SMF channels are 0-based; Cadenza uses 1-based for display.
-            const auto parsedPolicy = findYamahaPolicy(result.casm, section.name, part.midiChannel);
+            auto parsedPolicy = findYamahaPolicy(result.casm, section.name, part.midiChannel);
+            bool inheritedPolicy = false;
+            bool inheritedSameFamily = false;
+            if (!parsedPolicy) {
+                // No policy for this exact section: borrow the channel's real policy
+                // from a sibling section before resorting to the heuristic.
+                if (auto sib = findSiblingYamahaPolicy(result.casm, section.name,
+                                                       part.midiChannel, inheritedSameFamily)) {
+                    parsedPolicy = sib;
+                    inheritedPolicy = true;
+                }
+            }
             part.yamahaPolicy = parsedPolicy.value_or(fallbackYamahaPolicy(part.midiChannel));
             if (!parsedPolicy) {
                 addParseWarning(style,
                     "section " + section.name + " channel " + std::to_string(part.midiChannel)
                     + " missing NTR/NTT policy, using fallback role mapping");
+            } else if (inheritedPolicy) {
+                addParseWarning(style,
+                    "section " + section.name + " channel " + std::to_string(part.midiChannel)
+                    + " inherited NTR/NTT policy from a "
+                    + (inheritedSameFamily ? "same-family" : "related") + " section");
             } else if (part.yamahaPolicy) {
                 const auto& policy = *part.yamahaPolicy;
                 if (!policy.sourceRoot || !policy.sourceChord) {
