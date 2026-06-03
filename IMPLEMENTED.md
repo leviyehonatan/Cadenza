@@ -28,6 +28,10 @@ There are two UIs:
 
 ### Audio + MIDI
 - FluidSynth SoundFont (`.sf2`) playback. Configurable SoundFont path.
+- **Audio output device picker** ("Audio" button) — choose the real output device
+  (DAC/headphones) instead of whatever is the system default, e.g. to bypass a
+  virtual "gaming" mixer that colours/flattens the sound. Choice persists
+  (`audio-device.xml` next to settings) and is restored on launch.
 - Real-time audio engine with a PPQ transport clock; events fire before render.
 - **MIDI input**: opens all connected devices and hot-plugs new ones (rescans ~2s).
 - On-screen keyboard injects notes through the same route as hardware.

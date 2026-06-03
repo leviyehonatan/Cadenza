@@ -18,7 +18,8 @@
 namespace cadenza::ui { class NativePanel; }
 
 class MainComponent final : public juce::Component,
-                            private juce::Timer
+                            private juce::Timer,
+                            private juce::ChangeListener
 {
 public:
     MainComponent();
@@ -28,6 +29,11 @@ public:
 
     // juce::Timer — drives song-mode auto-stepping on the message thread.
     void timerCallback() override;
+
+    // juce::ChangeListener — persists the audio-device choice when it changes.
+    void changeListenerCallback(juce::ChangeBroadcaster*) override;
+    void showAudioSettings();
+    std::string audioStateFilePath() const;
 
 private:
     juce::WebBrowserComponent::Options createBrowserOptions();

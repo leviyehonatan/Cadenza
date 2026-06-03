@@ -66,10 +66,16 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         });
 }
 
-void AudioEngine::startAudioDevice()
+void AudioEngine::startAudioDevice() { startAudioDevice(nullptr); }
+
+void AudioEngine::startAudioDevice(const juce::XmlElement* savedState)
 {
-    // Default stereo, prompt user later via UI/settings.
-    const auto error = m_deviceManager.initialiseWithDefaultDevices(0, 2);
+    // Restore the user's saved device choice if present; otherwise default stereo.
+    juce::String error;
+    if (savedState != nullptr)
+        error = m_deviceManager.initialise(0, 2, savedState, true);
+    else
+        error = m_deviceManager.initialiseWithDefaultDevices(0, 2);
     m_sourcePlayer.setSource(this);
     m_deviceManager.addAudioCallback(&m_sourcePlayer);
 

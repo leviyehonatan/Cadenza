@@ -44,6 +44,7 @@ NativePanel::NativePanel()
     addAndMakeVisible(m_play);
     addAndMakeVisible(m_openStyle);
     addAndMakeVisible(m_openSf);
+    addAndMakeVisible(m_openAudio);
     addAndMakeVisible(m_webToggle);
 
     styleCaption(m_bpmCaption, "Tempo");
@@ -142,6 +143,7 @@ NativePanel::NativePanel()
     m_play.onClick          = [this] { if (m_cb.togglePlay)    m_cb.togglePlay(); };
     m_openStyle.onClick     = [this] { if (m_cb.openStyle)     m_cb.openStyle(); };
     m_openSf.onClick        = [this] { if (m_cb.openSoundFont) m_cb.openSoundFont(); };
+    m_openAudio.onClick     = [this] { if (m_cb.openAudioSettings) m_cb.openAudioSettings(); };
     m_webToggle.onClick     = [this] { if (m_cb.toggleWeb)     m_cb.toggleWeb(); };
     m_transposeDown.onClick = [this] { if (m_cb.nudgeTranspose) m_cb.nudgeTranspose(-1); };
     m_transposeUp.onClick   = [this] { if (m_cb.nudgeTranspose) m_cb.nudgeTranspose(+1); };
@@ -379,6 +381,7 @@ void NativePanel::resized()
         m_play.setBounds(r.removeFromLeft(80));        r.removeFromLeft(gap);
         m_openStyle.setBounds(r.removeFromLeft(100));  r.removeFromLeft(gap);
         m_openSf.setBounds(r.removeFromLeft(120));     r.removeFromLeft(gap);
+        m_openAudio.setBounds(r.removeFromLeft(64));   r.removeFromLeft(gap);
         m_webToggle.setBounds(r.removeFromLeft(80));   r.removeFromLeft(gap * 3);
         m_bpmCaption.setBounds(r.removeFromLeft(56));
         m_bpmDown.setBounds(r.removeFromLeft(36));     r.removeFromLeft(gap);

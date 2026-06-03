@@ -69,6 +69,11 @@ public:
     Transport& transport() noexcept { return m_transport; }
     SynthEngine& synth() noexcept   { return *m_synth; }
 
+    // Output-device selection (so the user can avoid a coloured virtual device).
+    juce::AudioDeviceManager& deviceManager() noexcept { return m_deviceManager; }
+    // Restore a previously-saved device setup (createStateXml) before defaulting.
+    void startAudioDevice(const juce::XmlElement* savedState);
+
 private:
     std::unique_ptr<SynthEngine> m_synth;
     Metronome m_metronome;

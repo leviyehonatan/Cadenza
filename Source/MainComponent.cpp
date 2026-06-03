@@ -87,7 +87,12 @@ MainComponent::MainComponent()
     loadSettings();
 
     // Start audio before installing hooks so noteOn arrivals have somewhere to go.
-    m_audio.startAudioDevice();
+    // Restore the user's saved output-device choice (avoids a coloured virtual
+    // device being silently re-selected each launch).
+    std::unique_ptr<juce::XmlElement> audioState(
+        juce::XmlDocument::parse(juce::File(audioStateFilePath())));
+    m_audio.startAudioDevice(audioState.get());
+    m_audio.deviceManager().addChangeListener(this);   // persist future changes
     m_audio.setBpm(static_cast<double>(m_state.bpm()));
     if (m_settings) {
         const auto& st = m_settings->state();
@@ -233,6 +238,7 @@ MainComponent::~MainComponent()
     stopTimer();
     saveSettings();
     m_styleEngine.allNotesOff();
+    m_audio.deviceManager().removeChangeListener(this);
     m_audio.stopAudioDevice();
     m_midi.closeInputs();
 }
@@ -243,6 +249,39 @@ std::string MainComponent::settingsFilePath() const
         .getChildFile("Cadenza");
     if (!dir.isDirectory()) dir.createDirectory();
     return dir.getChildFile("settings.json").getFullPathName().toStdString();
+}
+
+std::string MainComponent::audioStateFilePath() const
+{
+    return juce::File(settingsFilePath()).getParentDirectory()
+        .getChildFile("audio-device.xml").getFullPathName().toStdString();
+}
+
+void MainComponent::changeListenerCallback(juce::ChangeBroadcaster*)
+{
+    // The audio device changed (user picked a different output) — persist it.
+    if (auto xml = m_audio.deviceManager().createStateXml())
+        xml->writeTo(juce::File(audioStateFilePath()));
+}
+
+void MainComponent::showAudioSettings()
+{
+    auto* selector = new juce::AudioDeviceSelectorComponent(
+        m_audio.deviceManager(),
+        /*minInputCh*/  0, /*maxInputCh*/  0,
+        /*minOutputCh*/ 1, /*maxOutputCh*/ 2,
+        /*showMidiIn*/  false, /*showMidiOut*/ false,
+        /*stereoPairs*/ true,  /*hideAdvanced*/ false);
+    selector->setSize(520, 360);
+
+    juce::DialogWindow::LaunchOptions opts;
+    opts.content.setOwned(selector);
+    opts.dialogTitle = "Audio Output Settings";
+    opts.dialogBackgroundColour = juce::Colour(0xff2a2f3a);
+    opts.escapeKeyTriggersCloseButton = true;
+    opts.useNativeTitleBar = true;
+    opts.resizable = false;
+    opts.launchAsync();
 }
 
 void MainComponent::loadSettings()
@@ -1078,6 +1117,7 @@ void MainComponent::buildNativePanel()
     };
     cb.openStyle     = [this] { openStyleFileChooser(); };
     cb.openSoundFont = [this] { openSoundFontFileChooser(); };
+    cb.openAudioSettings = [this] { showAudioSettings(); };
     cb.toggleWeb     = [this] {
         m_webView.setVisible(!m_webView.isVisible());
         resized();
