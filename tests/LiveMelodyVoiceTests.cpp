@@ -101,6 +101,36 @@ void octaveChangeAffectsSubsequentLiveNotes()
     v.handleNote(72, 0, false, true);
 }
 
+void transposeShiftsTheRightHandMelody()
+{
+    LiveMelodyVoice v;
+    v.setTranspose(1);
+    expect(v.handleNote(60, 100, true, true)->note == 61, "transpose +1: 60 sounds 61");
+    v.handleNote(60, 0, false, true);
+
+    v.setTranspose(-2);
+    expect(v.handleNote(60, 100, true, true)->note == 58, "transpose -2: 60 sounds 58");
+    v.handleNote(60, 0, false, true);
+}
+
+void transposeAndOctaveCombine()
+{
+    LiveMelodyVoice v;
+    v.setOctave(1);        // +12
+    v.setTranspose(2);     // +2
+    expect(v.handleNote(60, 100, true, true)->note == 74, "octave +1 and transpose +2: 60 -> 74");
+}
+
+void transposedNoteOffReleasesSamePitch()
+{
+    LiveMelodyVoice v;
+    v.setTranspose(3);
+    v.handleNote(60, 100, true, true);   // sounds 63
+    v.setTranspose(0);                   // change transpose while held
+    const auto off = v.handleNote(60, 0, false, true);
+    expect(off.has_value() && off->note == 63, "note-off releases the originally-sounded transposed pitch");
+}
+
 void resetClearsHeldNotes()
 {
     LiveMelodyVoice v;
@@ -141,6 +171,9 @@ int main()
     chordZoneNoteMakesNoMelodySound();
     octaveDirectionsAndClamping();
     octaveChangeAffectsSubsequentLiveNotes();
+    transposeShiftsTheRightHandMelody();
+    transposeAndOctaveCombine();
+    transposedNoteOffReleasesSamePitch();
     resetClearsHeldNotes();
     bankNamesMapToGmPrograms();
     dedicatedChannelIsConfigurable();

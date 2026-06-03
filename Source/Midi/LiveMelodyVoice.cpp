@@ -25,7 +25,7 @@ std::optional<LiveMelodyEvent> LiveMelodyVoice::handleNote(int note, int velocit
         if (!isMelodyZone)
             return std::nullopt;                 // chord-zone / ignored: no live melody sound
 
-        const int played = clampMidi(note + 12 * m_octave.load());
+        const int played = clampMidi(note + 12 * m_octave.load() + m_transpose.load());
         m_playedNote[static_cast<std::size_t>(note)] = played;
         return LiveMelodyEvent{ m_channel, played, velocity, true };
     }

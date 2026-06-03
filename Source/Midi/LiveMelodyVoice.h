@@ -37,6 +37,13 @@ public:
 
     void setOctave(int octaves) noexcept { m_octave.store(octaves); }
     int  octave() const noexcept { return m_octave.load(); }
+
+    // Global transpose in semitones. Like a real arranger, transpose shifts the
+    // sounding right-hand pitch along with the accompaniment (chord detection is
+    // unaffected — the router/recogniser still sees the original played notes).
+    void setTranspose(int semitones) noexcept { m_transpose.store(semitones); }
+    int  transpose() const noexcept { return m_transpose.load(); }
+
     int  channel() const noexcept { return m_channel; }
 
     // Reassign the melody output channel (e.g. to avoid a loaded style's channels).
@@ -62,6 +69,7 @@ private:
 
     int m_channel;
     std::atomic<int> m_octave { 0 };
+    std::atomic<int> m_transpose { 0 };
     // For each source note 0..127, the pitch actually sounded (-1 = not held).
     std::array<int, 128> m_playedNote;
 };

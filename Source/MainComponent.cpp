@@ -401,6 +401,7 @@ void MainComponent::pushToWeb(const juce::String& js)
 void MainComponent::applyRuntimeStateToEngines()
 {
     m_styleEngine.setGlobalTranspose(m_state.transpose());
+    m_midi.setLiveTranspose(m_state.transpose());   // transpose shifts the right-hand melody too
     m_midi.setLiveOctave(m_state.octave());   // Octave affects live right-hand only, not style parts
     m_styleEngine.setEnabled(m_state.chordSourceEnabled("arranger"));
     m_midi.setChordDetectionMode(m_state.chordSourceEnabled("bass")
@@ -522,6 +523,7 @@ void MainComponent::installBridgeHooks()
     };
     hooks.onTransposeChanged = [this](int semitones) {
         m_styleEngine.setGlobalTranspose(semitones);
+        m_midi.setLiveTranspose(semitones);   // shift the right-hand melody too
         saveSettings();
     };
     hooks.onOctaveChanged = [this](int octaves) {
@@ -1233,7 +1235,8 @@ void MainComponent::buildNativePanel()
 
     cb.nudgeTranspose = [this](int delta) {
         const int t = m_state.setTranspose(m_state.transpose() + delta);
-        m_styleEngine.setGlobalTranspose(t);                 // transpose affects style (unchanged)
+        m_styleEngine.setGlobalTranspose(t);                 // transpose affects style
+        m_midi.setLiveTranspose(t);                          // ...and the right-hand melody
         if (m_panel) m_panel->setTranspose(t);
         pushToWeb("window.JuceBridge && window.JuceBridge.setTranspose(" + juce::String(t) + ");");
         saveSettings();

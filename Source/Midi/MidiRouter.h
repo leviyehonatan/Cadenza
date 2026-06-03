@@ -70,6 +70,11 @@ public:
     void setLiveOctave(int octaves) noexcept { m_melody.setOctave(octaves); }
     int  liveOctave() const noexcept { return m_melody.octave(); }
 
+    // Global transpose: shifts the sounding right-hand melody by N semitones,
+    // matching the accompaniment transpose. Chord detection is unaffected.
+    void setLiveTranspose(int semitones) noexcept { m_melody.setTranspose(semitones); }
+    int  liveTranspose() const noexcept { return m_melody.transpose(); }
+
     // Dedicated Cadenza channel the live right-hand melody plays on.
     int  melodyChannel() const noexcept { return m_melody.channel(); }
     void setMelodyChannel(int channel) noexcept { m_melody.setChannel(channel); }
