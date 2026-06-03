@@ -32,6 +32,12 @@ There are two UIs:
   (DAC/headphones) instead of whatever is the system default, e.g. to bypass a
   virtual "gaming" mixer that colours/flattens the sound. Choice persists
   (`audio-device.xml` next to settings) and is restored on launch.
+- **Optional ASIO** (low-latency, bypasses the Windows audio stack). Off by default
+  because the Steinberg ASIO SDK is proprietary and can't be bundled. To enable:
+  put the SDK at `lib/asiosdk/` (so `lib/asiosdk/common/iasiodrv.h` exists) or pass
+  `-DASIO_SDK_DIR=<path>`, then reconfigure — CMake prints "ASIO ENABLED" and ASIO
+  appears as a device type in the Audio picker. (No native ASIO driver? Install
+  ASIO4ALL.)
 - Real-time audio engine with a PPQ transport clock; events fire before render.
 - **MIDI input**: opens all connected devices and hot-plugs new ones (rescans ~2s).
 - On-screen keyboard injects notes through the same route as hardware.

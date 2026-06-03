@@ -28,6 +28,7 @@ CMakeFiles/
 
 # Dependencies
 lib/JUCE/
+lib/asiosdk/
 
 # Logs
 *.log

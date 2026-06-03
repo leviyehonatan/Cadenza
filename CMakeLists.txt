@@ -232,6 +232,25 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
             JUCE_PLUGINHOST_VST3=1
     )
 
+    # Optional ASIO (low-latency, bypasses the Windows audio stack). The Steinberg
+    # ASIO SDK is proprietary and cannot be bundled, so ASIO turns on automatically
+    # only when the SDK is present. Drop it at lib/asiosdk, or pass -DASIO_SDK_DIR=<path>.
+    set(ASIO_SDK_DIR "" CACHE PATH "Path to the Steinberg ASIO SDK root (contains common/iasiodrv.h)")
+    if(NOT ASIO_SDK_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/asiosdk/common/iasiodrv.h")
+        set(ASIO_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/asiosdk")
+    endif()
+    if(MSVC AND ASIO_SDK_DIR AND EXISTS "${ASIO_SDK_DIR}/common/iasiodrv.h")
+        message(STATUS "Cadenza: ASIO SDK found (${ASIO_SDK_DIR}) -> ASIO ENABLED")
+        target_compile_definitions(Cadenza PRIVATE JUCE_ASIO=1)
+        target_include_directories(Cadenza PRIVATE
+            "${ASIO_SDK_DIR}/common"
+            "${ASIO_SDK_DIR}/host"
+            "${ASIO_SDK_DIR}/host/pc")
+    else()
+        message(STATUS "Cadenza: ASIO SDK not found -> ASIO disabled "
+                       "(set ASIO_SDK_DIR or place it at lib/asiosdk to enable)")
+    endif()
+
     if(CADENZA_HAVE_FLUIDSYNTH)
         target_compile_definitions(Cadenza PRIVATE CADENZA_HAVE_FLUIDSYNTH=1)
         if(FluidSynth_FOUND)
