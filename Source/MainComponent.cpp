@@ -100,6 +100,7 @@ MainComponent::MainComponent()
                            static_cast<float>(st.eqMidDb),
                            static_cast<float>(st.eqHighDb));
         m_audio.setCompAmount(st.compAmount);
+        m_midi.setSplitPoint(st.splitNote);
     }
     juce::Logger::writeToLog("[Cadenza] Synth engine: " + juce::String(m_audio.synthEngineName()));
     if (!m_audio.supportsSoundFonts()) {
@@ -1233,6 +1234,14 @@ void MainComponent::buildNativePanel()
         }
     };
 
+    cb.onSplitChanged = [this](int note) {
+        m_midi.setSplitPoint(note);                 // notes < split drive chords; >= play melody
+        if (m_settings) {
+            m_settings->state().splitNote = note;
+            saveSettings();
+        }
+    };
+
     cb.nudgeTranspose = [this](int delta) {
         const int t = m_state.setTranspose(m_state.transpose() + delta);
         m_styleEngine.setGlobalTranspose(t);                 // transpose affects style
@@ -1296,6 +1305,7 @@ void MainComponent::buildNativePanel()
         const auto& st = m_settings->state();
         m_panel->setEqGains(st.eqLowDb, st.eqMidDb, st.eqHighDb);
         m_panel->setCompAmount(st.compAmount);
+        m_panel->setSplitPoint(st.splitNote);
     }
     resized();
 }

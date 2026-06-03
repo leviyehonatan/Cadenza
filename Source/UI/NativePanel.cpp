@@ -53,40 +53,6 @@ void showInstrumentMenu(juce::Component* anchor, int channel,
         if (result > 0) onPick(result - 1);
     });
 }
-
-// On-screen keyboard that tints the left-hand chord zone (notes below the split
-// point) so the player can see where chords end and the melody begins.
-class ChordSplitKeyboard final : public juce::MidiKeyboardComponent
-{
-public:
-    ChordSplitKeyboard(juce::MidiKeyboardState& state, Orientation orientation, int splitNote)
-        : juce::MidiKeyboardComponent(state, orientation), m_split(splitNote) {}
-
-    void setSplitNote(int n) { m_split = n; repaint(); }
-
-    void drawWhiteNote(int midiNoteNumber, juce::Graphics& g, juce::Rectangle<float> area,
-                       bool isDown, bool isOver, juce::Colour line, juce::Colour text) override
-    {
-        juce::MidiKeyboardComponent::drawWhiteNote(midiNoteNumber, g, area, isDown, isOver, line, text);
-        if (midiNoteNumber < m_split) {
-            g.setColour(juce::Colour(0x33409cff));   // translucent blue = chord (left-hand) zone
-            g.fillRect(area);
-        }
-    }
-
-    void drawBlackNote(int midiNoteNumber, juce::Graphics& g, juce::Rectangle<float> area,
-                       bool isDown, bool isOver, juce::Colour fill) override
-    {
-        juce::MidiKeyboardComponent::drawBlackNote(midiNoteNumber, g, area, isDown, isOver, fill);
-        if (midiNoteNumber < m_split) {
-            g.setColour(juce::Colour(0x55409cff));
-            g.fillRect(area);
-        }
-    }
-
-private:
-    int m_split;
-};
 }
 
 NativePanel::NativePanel()
@@ -151,12 +117,24 @@ NativePanel::NativePanel()
 
     // On-screen keyboard (split-aware via injectNote on the host side). The left
     // chord zone (below the split) is tinted blue so the split is visible.
+    m_splitNote = kKeyboardSplitNote;
     m_keyboard = std::make_unique<ChordSplitKeyboard>(
-        m_keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard, kKeyboardSplitNote);
+        m_keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard, m_splitNote);
     m_keyboard->setAvailableRange(36, 96);   // C2..C7
     m_keyboard->setLowestVisibleKey(36);     // show the chord zone too
     addAndMakeVisible(*m_keyboard);
     m_keyboardState.addListener(this);
+
+    // Draggable split marker ("Chords | Melody") above the keys.
+    m_splitBar = std::make_unique<SplitBar>();
+    m_splitBar->setKeyboard(m_keyboard.get());
+    m_splitBar->setSplitNote(m_splitNote);
+    m_splitBar->onSplitChanged = [this](int note) {
+        m_splitNote = note;
+        m_keyboard->setSplitNote(note);
+        if (m_cb.onSplitChanged) m_cb.onSplitChanged(note);
+    };
+    addAndMakeVisible(*m_splitBar);
 
     styleCaption(m_mixerCaption, "Mixer");
     addAndMakeVisible(m_mixerCaption);
@@ -409,6 +387,13 @@ void NativePanel::setCompAmount(int percent)
     m_comp.setValue(percent, juce::dontSendNotification);
 }
 
+void NativePanel::setSplitPoint(int midiNote)
+{
+    m_splitNote = midiNote;
+    if (m_keyboard) m_keyboard->setSplitNote(midiNote);
+    if (m_splitBar) m_splitBar->setSplitNote(midiNote);
+}
+
 void NativePanel::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xff1c1f26));
@@ -422,10 +407,13 @@ void NativePanel::resized()
     const int row = 34;
     const int gap = 6;
 
-    // On-screen keyboard pinned to the bottom, full width.
+    // On-screen keyboard pinned to the bottom, full width, with the draggable
+    // "Chords | Melody" split bar in a thin strip directly above the keys.
     if (m_keyboard) {
-        auto kb = area.removeFromBottom(140);
-        m_keyboard->setBounds(kb.reduced(0, 4));
+        auto kb = area.removeFromBottom(140).reduced(0, 4);
+        auto bar = kb.removeFromTop(16);
+        if (m_splitBar) m_splitBar->setBounds(bar);
+        m_keyboard->setBounds(kb);
         area.removeFromBottom(gap);
     }
 

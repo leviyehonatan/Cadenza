@@ -46,6 +46,7 @@ bool SettingsStore::load()
     m_state.eqMidDb  = root.get("eqMidDb").asInt(m_state.eqMidDb);
     m_state.eqHighDb = root.get("eqHighDb").asInt(m_state.eqHighDb);
     m_state.compAmount = root.get("compAmount").asInt(m_state.compAmount);
+    m_state.splitNote  = root.get("splitNote").asInt(m_state.splitNote);
 
     m_state.styleMixes.clear();
     const auto& styleMixes = root.get("styleMixes");
@@ -97,6 +98,7 @@ bool SettingsStore::save() const
     root["eqMidDb"]  = J::Value::number(m_state.eqMidDb);
     root["eqHighDb"] = J::Value::number(m_state.eqHighDb);
     root["compAmount"] = J::Value::number(m_state.compAmount);
+    root["splitNote"]  = J::Value::number(m_state.splitNote);
 
     J::Object styleMixes;
     for (const auto& [styleId, channels] : m_state.styleMixes) {

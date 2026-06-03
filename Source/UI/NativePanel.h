@@ -17,6 +17,92 @@
 
 namespace cadenza::ui
 {
+// On-screen keyboard that tints the left-hand chord zone (notes below the split
+// point) so the player can see where chords end and the melody begins.
+class ChordSplitKeyboard final : public juce::MidiKeyboardComponent
+{
+public:
+    ChordSplitKeyboard(juce::MidiKeyboardState& state, Orientation orientation, int splitNote)
+        : juce::MidiKeyboardComponent(state, orientation), m_split(splitNote) {}
+
+    void setSplitNote(int n) { m_split = n; repaint(); }
+    int  splitNote() const   { return m_split; }
+
+    void drawWhiteNote(int midiNoteNumber, juce::Graphics& g, juce::Rectangle<float> area,
+                       bool isDown, bool isOver, juce::Colour line, juce::Colour text) override
+    {
+        juce::MidiKeyboardComponent::drawWhiteNote(midiNoteNumber, g, area, isDown, isOver, line, text);
+        if (midiNoteNumber < m_split) { g.setColour(juce::Colour(0x33409cff)); g.fillRect(area); }
+    }
+    void drawBlackNote(int midiNoteNumber, juce::Graphics& g, juce::Rectangle<float> area,
+                       bool isDown, bool isOver, juce::Colour fill) override
+    {
+        juce::MidiKeyboardComponent::drawBlackNote(midiNoteNumber, g, area, isDown, isOver, fill);
+        if (midiNoteNumber < m_split) { g.setColour(juce::Colour(0x55409cff)); g.fillRect(area); }
+    }
+
+private:
+    int m_split;
+};
+
+// A thin strip drawn above the keyboard: "Chords" / "Melody" labels and a
+// draggable triangle marker at the split point. Dragging snaps to white keys.
+class SplitBar final : public juce::Component
+{
+public:
+    void setKeyboard(juce::MidiKeyboardComponent* kb) { m_kb = kb; }
+    void setSplitNote(int n) { m_split = n; repaint(); }
+    int  splitNote() const   { return m_split; }
+
+    std::function<void(int)> onSplitChanged;   // fired with the new split note
+
+    void paint(juce::Graphics& g) override
+    {
+        const float x = markerX();
+        auto b = getLocalBounds();
+        g.setFont(juce::Font(juce::FontOptions(11.0f)));
+        g.setColour(juce::Colours::skyblue.withAlpha(0.9f));
+        g.drawText("Chords", b.withWidth(juce::jmax(0, (int) x)).reduced(4, 0),
+                   juce::Justification::centredRight, false);
+        g.setColour(juce::Colours::lightgrey);
+        g.drawText("Melody", b.withLeft((int) x).reduced(4, 0),
+                   juce::Justification::centredLeft, false);
+        juce::Path tri;
+        const float w = 6.0f, h = (float) getHeight() - 1.0f;
+        tri.addTriangle(x - w, 0.0f, x + w, 0.0f, x, h);
+        g.setColour(juce::Colours::white);
+        g.fillPath(tri);
+    }
+
+    void mouseDown(const juce::MouseEvent& e) override { setFromX((float) e.x); }
+    void mouseDrag(const juce::MouseEvent& e) override { setFromX((float) e.x); }
+
+private:
+    float markerX() const { return m_kb ? m_kb->getRectangleForKey(m_split).getX() : 0.0f; }
+
+    void setFromX(float x)
+    {
+        if (m_kb == nullptr) return;
+        int best = m_split; float bestDist = 1.0e9f;
+        for (int n = 24; n <= 108; ++n) {
+            const int pc = n % 12;
+            const bool white = (pc==0||pc==2||pc==4||pc==5||pc==7||pc==9||pc==11);
+            if (!white) continue;
+            const float left = m_kb->getRectangleForKey(n).getX();
+            const float d = left > x ? left - x : x - left;
+            if (d < bestDist) { bestDist = d; best = n; }
+        }
+        if (best != m_split) {
+            m_split = best;
+            repaint();
+            if (onSplitChanged) onSplitChanged(best);
+        }
+    }
+
+    juce::MidiKeyboardComponent* m_kb = nullptr;
+    int m_split = 60;
+};
+
 class NativePanel : public juce::Component,
                     private juce::MidiKeyboardState::Listener
 {
@@ -47,6 +133,7 @@ public:
         std::function<void(int)> onPad;                       // pad index 0..3
         std::function<void(int, int, int)> onEqChanged;       // low, mid, high gain in dB
         std::function<void(int)> onCompChanged;               // master compressor amount 0..100
+        std::function<void(int)> onSplitChanged;              // keyboard split MIDI note
     };
 
     NativePanel();
@@ -71,6 +158,7 @@ public:
     void setToggleStates(bool arranger, bool chordMemory, bool syncroStop, bool fingeredOnBass);
     void setEqGains(int lowDb, int midDb, int highDb);   // init the EQ knobs (no callback)
     void setCompAmount(int percent);                     // init the Comp knob (no callback)
+    void setSplitPoint(int midiNote);                    // init the split marker (no callback)
 
     void resized() override;
     void paint(juce::Graphics&) override;
@@ -124,7 +212,9 @@ private:
     bool m_playing = false;
 
     juce::MidiKeyboardState m_keyboardState;
-    std::unique_ptr<juce::MidiKeyboardComponent> m_keyboard;
+    std::unique_ptr<ChordSplitKeyboard> m_keyboard;
+    std::unique_ptr<SplitBar>           m_splitBar;
+    int m_splitNote = 60;
 
     juce::Label m_mixerCaption;
     struct MixerStrip
