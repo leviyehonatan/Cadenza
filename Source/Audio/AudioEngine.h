@@ -101,6 +101,7 @@ private:
     PluginHost               m_partInstrument[kNumChannels];
     juce::MidiMessageCollector m_partCollector[kNumChannels];
     std::atomic<bool>        m_partLoaded[kNumChannels] {};
+    std::atomic<float>       m_partGain[kNumChannels] {};   // per-channel CC7 gain 0..1 (for VST parts)
     std::atomic<int>         m_partInstrumentCount { 0 };
     juce::AudioBuffer<float> m_partScratch;
     juce::MidiBuffer         m_partMidiScratch;

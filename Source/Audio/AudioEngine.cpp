@@ -2,6 +2,8 @@
 #include "AudioBlockPipeline.h"
 #include "MidiChannel.h"
 
+#include <algorithm>
+
 namespace cadenza::audio
 {
 AudioEngine::AudioEngine()
@@ -30,6 +32,7 @@ void AudioEngine::prepareToPlay(int samplesPerBlock, double sampleRate)
     for (int ch = 1; ch < kNumChannels; ++ch) {
         m_partCollector[ch].reset(sampleRate);
         m_partInstrument[ch].prepare(sampleRate, m_currentBlockSize);
+        m_partGain[ch].store(1.0f);
     }
 }
 
@@ -158,6 +161,11 @@ void AudioEngine::programChange(int channel, int program)
 
 void AudioEngine::controlChange(int channel, int cc, int value)
 {
+    // CC7 (volume) doubles as the per-part gain for VST-instrument channels, so
+    // the mixer fader / mute / solo (sent as effective CC7) affects them too.
+    if (cc == 7 && channel > 0 && channel < kNumChannels)
+        m_partGain[channel].store(std::clamp(value, 0, 127) / 127.0f);
+
     if (m_synth) {
         if (auto synthChannel = synthChannelFromCadenzaChannel(channel))
             m_synth->controlChange(*synthChannel, cc, value);
@@ -216,8 +224,9 @@ void AudioEngine::renderPartInstruments(juce::AudioBuffer<float>& view)
         m_partCollector[ch].removeNextBlockOfMessages(m_partMidiScratch, ns);
         m_partInstrument[ch].process(scratch, m_partMidiScratch);   // VST instrument: MIDI -> audio
 
+        const float gain = m_partGain[ch].load();
         for (int c = 0; c < nc; ++c)
-            view.addFrom(c, 0, scratch, c, 0, ns);
+            view.addFrom(c, 0, scratch, c, 0, ns, gain);   // mixer fader / mute / solo
     }
 }
 
