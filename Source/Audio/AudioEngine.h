@@ -71,8 +71,10 @@ public:
     // of the FluidSynth SoundFont. When none are loaded there is zero overhead.
     bool loadPartInstrument(int channel, const std::string& path, std::string& error);
     void clearPartInstrument(int channel);
+    void clearAllPartInstruments();
     bool hasPartInstrument(int channel) const;
     std::string partInstrumentName(int channel) const;
+    std::string partInstrumentPath(int channel) const;   // path used to load (for persistence)
 
     // Block callback for the style engine to push notes on the audio thread.
     using TickCallback = std::function<void(int ticksAdvanced, Transport&)>;
@@ -105,6 +107,7 @@ private:
     std::atomic<int>         m_partInstrumentCount { 0 };
     juce::AudioBuffer<float> m_partScratch;
     juce::MidiBuffer         m_partMidiScratch;
+    std::string              m_partPath[kNumChannels];   // message-thread only
     double m_currentSampleRate = 48000.0;
     int    m_currentBlockSize  = 512;
     juce::MidiBuffer m_effectMidi;   // scratch (empty) MIDI for effect processing

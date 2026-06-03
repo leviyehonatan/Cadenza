@@ -239,6 +239,7 @@ bool AudioEngine::loadPartInstrument(int channel, const std::string& path, std::
         error = err.toStdString();
         return false;
     }
+    m_partPath[channel] = path;
     if (!m_partLoaded[channel].exchange(true))
         m_partInstrumentCount.fetch_add(1);
     return true;
@@ -250,6 +251,19 @@ void AudioEngine::clearPartInstrument(int channel)
     if (m_partLoaded[channel].exchange(false))
         m_partInstrumentCount.fetch_sub(1);
     m_partInstrument[channel].clear();
+    m_partPath[channel].clear();
+}
+
+void AudioEngine::clearAllPartInstruments()
+{
+    for (int ch = 1; ch < kNumChannels; ++ch)
+        clearPartInstrument(ch);
+}
+
+std::string AudioEngine::partInstrumentPath(int channel) const
+{
+    if (channel <= 0 || channel >= kNumChannels) return {};
+    return m_partPath[channel];
 }
 
 bool AudioEngine::hasPartInstrument(int channel) const

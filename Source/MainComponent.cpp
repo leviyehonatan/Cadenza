@@ -787,6 +787,7 @@ void MainComponent::choosePartInstrument(int channel)
                         if (self->m_panel)
                             self->m_panel->setMixerInstrumentName(
                                 channel, juce::String(self->m_audio.partInstrumentName(channel)));
+                        self->persistStyleMix();   // remember this plugin for the style
                     } else {
                         juce::Logger::writeToLog("[Cadenza] Part instrument load failed ch="
                                                  + juce::String(channel) + ": " + juce::String(err));
@@ -1163,6 +1164,7 @@ void MainComponent::buildNativePanel()
                 : juce::String(cadenza::midi::gmInstrumentName(m_mixer.program(channel)));
             m_panel->setMixerInstrumentName(channel, insName);
         }
+        persistStyleMix();   // remember "GM" for this channel
     };
     cb.toggleWeb     = [this] {
         m_webView.setVisible(!m_webView.isVisible());
@@ -1359,6 +1361,9 @@ void MainComponent::updateNativePanelStyle()
     }
 
     // Re-apply the player's saved per-style tweaks on top of the defaults.
+    // Clear any per-part VST instruments from the previous style first; applyStyleMix
+    // reloads the ones saved for this style.
+    m_audio.clearAllPartInstruments();
     if (m_settings)
         applyStyleMix(m_settings->state().lastStyleId);
 
@@ -1400,6 +1405,19 @@ void MainComponent::applyStyleMix(const std::string& styleId)
         if (m.volume  >= 0) m_mixer.setVolume(m.channel, m.volume);
         m_mixer.setMute(m.channel, m.mute);
         m_mixer.setSolo(m.channel, m.solo);
+
+        // Restore a saved per-part VST3 instrument for this channel.
+        if (!m.pluginPath.empty()) {
+            std::string err;
+            if (m_audio.loadPartInstrument(m.channel, m.pluginPath, err)) {
+                if (m_panel)
+                    m_panel->setMixerInstrumentName(
+                        m.channel, juce::String(m_audio.partInstrumentName(m.channel)));
+            } else {
+                juce::Logger::writeToLog("[Cadenza] Saved part instrument missing/failed ch="
+                                         + juce::String(m.channel) + ": " + juce::String(err));
+            }
+        }
     }
 }
 
@@ -1422,6 +1440,7 @@ void MainComponent::persistStyleMix()
         m.volume  = m_mixer.volume(c.channel);
         m.mute    = m_mixer.mute(c.channel);
         m.solo    = m_mixer.solo(c.channel);
+        m.pluginPath = m_audio.partInstrumentPath(c.channel);
         mix.push_back(m);
     }
     m_settings->state().styleMixes[styleId] = std::move(mix);

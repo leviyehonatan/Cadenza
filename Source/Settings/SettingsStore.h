@@ -18,6 +18,7 @@ struct StyleChannelMix
     int  volume  = -1;
     bool mute    = false;
     bool solo    = false;
+    std::string pluginPath;          // VST3 instrument for this channel ("" = GM SoundFont)
 };
 
 struct Settings

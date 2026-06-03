@@ -63,6 +63,7 @@ bool SettingsStore::load()
                 m.volume  = e.get("volume").asInt(-1);
                 m.mute    = e.get("mute").asBool(false);
                 m.solo    = e.get("solo").asBool(false);
+                m.pluginPath = e.get("pluginPath").asString("");
                 channels.push_back(m);
             }
             m_state.styleMixes[styleId] = std::move(channels);
@@ -107,6 +108,8 @@ bool SettingsStore::save() const
             o["volume"]  = J::Value::number(m.volume);
             o["mute"]    = J::Value::boolean(m.mute);
             o["solo"]    = J::Value::boolean(m.solo);
+            if (!m.pluginPath.empty())
+                o["pluginPath"] = J::Value::string(m.pluginPath);
             arr.push_back(J::Value::object(std::move(o)));
         }
         styleMixes[styleId] = J::Value::array(std::move(arr));

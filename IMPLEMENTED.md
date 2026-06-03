@@ -65,8 +65,9 @@ There are two UIs:
   "Load VST3 Instrument…" / "Use GM SoundFont". A channel with a loaded VST3
   instrument routes its notes (thread-safe `MidiMessageCollector`) to that plugin
   and sums its render into the mix; channels without one keep using FluidSynth.
-  Zero overhead when none are loaded. (v1: mixer volume/CC not yet sent to the
-  plugin, and the choice isn't persisted yet — both planned.)
+  Zero overhead when none are loaded. The mixer fader/mute/solo control the plugin
+  (effective CC7 → per-part gain), and the choice **persists per style**
+  (`pluginPath` in `styleMixes`) — reloaded automatically when the style loads.
 - **Per-style mixer memory**: instrument/volume/mute/solo tweaks are saved per
   style id (in settings.json under `styleMixes`) and re-applied on top of the
   style defaults whenever that style is loaded again.
