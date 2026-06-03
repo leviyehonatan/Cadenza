@@ -1215,6 +1215,35 @@ YamahaChannelPolicy fallbackYamahaPolicy(int midiChannel)
     policy.destinationPart = destinationPartNameForChannel(midiChannel);
     policy.destinationType = policy.destinationPart;
     policy.destinationName = policy.destinationPart;
+
+    // When a style has no CASM policy for this channel, pick the NTR/NTT that
+    // matches the standard Yamaha role for the channel so the part follows chords
+    // the way a real arranger would, instead of snapping every note to a chord
+    // tone. NTR/NTT left Unknown (other channels) keep the generic heuristic.
+    switch (midiChannel) {
+        case 9:   // sub rhythm / comp
+        case 12:  // chord 1
+        case 13:  // chord 2
+        case 14:  // pad
+            policy.ntr = YamahaNtr::RootTransposition;
+            policy.ntt = YamahaNtt::Chord;    // chord tones follow the chord; colour tones root-shift
+            break;
+        case 11:  // bass: root-shift the recorded line, preserve its shape
+            policy.ntr = YamahaNtr::RootTransposition;
+            policy.ntt = YamahaNtt::Bypass;
+            break;
+        case 15:  // phrase 1
+        case 16:  // phrase 2
+            policy.ntr = YamahaNtr::RootTransposition;
+            policy.ntt = YamahaNtt::Melody;   // melodic riff: root-shift, keep the melody
+            break;
+        case 10:  // drums: never transpose
+            policy.ntr = YamahaNtr::RootFixed;
+            policy.ntt = YamahaNtt::Bypass;
+            break;
+        default:
+            break;                            // leave Unknown -> generic heuristic
+    }
     return policy;
 }
 

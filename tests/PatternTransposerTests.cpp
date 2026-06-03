@@ -372,6 +372,34 @@ void colorTonePolicyChordModeFitsPlayedQuality()
            "Chord-NTT color E over C major stays E");
 }
 
+void fallbackPolicyWithRolesIsHonoured()
+{
+    // A Fallback policy carrying explicit role-based NTR/NTT (as set by
+    // fallbackYamahaPolicy for standard channels 9..16) must now be honoured
+    // instead of dropping to the generic chord-snap heuristic.
+    YamahaChannelPolicy bass;
+    bass.source = YamahaPolicySource::Fallback;
+    bass.sourceRoot = "C";
+    bass.ntr = YamahaNtr::RootTransposition;
+    bass.ntt = YamahaNtt::Bypass;                    // bass: root-shift the whole line
+
+    auto root  = noteOf(NoteRole::ChordRoot,  36);   // C2
+    auto fifth = noteOf(NoteRole::ChordColor, 43);   // G2, a 5th above
+    // To A minor the folded root delta C->A is -3; the whole line shifts by -3,
+    // preserving the recorded interval (no per-note chord snapping).
+    expect(transposeNote(root,  ctxFor(9, ChordQuality::Minor), &bass).value() == 33,
+           "fallback bass root C2 -> A1 (-3)");
+    expect(transposeNote(fifth, ctxFor(9, ChordQuality::Minor), &bass).value() == 40,
+           "fallback bass 5th also shifts -3 (interval preserved)");
+
+    // A Fallback policy WITHOUT explicit NTR/NTT still uses the heuristic.
+    YamahaChannelPolicy unknown;
+    unknown.source = YamahaPolicySource::Fallback;   // ntr/ntt stay Unknown
+    auto third = noteOf(NoteRole::Chord3, 60);
+    expect(transposeNote(third, ctxFor(0, ChordQuality::Minor), &unknown).value() == 63,
+           "fallback w/o NTR/NTT keeps the heuristic minor third");
+}
+
 void drumsStayAbsoluteWithPolicy()
 {
     auto n = noteOf(NoteRole::Absolute, 36);
@@ -410,6 +438,7 @@ int main()
     colorToneFitsPlayedChordQuality();
     colorToneFitsExoticQualities();
     colorTonePolicyChordModeFitsPlayedQuality();
+    fallbackPolicyWithRolesIsHonoured();
     drumsStayAbsoluteWithPolicy();
 
     if (failures != 0) return EXIT_FAILURE;
