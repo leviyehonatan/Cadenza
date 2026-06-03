@@ -131,6 +131,9 @@ There are two UIs:
   feed-forward bus compressor for gentle glue/density (default -18 dB / 2:1 /
   15 ms / 200 ms / +3 dB makeup). Linked detector keeps the stereo image stable;
   output soft-clipped. Chain: EQ → compressor → (console glue, off) → limiter.
+  A live **"Comp" knob** (0..100%, next to the EQ knobs) maps to threshold +
+  make-up so the player dials glue by ear (0 = bypass); persists in settings
+  (`compAmount`).
 - **Soft limiter** (always on) rounds peaks so a hot full band never hard-clips
   into a crunchy distortion; synth gain leaves headroom for it.
 - **Far more CASM policies are extracted (three fixes).** (1) Ctb2 split-range

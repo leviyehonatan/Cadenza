@@ -23,6 +23,10 @@ public:
     void setParams(double thresholdDb, double ratio,
                    double attackMs, double releaseMs, double makeupDb) noexcept;
 
+    // Single "amount" control (0..100). 0 = bypass; higher = lower threshold +
+    // more make-up = more glue/density. Maps to sensible threshold/makeup.
+    void setAmount(int percent) noexcept;
+
     void process(float* const* channels, int numChannels, int numSamples) noexcept;
 
     // Current gain reduction in dB (>=0), for metering/tests.

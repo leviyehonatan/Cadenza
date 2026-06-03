@@ -40,6 +40,16 @@ void MasterCompressor::setParams(double thresholdDb, double ratio,
     recomputeCoeffs();
 }
 
+void MasterCompressor::setAmount(int percent) noexcept
+{
+    const int pct = std::clamp(percent, 0, 100);
+    if (pct <= 0) { setEnabled(false); return; }
+    setEnabled(true);
+    const double a = pct / 100.0;
+    // threshold -6 dB (light) down to -28 dB (strong); make-up 0..+5 dB.
+    setParams(-6.0 - a * 22.0, 2.0, 15.0, 200.0, a * 5.0);
+}
+
 void MasterCompressor::recomputeCoeffs() noexcept
 {
     m_attackCoeff  = onePoleCoeff(m_attackMs,  m_sampleRate);

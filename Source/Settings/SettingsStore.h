@@ -45,6 +45,7 @@ struct Settings
     int eqLowDb = 4;
     int eqMidDb = 0;
     int eqHighDb = 2;
+    int compAmount = 55;             // master compressor amount 0..100 (0 = off)
 
     // Per-style mixer overrides keyed by style id. Applied on top of the style's
     // own defaults when a style is (re)loaded, so the player's instrument/volume/

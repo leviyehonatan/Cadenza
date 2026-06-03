@@ -54,6 +54,8 @@ public:
 
     // Master 3-band EQ (low/mid/high gain in dB) applied to the final mix.
     void setEqGains(float lowDb, float midDb, float highDb) { m_masterEq.setGains(lowDb, midDb, highDb); }
+    // Master compressor amount 0..100 (0 = bypass).
+    void setCompAmount(int percent) { m_masterComp.setAmount(percent); }
     const char* synthEngineName() const noexcept;
     bool supportsSoundFonts() const noexcept;
 

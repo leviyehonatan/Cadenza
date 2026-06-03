@@ -139,6 +139,15 @@ NativePanel::NativePanel()
     };
     eqLabel(m_eqLowCap, "Low"); eqLabel(m_eqMidCap, "Mid"); eqLabel(m_eqHighCap, "High");
 
+    // Master compressor amount knob (0..100).
+    m_comp.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    m_comp.setRange(0.0, 100.0, 1.0);
+    m_comp.setValue(55.0, juce::dontSendNotification);
+    m_comp.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 46, 16);
+    m_comp.onValueChange = [this] { if (m_cb.onCompChanged) m_cb.onCompChanged((int) m_comp.getValue()); };
+    addAndMakeVisible(m_comp);
+    eqLabel(m_compCap, "Comp");
+
     // --- wire control callbacks (message thread) ---
     m_play.onClick          = [this] { if (m_cb.togglePlay)    m_cb.togglePlay(); };
     m_openStyle.onClick     = [this] { if (m_cb.openStyle)     m_cb.openStyle(); };
@@ -335,6 +344,11 @@ void NativePanel::setEqGains(int lowDb, int midDb, int highDb)
     m_eqHigh.setValue(highDb, juce::dontSendNotification);
 }
 
+void NativePanel::setCompAmount(int percent)
+{
+    m_comp.setValue(percent, juce::dontSendNotification);
+}
+
 void NativePanel::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xff1c1f26));
@@ -437,6 +451,8 @@ void NativePanel::resized()
         placeKnob(m_eqLow, m_eqLowCap);
         placeKnob(m_eqMid, m_eqMidCap);
         placeKnob(m_eqHigh, m_eqHighCap);
+        r.removeFromLeft(14);
+        placeKnob(m_comp, m_compCap);
     }
     area.removeFromTop(gap);
 

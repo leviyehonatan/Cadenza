@@ -43,6 +43,7 @@ public:
         std::function<void(int, int)> onMixerInstrument;      // channel, GM program 0..127
         std::function<void(int)> onPad;                       // pad index 0..3
         std::function<void(int, int, int)> onEqChanged;       // low, mid, high gain in dB
+        std::function<void(int)> onCompChanged;               // master compressor amount 0..100
     };
 
     NativePanel();
@@ -66,6 +67,7 @@ public:
     void setMixerInstrumentName(int channel, const juce::String& instrumentName);
     void setToggleStates(bool arranger, bool chordMemory, bool syncroStop, bool fingeredOnBass);
     void setEqGains(int lowDb, int midDb, int highDb);   // init the EQ knobs (no callback)
+    void setCompAmount(int percent);                     // init the Comp knob (no callback)
 
     void resized() override;
     void paint(juce::Graphics&) override;
@@ -137,8 +139,8 @@ private:
     std::vector<std::unique_ptr<juce::TextButton>> m_pads;
 
     juce::Label  m_eqCaption;
-    juce::Label  m_eqLowCap, m_eqMidCap, m_eqHighCap;
-    juce::Slider m_eqLow, m_eqMid, m_eqHigh;
+    juce::Label  m_eqLowCap, m_eqMidCap, m_eqHighCap, m_compCap;
+    juce::Slider m_eqLow, m_eqMid, m_eqHigh, m_comp;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NativePanel)
 };

@@ -99,6 +99,7 @@ MainComponent::MainComponent()
         m_audio.setEqGains(static_cast<float>(st.eqLowDb),
                            static_cast<float>(st.eqMidDb),
                            static_cast<float>(st.eqHighDb));
+        m_audio.setCompAmount(st.compAmount);
     }
     juce::Logger::writeToLog("[Cadenza] Synth engine: " + juce::String(m_audio.synthEngineName()));
     if (!m_audio.supportsSoundFonts()) {
@@ -1173,6 +1174,14 @@ void MainComponent::buildNativePanel()
         }
     };
 
+    cb.onCompChanged = [this](int amount) {
+        m_audio.setCompAmount(amount);
+        if (m_settings) {
+            m_settings->state().compAmount = amount;
+            saveSettings();
+        }
+    };
+
     cb.nudgeTranspose = [this](int delta) {
         const int t = m_state.setTranspose(m_state.transpose() + delta);
         m_styleEngine.setGlobalTranspose(t);                 // transpose affects style (unchanged)
@@ -1234,6 +1243,7 @@ void MainComponent::buildNativePanel()
     if (m_settings) {
         const auto& st = m_settings->state();
         m_panel->setEqGains(st.eqLowDb, st.eqMidDb, st.eqHighDb);
+        m_panel->setCompAmount(st.compAmount);
     }
     resized();
 }
