@@ -26,9 +26,8 @@ CMakeFiles/
 *.VC.db
 *.VC.opendb
 
-# Dependencies
-lib/JUCE/
-lib/asiosdk/
+# Dependencies (all vendored: JUCE clone, Steinberg ASIO SDK, etc. — never committed)
+lib/
 
 # Logs
 *.log
