@@ -763,6 +763,40 @@ void MainComponent::openSoundFontFileChooser()
         });
 }
 
+void MainComponent::choosePartInstrument(int channel)
+{
+    juce::File vst3Dir("C:\\Program Files\\Common Files\\VST3");
+    m_partPluginChooser = std::make_unique<juce::FileChooser>(
+        "Choose a VST3 instrument for this part",
+        vst3Dir.isDirectory() ? vst3Dir
+                              : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+        "*.vst3");
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    m_partPluginChooser->launchAsync(
+        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+            | juce::FileBrowserComponent::canSelectDirectories,   // .vst3 is a bundle dir on Windows
+        [safe, channel](const juce::FileChooser& chooser) {
+            if (auto* self = safe.getComponent()) {
+                const auto file = chooser.getResult();
+                if (file.exists()) {
+                    std::string err;
+                    if (self->m_audio.loadPartInstrument(channel, file.getFullPathName().toStdString(), err)) {
+                        juce::Logger::writeToLog("[Cadenza] Loaded part instrument ch=" + juce::String(channel)
+                                                 + ": " + juce::String(self->m_audio.partInstrumentName(channel)));
+                        if (self->m_panel)
+                            self->m_panel->setMixerInstrumentName(
+                                channel, juce::String(self->m_audio.partInstrumentName(channel)));
+                    } else {
+                        juce::Logger::writeToLog("[Cadenza] Part instrument load failed ch="
+                                                 + juce::String(channel) + ": " + juce::String(err));
+                    }
+                }
+                self->m_partPluginChooser.reset();
+            }
+        });
+}
+
 bool MainComponent::loadAndApplySoundFontFile(const juce::File& file, bool persist)
 {
     if (!file.existsAsFile() || !isSupportedSoundFontFile(file)) {
@@ -1119,6 +1153,17 @@ void MainComponent::buildNativePanel()
     cb.openStyle     = [this] { openStyleFileChooser(); };
     cb.openSoundFont = [this] { openSoundFontFileChooser(); };
     cb.openAudioSettings = [this] { showAudioSettings(); };
+
+    cb.onLoadInstrumentPlugin = [this](int channel) { choosePartInstrument(channel); };
+    cb.onClearInstrumentPlugin = [this](int channel) {
+        m_audio.clearPartInstrument(channel);   // back to the GM SoundFont
+        if (m_panel) {
+            const juce::String insName = (channel == 10)
+                ? juce::String("Drum Kit")
+                : juce::String(cadenza::midi::gmInstrumentName(m_mixer.program(channel)));
+            m_panel->setMixerInstrumentName(channel, insName);
+        }
+    };
     cb.toggleWeb     = [this] {
         m_webView.setVisible(!m_webView.isVisible());
         resized();

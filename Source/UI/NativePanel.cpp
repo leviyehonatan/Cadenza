@@ -7,9 +7,18 @@ namespace
 {
 // Show the instrument / drum-kit picker for a mixer strip. Drum channel (10) gets
 // GM drum kits; melodic channels get the 128 GM voices grouped by family.
-void showInstrumentMenu(juce::Component* anchor, int channel, std::function<void(int)> onPick)
+constexpr int kMenuLoadPlugin = 900001;
+constexpr int kMenuUseGm       = 900002;
+
+void showInstrumentMenu(juce::Component* anchor, int channel,
+                        std::function<void(int)> onPick,
+                        std::function<void()> onLoadPlugin,
+                        std::function<void()> onClearPlugin)
 {
     juce::PopupMenu menu;
+    menu.addItem(kMenuLoadPlugin, "Load VST3 Instrument...");
+    menu.addItem(kMenuUseGm, "Use GM SoundFont");
+    menu.addSeparator();
     if (channel == 10) {
         static const std::pair<int, const char*> kits[] = {
             { 0, "Standard Kit" }, { 8, "Room Kit" }, { 16, "Power Kit" },
@@ -29,7 +38,11 @@ void showInstrumentMenu(juce::Component* anchor, int channel, std::function<void
         }
     }
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(anchor),
-                       [onPick](int result) { if (result > 0) onPick(result - 1); });
+                       [onPick, onLoadPlugin, onClearPlugin](int result) {
+        if (result == kMenuLoadPlugin) { if (onLoadPlugin)  onLoadPlugin();  return; }
+        if (result == kMenuUseGm)      { if (onClearPlugin) onClearPlugin(); return; }
+        if (result > 0) onPick(result - 1);
+    });
 }
 }
 
@@ -211,9 +224,10 @@ void NativePanel::setMixerChannels(const std::vector<std::pair<int, std::string>
         strip.instrument->onClick = [this, ch] {
             juce::Component* anchor = nullptr;
             for (auto& s : m_mixer) if (s.channel == ch) { anchor = s.instrument.get(); break; }
-            showInstrumentMenu(anchor, ch, [this, ch](int program) {
-                if (m_cb.onMixerInstrument) m_cb.onMixerInstrument(ch, program);
-            });
+            showInstrumentMenu(anchor, ch,
+                [this, ch](int program) { if (m_cb.onMixerInstrument) m_cb.onMixerInstrument(ch, program); },
+                [this, ch] { if (m_cb.onLoadInstrumentPlugin)  m_cb.onLoadInstrumentPlugin(ch); },
+                [this, ch] { if (m_cb.onClearInstrumentPlugin) m_cb.onClearInstrumentPlugin(ch); });
         };
         addAndMakeVisible(*strip.instrument);
 

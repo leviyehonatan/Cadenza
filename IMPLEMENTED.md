@@ -61,6 +61,12 @@ There are two UIs:
 - Section switching (intro / main A–D / fill / break / ending).
 - Per-channel **mixer**: volume, mute, solo, and instrument (program) pick.
   Bass/drums/etc. get sensible role-based default instruments.
+- **Per-part VST3 instruments**: each mixer strip's instrument menu offers
+  "Load VST3 Instrument…" / "Use GM SoundFont". A channel with a loaded VST3
+  instrument routes its notes (thread-safe `MidiMessageCollector`) to that plugin
+  and sums its render into the mix; channels without one keep using FluidSynth.
+  Zero overhead when none are loaded. (v1: mixer volume/CC not yet sent to the
+  plugin, and the choice isn't persisted yet — both planned.)
 - **Per-style mixer memory**: instrument/volume/mute/solo tweaks are saved per
   style id (in settings.json under `styleMixes`) and re-applied on top of the
   style defaults whenever that style is loaded again.

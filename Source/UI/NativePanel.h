@@ -41,6 +41,8 @@ public:
         std::function<void(int, bool)> onMixerMute;           // channel, muted
         std::function<void(int, bool)> onMixerSolo;           // channel, soloed
         std::function<void(int, int)> onMixerInstrument;      // channel, GM program 0..127
+        std::function<void(int)> onLoadInstrumentPlugin;      // channel -> choose+load a VST3 instrument
+        std::function<void(int)> onClearInstrumentPlugin;     // channel -> back to GM SoundFont
         std::function<void(int)> onPad;                       // pad index 0..3
         std::function<void(int, int, int)> onEqChanged;       // low, mid, high gain in dB
         std::function<void(int)> onCompChanged;               // master compressor amount 0..100

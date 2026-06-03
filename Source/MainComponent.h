@@ -53,6 +53,7 @@ private:
     void openSoundFontFileChooser();
     void openSongFileChooser();
     void openPluginFileChooser();
+    void choosePartInstrument(int channel);   // load a VST3 instrument onto a mixer channel
     bool loadAndApplyPluginFile(const juce::File& file);
     void clearMasterEffect();
     void pushPluginStateToWeb();
@@ -104,6 +105,7 @@ private:
     std::unique_ptr<juce::FileChooser> m_soundFontChooser;
     std::unique_ptr<juce::FileChooser> m_songChooser;
     std::unique_ptr<juce::FileChooser> m_pluginChooser;
+    std::unique_ptr<juce::FileChooser> m_partPluginChooser;
 
     std::unique_ptr<cadenza::ui::NativePanel> m_panel;
     juce::WebBrowserComponent m_webView;
