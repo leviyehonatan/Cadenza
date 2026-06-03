@@ -75,6 +75,7 @@ public:
     bool hasPartInstrument(int channel) const;
     std::string partInstrumentName(int channel) const;
     std::string partInstrumentPath(int channel) const;   // path used to load (for persistence)
+    void showPartInstrumentEditor(int channel);           // open the plugin's GUI (message thread)
 
     // Block callback for the style engine to push notes on the audio thread.
     using TickCallback = std::function<void(int ticksAdvanced, Transport&)>;

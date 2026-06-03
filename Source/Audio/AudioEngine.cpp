@@ -276,4 +276,11 @@ std::string AudioEngine::partInstrumentName(int channel) const
     if (channel <= 0 || channel >= kNumChannels) return {};
     return m_partInstrument[channel].name().toStdString();
 }
+
+void AudioEngine::showPartInstrumentEditor(int channel)
+{
+    if (channel <= 0 || channel >= kNumChannels) return;
+    m_partInstrument[channel].showEditor(
+        juce::String(m_partInstrument[channel].name()) + "  (part " + juce::String(channel) + ")");
+}
 }

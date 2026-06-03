@@ -787,6 +787,7 @@ void MainComponent::choosePartInstrument(int channel)
                         if (self->m_panel)
                             self->m_panel->setMixerInstrumentName(
                                 channel, juce::String(self->m_audio.partInstrumentName(channel)));
+                        self->m_audio.showPartInstrumentEditor(channel);   // pop the plugin's GUI
                         self->persistStyleMix();   // remember this plugin for the style
                     } else {
                         juce::Logger::writeToLog("[Cadenza] Part instrument load failed ch="
@@ -1156,6 +1157,7 @@ void MainComponent::buildNativePanel()
     cb.openAudioSettings = [this] { showAudioSettings(); };
 
     cb.onLoadInstrumentPlugin = [this](int channel) { choosePartInstrument(channel); };
+    cb.onOpenInstrumentEditor = [this](int channel) { m_audio.showPartInstrumentEditor(channel); };
     cb.onClearInstrumentPlugin = [this](int channel) {
         m_audio.clearPartInstrument(channel);   // back to the GM SoundFont
         if (m_panel) {

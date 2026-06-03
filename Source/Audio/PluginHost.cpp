@@ -2,9 +2,34 @@
 
 namespace cadenza::audio
 {
+namespace
+{
+// A simple top-level window that owns a plugin's editor. Closing it tells the
+// PluginHost to drop the window (which deletes the editor before the plugin).
+class PluginEditorWindow final : public juce::DocumentWindow
+{
+public:
+    PluginEditorWindow(const juce::String& title, juce::AudioProcessorEditor* editor)
+        : juce::DocumentWindow(title, juce::Colours::darkgrey,
+                               juce::DocumentWindow::closeButton)
+    {
+        setUsingNativeTitleBar(true);
+        setContentOwned(editor, true);          // window owns/deletes the editor
+        setResizable(editor->isResizable(), false);
+        centreWithSize(getWidth(), getHeight());
+        setVisible(true);
+        setAlwaysOnTop(true);
+    }
+
+    void closeButtonPressed() override { if (onClose) onClose(); }
+
+    std::function<void()> onClose;
+};
+}
+
 PluginHost::PluginHost()
 {
-    m_formatManager.addFormat(new juce::VST3PluginFormatHeadless());
+    m_formatManager.addFormat(new juce::VST3PluginFormat());
 }
 
 PluginHost::~PluginHost()
@@ -14,7 +39,7 @@ PluginHost::~PluginHost()
 
 bool PluginHost::loadFromFile(const juce::String& path, juce::String& error)
 {
-    juce::VST3PluginFormatHeadless format;
+    juce::VST3PluginFormat format;
     juce::OwnedArray<juce::PluginDescription> descriptions;
     format.findAllTypesForFile(descriptions, path);
 
@@ -47,8 +72,39 @@ bool PluginHost::loadFromFile(const juce::String& path, juce::String& error)
     return true;
 }
 
+void PluginHost::showEditor(const juce::String& title)
+{
+    if (m_editorWindow != nullptr) {        // already open — just bring it forward
+        m_editorWindow->toFront(true);
+        return;
+    }
+
+    juce::AudioProcessorEditor* editor = nullptr;
+    {
+        const juce::ScopedLock sl(m_lock);  // audio thread only try-locks, so it skips
+        if (m_plugin == nullptr)
+            return;
+        if (!m_plugin->hasEditor())
+            return;                          // headless / GUI-less plugin
+        editor = m_plugin->createEditorIfNeeded();
+    }
+    if (editor == nullptr)
+        return;
+
+    auto* window = new PluginEditorWindow(title.isNotEmpty() ? title : name(), editor);
+    window->onClose = [this] { closeEditor(); };
+    m_editorWindow.reset(window);
+}
+
+void PluginHost::closeEditor()
+{
+    m_editorWindow.reset();   // deletes the editor (notifies the plugin) before the plugin
+}
+
 void PluginHost::clear()
 {
+    closeEditor();            // editor references the plugin: destroy it first
+
     std::unique_ptr<juce::AudioPluginInstance> previous;
     {
         const juce::ScopedLock sl(m_lock);

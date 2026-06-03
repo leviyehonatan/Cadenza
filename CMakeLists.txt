@@ -277,7 +277,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
             cadenza_core
             juce::juce_audio_utils
             juce::juce_audio_devices
-            juce::juce_audio_processors_headless
+            juce::juce_audio_processors
             juce::juce_gui_extra
     )
 
