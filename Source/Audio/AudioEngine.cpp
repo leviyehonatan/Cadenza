@@ -23,6 +23,14 @@ void AudioEngine::prepareToPlay(int samplesPerBlock, double sampleRate)
     m_masterEq.prepare(sampleRate, 2);
     m_masterComp.prepare(sampleRate);
     m_masterGlue.prepare(sampleRate);
+
+    m_currentSampleRate = sampleRate;
+    m_currentBlockSize  = samplesPerBlock > 0 ? samplesPerBlock : 512;
+    m_partScratch.setSize(2, m_currentBlockSize, false, false, true);
+    for (int ch = 1; ch < kNumChannels; ++ch) {
+        m_partCollector[ch].reset(sampleRate);
+        m_partInstrument[ch].prepare(sampleRate, m_currentBlockSize);
+    }
 }
 
 void AudioEngine::releaseResources()
@@ -52,6 +60,7 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         [&] {  // 2) render synth (clears buffer first, then renders queued notes)
             if (m_synth) m_synth->renderBlock(view);
             else view.clear();
+            renderPartInstruments(view);   // sum any per-part VST instruments (no-op if none)
         },
         [&] {  // 3) metronome clicks on top
             m_metronome.renderBlock(view, m_transport);
@@ -113,6 +122,12 @@ void AudioEngine::setBpm(double bpm) { m_transport.setBpm(bpm); }
 
 void AudioEngine::noteOn(int channel, int note, int velocity)
 {
+    if (channel > 0 && channel < kNumChannels && m_partLoaded[channel].load()) {
+        auto m = juce::MidiMessage::noteOn(1, note, (juce::uint8) velocity);
+        m.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
+        m_partCollector[channel].addMessageToQueue(m);   // thread-safe intake
+        return;
+    }
     if (m_synth) {
         if (auto synthChannel = synthChannelFromCadenzaChannel(channel))
             m_synth->noteOn(*synthChannel, note, velocity);
@@ -121,6 +136,12 @@ void AudioEngine::noteOn(int channel, int note, int velocity)
 
 void AudioEngine::noteOff(int channel, int note)
 {
+    if (channel > 0 && channel < kNumChannels && m_partLoaded[channel].load()) {
+        auto m = juce::MidiMessage::noteOff(1, note);
+        m.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
+        m_partCollector[channel].addMessageToQueue(m);
+        return;
+    }
     if (m_synth) {
         if (auto synthChannel = synthChannelFromCadenzaChannel(channel))
             m_synth->noteOff(*synthChannel, note);
@@ -174,4 +195,62 @@ bool AudioEngine::loadMasterEffect(const std::string& path, std::string& error)
 void AudioEngine::clearMasterEffect()        { m_masterEffect.clear(); }
 bool AudioEngine::hasMasterEffect() const    { return m_masterEffect.isLoaded(); }
 std::string AudioEngine::masterEffectName() const { return m_masterEffect.name().toStdString(); }
+
+// ---- per-part VST instruments ----
+
+void AudioEngine::renderPartInstruments(juce::AudioBuffer<float>& view)
+{
+    if (m_partInstrumentCount.load() <= 0)
+        return;   // common case: no per-part instruments — zero work
+
+    const int ns = view.getNumSamples();
+    const int nc = juce::jmin(view.getNumChannels(), 2);
+
+    for (int ch = 1; ch < kNumChannels; ++ch) {
+        if (!m_partLoaded[ch].load())
+            continue;
+
+        juce::AudioBuffer<float> scratch(m_partScratch.getArrayOfWritePointers(), 2, ns);
+        scratch.clear();
+        m_partMidiScratch.clear();
+        m_partCollector[ch].removeNextBlockOfMessages(m_partMidiScratch, ns);
+        m_partInstrument[ch].process(scratch, m_partMidiScratch);   // VST instrument: MIDI -> audio
+
+        for (int c = 0; c < nc; ++c)
+            view.addFrom(c, 0, scratch, c, 0, ns);
+    }
+}
+
+bool AudioEngine::loadPartInstrument(int channel, const std::string& path, std::string& error)
+{
+    if (channel <= 0 || channel >= kNumChannels) { error = "invalid channel"; return false; }
+    m_partInstrument[channel].prepare(m_currentSampleRate, m_currentBlockSize);
+    juce::String err;
+    if (!m_partInstrument[channel].loadFromFile(juce::String(path), err)) {
+        error = err.toStdString();
+        return false;
+    }
+    if (!m_partLoaded[channel].exchange(true))
+        m_partInstrumentCount.fetch_add(1);
+    return true;
+}
+
+void AudioEngine::clearPartInstrument(int channel)
+{
+    if (channel <= 0 || channel >= kNumChannels) return;
+    if (m_partLoaded[channel].exchange(false))
+        m_partInstrumentCount.fetch_sub(1);
+    m_partInstrument[channel].clear();
+}
+
+bool AudioEngine::hasPartInstrument(int channel) const
+{
+    return channel > 0 && channel < kNumChannels && m_partLoaded[channel].load();
+}
+
+std::string AudioEngine::partInstrumentName(int channel) const
+{
+    if (channel <= 0 || channel >= kNumChannels) return {};
+    return m_partInstrument[channel].name().toStdString();
+}
 }

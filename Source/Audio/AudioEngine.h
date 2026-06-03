@@ -15,6 +15,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include <atomic>
 #include <functional>
 #include <memory>
 
@@ -65,6 +66,14 @@ public:
     bool hasMasterEffect() const;
     std::string masterEffectName() const;
 
+    // Per-part VST3 INSTRUMENTS. A channel (1..16) with a loaded instrument has
+    // its notes routed to that plugin (and its audio summed into the mix) instead
+    // of the FluidSynth SoundFont. When none are loaded there is zero overhead.
+    bool loadPartInstrument(int channel, const std::string& path, std::string& error);
+    void clearPartInstrument(int channel);
+    bool hasPartInstrument(int channel) const;
+    std::string partInstrumentName(int channel) const;
+
     // Block callback for the style engine to push notes on the audio thread.
     using TickCallback = std::function<void(int ticksAdvanced, Transport&)>;
     void setOnTick(TickCallback cb) { m_onTick = std::move(cb); }
@@ -85,6 +94,18 @@ private:
     MasterEq         m_masterEq;
     MasterCompressor m_masterComp;
     MasterGlue       m_masterGlue;
+
+    // Per-part instrument hosting (channels 1..16; index 0 unused).
+    static constexpr int kNumChannels = 17;
+    void renderPartInstruments(juce::AudioBuffer<float>& view);   // audio thread
+    PluginHost               m_partInstrument[kNumChannels];
+    juce::MidiMessageCollector m_partCollector[kNumChannels];
+    std::atomic<bool>        m_partLoaded[kNumChannels] {};
+    std::atomic<int>         m_partInstrumentCount { 0 };
+    juce::AudioBuffer<float> m_partScratch;
+    juce::MidiBuffer         m_partMidiScratch;
+    double m_currentSampleRate = 48000.0;
+    int    m_currentBlockSize  = 512;
     juce::MidiBuffer m_effectMidi;   // scratch (empty) MIDI for effect processing
 
     juce::AudioDeviceManager  m_deviceManager;
