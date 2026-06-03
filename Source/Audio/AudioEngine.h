@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "MasterCompressor.h"
 #include "MasterEq.h"
 #include "MasterGlue.h"
 #include "Metronome.h"
@@ -79,8 +80,9 @@ private:
     Metronome m_metronome;
     Transport m_transport;
     PluginHost m_masterEffect;
-    MasterEq   m_masterEq;
-    MasterGlue m_masterGlue;
+    MasterEq         m_masterEq;
+    MasterCompressor m_masterComp;
+    MasterGlue       m_masterGlue;
     juce::MidiBuffer m_effectMidi;   // scratch (empty) MIDI for effect processing
 
     juce::AudioDeviceManager  m_deviceManager;

@@ -127,6 +127,10 @@ There are two UIs:
   default** — in the live chain it interacted badly (broke playback), so it's kept
   for a future, properly-verified pass. Master chain order when on:
   EQ → console glue → soft limiter → optional VST3 insert.
+- **Master compressor** (`MasterCompressor`, own DSP, unit-tested): stereo-linked
+  feed-forward bus compressor for gentle glue/density (default -18 dB / 2:1 /
+  15 ms / 200 ms / +3 dB makeup). Linked detector keeps the stereo image stable;
+  output soft-clipped. Chain: EQ → compressor → (console glue, off) → limiter.
 - **Soft limiter** (always on) rounds peaks so a hot full band never hard-clips
   into a crunchy distortion; synth gain leaves headroom for it.
 - **Far more CASM policies are extracted (three fixes).** (1) Ctb2 split-range

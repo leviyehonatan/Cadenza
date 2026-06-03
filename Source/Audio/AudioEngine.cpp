@@ -21,6 +21,7 @@ void AudioEngine::prepareToPlay(int samplesPerBlock, double sampleRate)
     if (m_synth) m_synth->prepare(sampleRate, 0);
     m_masterEffect.prepare(sampleRate, samplesPerBlock > 0 ? samplesPerBlock : 512);
     m_masterEq.prepare(sampleRate, 2);
+    m_masterComp.prepare(sampleRate);
     m_masterGlue.prepare(sampleRate);
 }
 
@@ -60,6 +61,7 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             const int nc = view.getNumChannels();
             const int ns = view.getNumSamples();
             m_masterEq.process(chans, nc, ns);     // tone + tame peaks
+            m_masterComp.process(chans, nc, ns);   // gentle master glue/density
             m_masterGlue.process(chans, nc, ns);   // console glue (no-op: disabled by default)
             m_effectMidi.clear();
             m_masterEffect.process(view, m_effectMidi);
