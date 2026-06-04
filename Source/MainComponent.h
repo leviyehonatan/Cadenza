@@ -4,7 +4,6 @@
 #include "BridgeRouter.h"
 #include "Audio/AudioEngine.h"
 #include "Audio/MixerModel.h"
-#include "Audio/VoiceMap.h"
 #include "Midi/MidiRouter.h"
 #include "Arranger/StyleEngine.h"
 #include "Arranger/Style.h"
@@ -66,8 +65,6 @@ private:
     void applyMixerState();          // send each channel's effective volume (CC7) to the synth
     void applyStyleMix(const std::string& styleId);  // apply saved per-style mixer overrides
     void persistStyleMix();          // save current mixer strips for the current style
-    void reconcilePartInstruments(); // load/keep/clear per-part VST3 voices for the current style
-    void loadVoiceMap();             // load the optional voicemap.json (Giglad-style voicing)
     void exportPlaybackDiagnostics();
     bool loadAndApplyStyleFile(const juce::File& file);
     bool loadAndApplySongFile(const juce::File& file);
@@ -100,7 +97,6 @@ private:
     int  m_lastSongBar = -1;
 
     cadenza::audio::MixerModel m_mixer;
-    cadenza::audio::VoiceMap   m_voiceMap;   // optional GM-program -> VST3 voice map
     int m_midiRescanTicks = 0;   // timer ticks since last MIDI hot-plug rescan
 
     // Persistent settings.

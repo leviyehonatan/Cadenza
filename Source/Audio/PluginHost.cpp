@@ -115,30 +115,6 @@ void PluginHost::clear()
         previous->releaseResources();
 }
 
-void PluginHost::applyStateBase64(const juce::String& base64)
-{
-    if (base64.isEmpty())
-        return;
-    juce::MemoryOutputStream decoded;
-    if (!juce::Base64::convertFromBase64(decoded, base64))
-        return;
-    const juce::ScopedLock sl(m_lock);
-    if (m_plugin != nullptr)
-        m_plugin->setStateInformation(decoded.getData(), static_cast<int>(decoded.getDataSize()));
-}
-
-juce::String PluginHost::captureStateBase64() const
-{
-    juce::MemoryBlock block;
-    {
-        const juce::ScopedLock sl(m_lock);
-        if (m_plugin == nullptr)
-            return {};
-        m_plugin->getStateInformation(block);
-    }
-    return juce::Base64::toBase64(block.getData(), block.getSize());
-}
-
 void PluginHost::prepare(double sampleRate, int blockSize)
 {
     m_sampleRate = sampleRate;

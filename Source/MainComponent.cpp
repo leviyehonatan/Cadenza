@@ -124,7 +124,6 @@ MainComponent::MainComponent()
 
     // Try optional factory content (fail silently if absent — no SF2 yet etc.).
     tryLoadFactorySoundFont();
-    loadVoiceMap();   // optional voicemap.json -> per-part VST voices on style load
     if (!tryLoadLastStyle())
         tryLoadFactoryStyle();
 
@@ -1380,12 +1379,30 @@ void MainComponent::updateNativePanelStyle()
         m_mixer.setProgram(s.channel, s.program);
     }
 
-    // Re-apply the player's saved per-style program/volume/mute/solo tweaks on top
-    // of the style defaults, then reconcile the per-part VST3 voices (explicit
-    // per-style choice, else the optional voice map, else the GM SoundFont).
-    if (m_settings)
+    // Re-apply the player's saved per-style tweaks on top of the defaults.
+    // Reconcile per-part VST instruments instead of tearing every plugin down and
+    // rebuilding it on each style switch (slow, froze the UI): keep a channel's
+    // plugin if the new style wants the same one, and only clear ones that change
+    // or are no longer used. applyStyleMix then loads the rest (loadPartInstrument
+    // is idempotent, so unchanged plugins are a no-op).
+    if (m_settings) {
+        std::map<int, std::string> desired;
+        const auto it = m_settings->state().styleMixes.find(m_settings->state().lastStyleId);
+        if (it != m_settings->state().styleMixes.end())
+            for (const auto& m : it->second)
+                if (!m.pluginPath.empty())
+                    desired[m.channel] = m.pluginPath;
+
+        for (int ch = 1; ch <= 16; ++ch) {
+            const auto d = desired.find(ch);
+            const std::string want = (d == desired.end()) ? std::string() : d->second;
+            if (m_audio.partInstrumentPath(ch) != want)
+                m_audio.clearPartInstrument(ch);   // changed or no longer wanted
+        }
         applyStyleMix(m_settings->state().lastStyleId);
-    reconcilePartInstruments();
+    } else {
+        m_audio.clearAllPartInstruments();
+    }
 
     m_panel->setMixerChannels(labels);
     for (int ch : channels) {
@@ -1417,9 +1434,7 @@ void MainComponent::applyStyleMix(const std::string& styleId)
     if (it == m_settings->state().styleMixes.end())
         return;
 
-    // Apply the player's saved tweaks on top of the style's own defaults. Per-part
-    // VST3 instruments are loaded separately in reconcilePartInstruments(), which
-    // runs after this so the final program numbers are available for voice-mapping.
+    // Apply the player's saved tweaks on top of the style's own defaults.
     for (const auto& m : it->second) {
         if (!m_mixer.has(m.channel))
             continue;   // only channels this style actually uses
@@ -1427,70 +1442,20 @@ void MainComponent::applyStyleMix(const std::string& styleId)
         if (m.volume  >= 0) m_mixer.setVolume(m.channel, m.volume);
         m_mixer.setMute(m.channel, m.mute);
         m_mixer.setSolo(m.channel, m.solo);
-    }
-}
 
-void MainComponent::reconcilePartInstruments()
-{
-    // Decide each channel's VST3 voice: an explicit per-style plugin choice wins;
-    // otherwise the optional voice map maps the part's GM program (or the drum
-    // kit) to a VST3 voice; channels with neither stay on the GM SoundFont.
-    struct Voice { std::string path; std::string state; };
-    std::map<int, Voice> desired;
-
-    if (m_settings) {
-        const auto it = m_settings->state().styleMixes.find(m_settings->state().lastStyleId);
-        if (it != m_settings->state().styleMixes.end())
-            for (const auto& m : it->second)
-                if (!m.pluginPath.empty() && m_mixer.has(m.channel))
-                    desired[m.channel] = { m.pluginPath, std::string() };
-    }
-
-    if (!m_voiceMap.empty()) {
-        for (const auto& c : m_mixer.channels()) {
-            if (desired.count(c.channel))
-                continue;   // explicit per-style choice already set
-            const cadenza::audio::VoiceMapEntry* e =
-                (c.channel == 10) ? m_voiceMap.forDrums()
-                                  : m_voiceMap.forProgram(m_mixer.program(c.channel));
-            if (e != nullptr)
-                desired[c.channel] = { e->pluginPath, e->presetState };
+        // Restore a saved per-part VST3 instrument for this channel.
+        if (!m.pluginPath.empty()) {
+            std::string err;
+            if (m_audio.loadPartInstrument(m.channel, m.pluginPath, err)) {
+                if (m_panel)
+                    m_panel->setMixerInstrumentName(
+                        m.channel, juce::String(m_audio.partInstrumentName(m.channel)));
+            } else {
+                juce::Logger::writeToLog("[Cadenza] Saved part instrument missing/failed ch="
+                                         + juce::String(m.channel) + ": " + juce::String(err));
+            }
         }
     }
-
-    // Clear channels whose plugin changed or is no longer wanted...
-    for (int ch = 1; ch <= 16; ++ch) {
-        const auto d = desired.find(ch);
-        const std::string want = (d == desired.end()) ? std::string() : d->second.path;
-        if (m_audio.partInstrumentPath(ch) != want)
-            m_audio.clearPartInstrument(ch);
-    }
-    // ...then load the desired ones (loadPartInstrument is idempotent, so an
-    // unchanged plugin is a no-op rather than a costly rebuild).
-    for (const auto& [ch, v] : desired) {
-        std::string err;
-        if (m_audio.loadPartInstrument(ch, v.path, err, v.state)) {
-            if (m_panel)
-                m_panel->setMixerInstrumentName(ch, juce::String(m_audio.partInstrumentName(ch)));
-        } else {
-            juce::Logger::writeToLog("[Cadenza] Voice load failed ch=" + juce::String(ch)
-                                     + " " + juce::String(v.path) + ": " + juce::String(err));
-        }
-    }
-}
-
-void MainComponent::loadVoiceMap()
-{
-    // Optional voicemap.json next to settings.json (user-editable). Empty/missing
-    // => no mapping, so playback is byte-identical to the GM-SoundFont behaviour.
-    const auto file = juce::File(juce::String(settingsFilePath()))
-                          .getParentDirectory().getChildFile("voicemap.json");
-    if (!file.existsAsFile())
-        return;
-    if (m_voiceMap.loadFromJson(file.loadFileAsString().toStdString()))
-        juce::Logger::writeToLog("[Cadenza] Voice map loaded: " + file.getFullPathName());
-    else
-        juce::Logger::writeToLog("[Cadenza] Voice map failed to parse: " + file.getFullPathName());
 }
 
 void MainComponent::persistStyleMix()

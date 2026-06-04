@@ -30,11 +30,6 @@ public:
     bool        isLoaded() const;
     juce::String name() const;
 
-    // Restore / capture the plugin's own state (its preset) as a Base64 string.
-    // applyStateBase64 is a no-op if nothing is loaded or the string is empty.
-    void         applyStateBase64(const juce::String& base64);   // message thread
-    juce::String captureStateBase64() const;                     // message thread
-
     // Open (or focus) the plugin's own editor GUI in a resizable window.
     // No-op if nothing is loaded or the plugin has no editor. Message thread only.
     void showEditor(const juce::String& title);
