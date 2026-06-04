@@ -57,7 +57,7 @@ private:
     bool loadAndApplyPluginFile(const juce::File& file);
     void clearMasterEffect();
     void pushPluginStateToWeb();
-    void applyMelodyProgram();   // (re)assert the live melody voice's GM program
+    void applyRightHand();       // (re)assert Right 1/2/3 enable + program + volume + octave
 
     // Native control panel (source of truth for live performance controls).
     void buildNativePanel();

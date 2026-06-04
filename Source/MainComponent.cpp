@@ -130,7 +130,7 @@ MainComponent::MainComponent()
     // Assert the live melody voice program on its dedicated channel AFTER the
     // style's channel setup, so the right-hand voice isn't left on the style's
     // channel-1 program.
-    applyMelodyProgram();
+    applyRightHand();
 
     // Wire web bridge messages -> audio / style / midi.
     installBridgeHooks();
@@ -548,11 +548,14 @@ void MainComponent::installBridgeHooks()
         saveSettings();
     };
     hooks.onBankMemoryChanged = [this](const std::string& bankName) {
-        // The "Bank Memory" voice picker selects the live right-hand melody
-        // instrument: map the voice name to a GM program on the melody channel.
-        if (m_settings)
-            m_settings->state().melodyProgram = cadenza::midi::gmProgramForBankName(bankName);
-        applyMelodyProgram();
+        // The "Bank Memory" voice picker selects Right 1's instrument: map the
+        // voice name to a GM program for the primary right-hand layer.
+        if (m_settings) {
+            const int program = cadenza::midi::gmProgramForBankName(bankName);
+            m_settings->state().melodyProgram = program;
+            m_settings->state().rightLayers[0].program = program;
+        }
+        applyRightHand();
         saveSettings();
     };
     hooks.onStyleMemoryChanged = [this](int slot) {
@@ -1130,13 +1133,24 @@ void MainComponent::pushPluginStateToWeb()
               + "window.JuceBridge.onPluginChanged(" + jsString(name) + ");");
 }
 
-void MainComponent::applyMelodyProgram()
+void MainComponent::applyRightHand()
 {
-    const int program = m_settings ? m_settings->state().melodyProgram : 0;
-    const int channel = m_midi.melodyChannel();
-    m_audio.programChange(channel, program);
-    juce::Logger::writeToLog("[Cadenza] live melody program=" + juce::String(program)
-                             + " on Cadenza channel=" + juce::String(channel));
+    if (!m_settings) return;
+    const auto& st = m_settings->state();
+    for (int i = 0; i < cadenza::midi::MidiRouter::kNumRightLayers; ++i) {
+        const auto& layer = st.rightLayers[i];
+        m_midi.setRightLayerEnabled(i, layer.enabled);
+        m_midi.setRightLayerOctave(i, layer.octave);
+        const int channel = m_midi.rightLayerChannel(i);
+        m_audio.programChange(channel, layer.program);                 // GM voice
+        m_audio.controlChange(channel, 7 /*CC7 volume*/, layer.volume);
+        juce::Logger::writeToLog("[Cadenza] Right " + juce::String(i + 1)
+            + (layer.enabled ? " ON" : " off")
+            + " program=" + juce::String(layer.program)
+            + " vol=" + juce::String(layer.volume)
+            + " oct=" + juce::String(layer.octave)
+            + " ch=" + juce::String(channel));
+    }
 }
 
 void MainComponent::buildNativePanel()
@@ -1334,24 +1348,30 @@ void MainComponent::updateNativePanelStyle()
     m_panel->setSections(pairs);
     m_panel->setActiveSection(juce::String(m_styleEngine.currentSection()));
 
-    // --- Pick a live-melody channel the style does NOT use, so the right-hand
-    //     voice never collides with (or overrides the program of) a style part. ---
+    // --- Assign a free channel to each Right 1/2/3 layer that the style does NOT
+    //     use, so the right-hand voices never collide with style parts. ---
     bool used[17] = { false };
     for (const auto& section : style->sections)
         for (const auto& part : section.parts)
             if (part.midiChannel >= 1 && part.midiChannel <= 16)
                 used[part.midiChannel] = true;
-    int melodyChannel = m_midi.melodyChannel();
-    for (int c = 1; c <= 16; ++c) {
-        if (c == 10) continue;            // never the GM drum channel
-        if (!used[c]) { melodyChannel = c; break; }
+
+    constexpr int kLayers = cadenza::midi::MidiRouter::kNumRightLayers;
+    int layerChannel[kLayers];
+    int lastFree = 1;
+    for (int i = 0; i < kLayers; ++i) {
+        int ch = lastFree;
+        for (int c = lastFree; c <= 16; ++c) {
+            if (c == 10 || used[c]) continue;   // skip the drum channel and style parts
+            ch = c; break;
+        }
+        used[ch] = true;                        // don't hand the same channel to two layers
+        layerChannel[i] = ch;
+        lastFree = ch + 1;
+        m_midi.setRightLayerChannel(i, ch);
     }
-    if (m_midi.melodyChannel() != melodyChannel) {
-        juce::Logger::writeToLog("[Cadenza] live melody channel moved to " + juce::String(melodyChannel)
-                                 + " to avoid style channels");
-        m_midi.setMelodyChannel(melodyChannel);
-    }
-    applyMelodyProgram();   // assert melody program on the (possibly new) channel
+    const int melodyChannel = layerChannel[0];   // Right 1 = the primary "Melody" strip
+    applyRightHand();   // assert each layer's enable/program/volume/octave on its channel
 
     // --- Mixer: live melody + one strip per distinct style channel ---
     struct StripSeed { int channel; int volume; int program; };

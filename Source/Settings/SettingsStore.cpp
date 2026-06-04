@@ -48,6 +48,24 @@ bool SettingsStore::load()
     m_state.compAmount = root.get("compAmount").asInt(m_state.compAmount);
     m_state.splitNote  = root.get("splitNote").asInt(m_state.splitNote);
 
+    // Right 1/2/3 layered voices. If absent (older settings), migrate Right 1 from
+    // melodyProgram so behaviour is unchanged.
+    const auto& rightLayers = root.get("rightLayers");
+    if (rightLayers.isArray()) {
+        const auto& arr = rightLayers.asArray();
+        for (int i = 0; i < 3 && i < static_cast<int>(arr.size()); ++i) {
+            const auto& e = arr[static_cast<std::size_t>(i)];
+            if (!e.isObject()) continue;
+            m_state.rightLayers[i].enabled = e.get("enabled").asBool(m_state.rightLayers[i].enabled);
+            m_state.rightLayers[i].program = e.get("program").asInt(m_state.rightLayers[i].program);
+            m_state.rightLayers[i].volume  = e.get("volume").asInt(m_state.rightLayers[i].volume);
+            m_state.rightLayers[i].octave  = e.get("octave").asInt(m_state.rightLayers[i].octave);
+        }
+    } else {
+        m_state.rightLayers[0].program = m_state.melodyProgram;
+    }
+    m_state.melodyProgram = m_state.rightLayers[0].program;   // keep the mirror in sync
+
     m_state.styleMixes.clear();
     const auto& styleMixes = root.get("styleMixes");
     if (styleMixes.isObject()) {
@@ -99,6 +117,17 @@ bool SettingsStore::save() const
     root["eqHighDb"] = J::Value::number(m_state.eqHighDb);
     root["compAmount"] = J::Value::number(m_state.compAmount);
     root["splitNote"]  = J::Value::number(m_state.splitNote);
+
+    J::Array rightLayers;
+    for (const auto& layer : m_state.rightLayers) {
+        J::Object o;
+        o["enabled"] = J::Value::boolean(layer.enabled);
+        o["program"] = J::Value::number(layer.program);
+        o["volume"]  = J::Value::number(layer.volume);
+        o["octave"]  = J::Value::number(layer.octave);
+        rightLayers.push_back(J::Value::object(std::move(o)));
+    }
+    root["rightLayers"] = J::Value::array(std::move(rightLayers));
 
     J::Object styleMixes;
     for (const auto& [styleId, channels] : m_state.styleMixes) {

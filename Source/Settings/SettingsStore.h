@@ -21,12 +21,25 @@ struct StyleChannelMix
     std::string pluginPath;          // VST3 instrument for this channel ("" = GM SoundFont)
 };
 
+// One of the three layered right-hand voices (Right 1 / Right 2 / Right 3).
+struct RightLayer
+{
+    bool enabled = false;   // does this layer sound?
+    int  program = 0;       // GM program 0..127
+    int  volume  = 100;     // 0..127
+    int  octave  = 0;       // octave shift, e.g. -2..+2
+};
+
 struct Settings
 {
     int bpm = 120;
     int transpose = 0;
     int octave = 0;
-    int melodyProgram = 0;           // GM program for the live right-hand melody voice
+    int melodyProgram = 0;           // GM program for Right 1 (mirrors rightLayers[0].program)
+
+    // The three layered right-hand voices. Right 1 is on by default and tracks
+    // melodyProgram / the bank-memory buttons; Right 2 and 3 are off until enabled.
+    RightLayer rightLayers[3] = { { true, 0, 100, 0 }, { false, 0, 100, 0 }, { false, 0, 100, 0 } };
     std::string key = "C";
     std::string bankMemory = "Piano";
     int styleMemory = 1;
