@@ -227,8 +227,12 @@ std::string saveStyleToJson(const Style& style, bool pretty)
 
 LoadResult loadStyleFromFile(const std::string& path)
 {
+    // Every Yamaha SFF container extension holds the same SMF+CASM payload and
+    // must go through the .sty parser; only .cstyle is Cadenza's own JSON format.
+    // .sty user, .prs preset (Genos), .sst session, .fps free play, .bcs.
     const auto ext = lowercase(std::filesystem::path(path).extension().string());
-    if (ext == ".sty")
+    if (ext == ".sty" || ext == ".prs" || ext == ".sst"
+        || ext == ".fps" || ext == ".bcs")
         return loadStyleFromStyFile(path);
 
     std::ifstream in(path, std::ios::binary);
