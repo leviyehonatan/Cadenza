@@ -119,7 +119,26 @@ public:
     void programChange(int channel, int program) override {
         if (!m_synth) return;
         const std::lock_guard<std::mutex> lock(m_mutex);
+
+        // Select the requested voice (the channel's bank was set by prior CC0/CC32).
         fluid_synth_program_change(m_synth, channel, program);
+
+        // Cross-SoundFont fallback: if the requested bank/program isn't in the
+        // loaded SoundFont, FluidSynth leaves the channel with no preset. So a
+        // Yamaha/XG style voice plays correctly on an XG SoundFont (e.g. Timbres
+        // of Heaven) but still gets a sensible voice on a plain GM SoundFont.
+        if (fluid_synth_get_channel_preset(m_synth, channel) != nullptr)
+            return;   // voice found in this SoundFont — nothing to do
+
+        if (channel == kDrumChannel) {
+            // Keep percussion: fall back to the standard kit on the drum bank
+            // (never bank 0 here — that would turn drums into a melodic voice).
+            fluid_synth_program_change(m_synth, channel, 0);
+        } else {
+            // Fall back to the GM bank for this program number.
+            fluid_synth_bank_select(m_synth, channel, 0);
+            fluid_synth_program_change(m_synth, channel, program);
+        }
     }
 
     void controlChange(int channel, int controller, int value) override {
@@ -149,6 +168,11 @@ public:
     bool supportsSoundFonts() const noexcept override { return true; }
 
 private:
+    // GM percussion channel (0-based). FluidSynth synth.drums-channel.active makes
+    // synth channel 9 the drum channel; voice fallback must not move it off the
+    // percussion bank.
+    static constexpr int kDrumChannel = 9;
+
     fluid_settings_t* m_settings = nullptr;
     fluid_synth_t*    m_synth = nullptr;
     int               m_soundFontId = -1;
