@@ -30,6 +30,27 @@ struct RightLayer
     int  octave  = 0;       // octave shift, e.g. -2..+2
 };
 
+// A registration: a one-button snapshot of the live performance setup, recalled
+// instantly. Empty (used == false) slots are shown but do nothing on recall.
+struct Registration
+{
+    bool used = false;
+    std::string name;            // optional label
+    std::string styleId;         // style to (re)load on recall ("" = leave current)
+    std::string stylePath;       // file path fallback when the id can't be resolved
+    int bpm = 120;
+    int transpose = 0;
+    int octave = 0;
+    int splitNote = 60;
+    int eqLowDb = 0, eqMidDb = 0, eqHighDb = 0, compAmount = 0;
+    std::string bankMemory;      // Right 1 voice name
+    bool chordArrangerEnabled = true;
+    bool chordMemoryEnabled = false;
+    bool chordBassEnabled = false;
+    bool syncroStopOnRelease = true;
+    RightLayer rightLayers[3];
+};
+
 struct Settings
 {
     int bpm = 120;
@@ -40,6 +61,10 @@ struct Settings
     // The three layered right-hand voices. Right 1 is on by default and tracks
     // melodyProgram / the bank-memory buttons; Right 2 and 3 are off until enabled.
     RightLayer rightLayers[3] = { { true, 0, 100, 0 }, { false, 0, 100, 0 }, { false, 0, 100, 0 } };
+
+    // One-button performance snapshots (registrations).
+    static constexpr int kNumRegistrations = 4;
+    Registration registrations[kNumRegistrations];
     std::string key = "C";
     std::string bankMemory = "Piano";
     int styleMemory = 1;

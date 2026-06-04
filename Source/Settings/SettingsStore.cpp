@@ -66,6 +66,46 @@ bool SettingsStore::load()
     }
     m_state.melodyProgram = m_state.rightLayers[0].program;   // keep the mirror in sync
 
+    // Registrations (performance snapshots).
+    const auto& regs = root.get("registrations");
+    if (regs.isArray()) {
+        const auto& arr = regs.asArray();
+        for (int i = 0; i < Settings::kNumRegistrations && i < static_cast<int>(arr.size()); ++i) {
+            const auto& e = arr[static_cast<std::size_t>(i)];
+            if (!e.isObject()) continue;
+            auto& r = m_state.registrations[i];
+            r.used      = e.get("used").asBool(false);
+            r.name      = e.get("name").asString(r.name);
+            r.styleId   = e.get("styleId").asString(r.styleId);
+            r.stylePath = e.get("stylePath").asString(r.stylePath);
+            r.bpm       = e.get("bpm").asInt(r.bpm);
+            r.transpose = e.get("transpose").asInt(r.transpose);
+            r.octave    = e.get("octave").asInt(r.octave);
+            r.splitNote = e.get("splitNote").asInt(r.splitNote);
+            r.eqLowDb   = e.get("eqLowDb").asInt(r.eqLowDb);
+            r.eqMidDb   = e.get("eqMidDb").asInt(r.eqMidDb);
+            r.eqHighDb  = e.get("eqHighDb").asInt(r.eqHighDb);
+            r.compAmount = e.get("compAmount").asInt(r.compAmount);
+            r.bankMemory = e.get("bankMemory").asString(r.bankMemory);
+            r.chordArrangerEnabled = e.get("chordArrangerEnabled").asBool(r.chordArrangerEnabled);
+            r.chordMemoryEnabled   = e.get("chordMemoryEnabled").asBool(r.chordMemoryEnabled);
+            r.chordBassEnabled     = e.get("chordBassEnabled").asBool(r.chordBassEnabled);
+            r.syncroStopOnRelease  = e.get("syncroStopOnRelease").asBool(r.syncroStopOnRelease);
+            const auto& layers = e.get("rightLayers");
+            if (layers.isArray()) {
+                const auto& la = layers.asArray();
+                for (int j = 0; j < 3 && j < static_cast<int>(la.size()); ++j) {
+                    const auto& le = la[static_cast<std::size_t>(j)];
+                    if (!le.isObject()) continue;
+                    r.rightLayers[j].enabled = le.get("enabled").asBool(r.rightLayers[j].enabled);
+                    r.rightLayers[j].program = le.get("program").asInt(r.rightLayers[j].program);
+                    r.rightLayers[j].volume  = le.get("volume").asInt(r.rightLayers[j].volume);
+                    r.rightLayers[j].octave  = le.get("octave").asInt(r.rightLayers[j].octave);
+                }
+            }
+        }
+    }
+
     m_state.styleMixes.clear();
     const auto& styleMixes = root.get("styleMixes");
     if (styleMixes.isObject()) {
@@ -128,6 +168,44 @@ bool SettingsStore::save() const
         rightLayers.push_back(J::Value::object(std::move(o)));
     }
     root["rightLayers"] = J::Value::array(std::move(rightLayers));
+
+    auto serializeLayers = [](const RightLayer (&layers)[3]) {
+        J::Array arr;
+        for (const auto& layer : layers) {
+            J::Object o;
+            o["enabled"] = J::Value::boolean(layer.enabled);
+            o["program"] = J::Value::number(layer.program);
+            o["volume"]  = J::Value::number(layer.volume);
+            o["octave"]  = J::Value::number(layer.octave);
+            arr.push_back(J::Value::object(std::move(o)));
+        }
+        return arr;
+    };
+
+    J::Array regs;
+    for (const auto& r : m_state.registrations) {
+        J::Object o;
+        o["used"]      = J::Value::boolean(r.used);
+        o["name"]      = J::Value::string(r.name);
+        o["styleId"]   = J::Value::string(r.styleId);
+        o["stylePath"] = J::Value::string(r.stylePath);
+        o["bpm"]       = J::Value::number(r.bpm);
+        o["transpose"] = J::Value::number(r.transpose);
+        o["octave"]    = J::Value::number(r.octave);
+        o["splitNote"] = J::Value::number(r.splitNote);
+        o["eqLowDb"]   = J::Value::number(r.eqLowDb);
+        o["eqMidDb"]   = J::Value::number(r.eqMidDb);
+        o["eqHighDb"]  = J::Value::number(r.eqHighDb);
+        o["compAmount"] = J::Value::number(r.compAmount);
+        o["bankMemory"] = J::Value::string(r.bankMemory);
+        o["chordArrangerEnabled"] = J::Value::boolean(r.chordArrangerEnabled);
+        o["chordMemoryEnabled"]   = J::Value::boolean(r.chordMemoryEnabled);
+        o["chordBassEnabled"]     = J::Value::boolean(r.chordBassEnabled);
+        o["syncroStopOnRelease"]  = J::Value::boolean(r.syncroStopOnRelease);
+        o["rightLayers"] = J::Value::array(serializeLayers(r.rightLayers));
+        regs.push_back(J::Value::object(std::move(o)));
+    }
+    root["registrations"] = J::Value::array(std::move(regs));
 
     J::Object styleMixes;
     for (const auto& [styleId, channels] : m_state.styleMixes) {

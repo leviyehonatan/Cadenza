@@ -1296,6 +1296,9 @@ void MainComponent::buildNativePanel()
         saveSettings();
     };
 
+    cb.onStoreRegistration  = [this](int slot) { captureRegistration(slot); };
+    cb.onRecallRegistration = [this](int slot) { recallRegistration(slot); };
+
     cb.nudgeTranspose = [this](int delta) {
         const int t = m_state.setTranspose(m_state.transpose() + delta);
         m_styleEngine.setGlobalTranspose(t);                 // transpose affects style
@@ -1364,6 +1367,8 @@ void MainComponent::buildNativePanel()
             const auto& L = st.rightLayers[i];
             m_panel->setRightVoice(i, L.enabled, L.program, L.volume, L.octave);
         }
+        for (int i = 0; i < cadenza::settings::Settings::kNumRegistrations; ++i)
+            m_panel->setRegistrationUsed(i, st.registrations[i].used);
     }
     resized();
 }
@@ -1542,6 +1547,86 @@ void MainComponent::persistStyleMix()
     }
     m_settings->state().styleMixes[styleId] = std::move(mix);
     saveSettings();
+}
+
+void MainComponent::captureRegistration(int slot)
+{
+    if (!m_settings || slot < 0 || slot >= cadenza::settings::Settings::kNumRegistrations)
+        return;
+    auto& st = m_settings->state();
+    auto& r = st.registrations[slot];
+    r.used      = true;
+    r.styleId   = st.lastStyleId;
+    r.stylePath = st.lastStylePath;
+    r.bpm       = m_state.bpm();
+    r.transpose = m_state.transpose();
+    r.octave    = m_state.octave();
+    r.splitNote = st.splitNote;
+    r.eqLowDb = st.eqLowDb; r.eqMidDb = st.eqMidDb; r.eqHighDb = st.eqHighDb; r.compAmount = st.compAmount;
+    r.bankMemory = st.bankMemory;
+    r.chordArrangerEnabled = m_state.chordSourceEnabled("arranger");
+    r.chordMemoryEnabled   = m_state.chordSourceEnabled("memory");
+    r.chordBassEnabled     = m_state.chordSourceEnabled("bass");
+    r.syncroStopOnRelease  = m_state.syncroStopOnRelease();
+    for (int i = 0; i < 3; ++i) r.rightLayers[i] = st.rightLayers[i];
+    saveSettings();
+    if (m_panel) m_panel->setRegistrationUsed(slot, true);
+    juce::Logger::writeToLog("[Cadenza] Stored registration " + juce::String(slot + 1));
+}
+
+void MainComponent::recallRegistration(int slot)
+{
+    if (!m_settings || slot < 0 || slot >= cadenza::settings::Settings::kNumRegistrations)
+        return;
+    const auto r = m_settings->state().registrations[slot];   // copy: loading a style mutates settings
+    if (!r.used)
+        return;
+
+    // 1) Reload the style first (resets tempo/mix), then override below.
+    if (!r.styleId.empty()) {
+        if (!selectStyleById(r.styleId) && !r.stylePath.empty())
+            loadAndApplyStyleFile(juce::File(juce::String(r.stylePath)));
+    }
+
+    auto& st = m_settings->state();
+    // 2) Tempo / transpose / octave.
+    m_audio.setBpm(m_state.setBpm(r.bpm));
+    m_state.setTranspose(r.transpose);
+    m_state.setOctave(r.octave);
+    // 3) Split / EQ / compressor.
+    st.splitNote = r.splitNote;
+    m_midi.setSplitPoint(r.splitNote);
+    st.eqLowDb = r.eqLowDb; st.eqMidDb = r.eqMidDb; st.eqHighDb = r.eqHighDb; st.compAmount = r.compAmount;
+    m_audio.setEqGains(static_cast<float>(r.eqLowDb), static_cast<float>(r.eqMidDb), static_cast<float>(r.eqHighDb));
+    m_audio.setCompAmount(r.compAmount);
+    // 4) Chord modes.
+    m_state.setChordSourceEnabled("arranger", r.chordArrangerEnabled);
+    m_state.setChordSourceEnabled("memory",   r.chordMemoryEnabled);
+    m_state.setChordSourceEnabled("bass",     r.chordBassEnabled);
+    m_state.setSyncroStopOnRelease(r.syncroStopOnRelease);
+    // 5) Right-hand layers + bank.
+    st.bankMemory = r.bankMemory;
+    for (int i = 0; i < 3; ++i) st.rightLayers[i] = r.rightLayers[i];
+    st.melodyProgram = st.rightLayers[0].program;
+
+    applyRuntimeStateToEngines();
+    applyRightHand();
+
+    if (m_panel) {
+        m_panel->setBpm(r.bpm);
+        m_panel->setTranspose(r.transpose);
+        m_panel->setOctave(r.octave);
+        m_panel->setSplitPoint(r.splitNote);
+        m_panel->setEqGains(r.eqLowDb, r.eqMidDb, r.eqHighDb);
+        m_panel->setCompAmount(r.compAmount);
+        m_panel->setToggleStates(r.chordArrangerEnabled, r.chordMemoryEnabled,
+                                 r.syncroStopOnRelease, r.chordBassEnabled);
+        for (int i = 0; i < 3; ++i)
+            m_panel->setRightVoice(i, r.rightLayers[i].enabled, r.rightLayers[i].program,
+                                   r.rightLayers[i].volume, r.rightLayers[i].octave);
+    }
+    saveSettings();
+    juce::Logger::writeToLog("[Cadenza] Recalled registration " + juce::String(slot + 1));
 }
 
 void MainComponent::handleBridgePayload(const juce::var& payload)

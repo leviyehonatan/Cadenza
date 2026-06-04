@@ -65,6 +65,8 @@ private:
     void applyMixerState();          // send each channel's effective volume (CC7) to the synth
     void applyStyleMix(const std::string& styleId);  // apply saved per-style mixer overrides
     void persistStyleMix();          // save current mixer strips for the current style
+    void captureRegistration(int slot);   // snapshot the live setup into a registration
+    void recallRegistration(int slot);    // restore a saved registration
     void exportPlaybackDiagnostics();
     bool loadAndApplyStyleFile(const juce::File& file);
     bool loadAndApplySongFile(const juce::File& file);

@@ -249,6 +249,32 @@ NativePanel::NativePanel()
         addAndMakeVisible(*s.octUp);
     }
 
+    // --- Registrations (one-button performance snapshots) ---
+    styleCaption(m_regCaption, "Registrations");
+    addAndMakeVisible(m_regCaption);
+    m_regStore.setClickingTogglesState(true);
+    m_regStore.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xffb04a4a));
+    m_regStore.setTooltip("Arm, then click a slot to save the current setup");
+    m_regStore.onClick = [this] { m_regStoreArmed = m_regStore.getToggleState(); };
+    addAndMakeVisible(m_regStore);
+    for (int i = 0; i < 4; ++i) {
+        auto b = std::make_unique<juce::TextButton>(juce::String(i + 1));
+        b->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff333a47));
+        const int slot = i;
+        b->onClick = [this, slot] {
+            if (m_regStoreArmed) {
+                if (m_cb.onStoreRegistration) m_cb.onStoreRegistration(slot);
+                m_regStoreArmed = false;
+                m_regStore.setToggleState(false, juce::dontSendNotification);
+            } else if (m_cb.onRecallRegistration) {
+                m_cb.onRecallRegistration(slot);
+            }
+        };
+        addAndMakeVisible(*b);
+        m_regButtons.push_back(std::move(b));
+        m_regUsed.push_back(false);
+    }
+
     // --- wire control callbacks (message thread) ---
     m_play.onClick          = [this] { if (m_cb.togglePlay)    m_cb.togglePlay(); };
     m_openStyle.onClick     = [this] { if (m_cb.openStyle)     m_cb.openStyle(); };
@@ -464,6 +490,16 @@ void NativePanel::setRightVoice(int layer, bool enabled, int program, int volume
     if (s.octVal)     s.octVal->setText(juce::String(octave), juce::dontSendNotification);
 }
 
+void NativePanel::setRegistrationUsed(int slot, bool used)
+{
+    if (slot < 0 || slot >= static_cast<int>(m_regButtons.size()))
+        return;
+    m_regUsed[static_cast<std::size_t>(slot)] = used;
+    m_regButtons[static_cast<std::size_t>(slot)]->setColour(
+        juce::TextButton::buttonColourId,
+        used ? juce::Colour(0xff2f6b3a) : juce::Colour(0xff333a47));
+}
+
 void NativePanel::setSplitPoint(int midiNote)
 {
     m_splitNote = midiNote;
@@ -603,6 +639,17 @@ void NativePanel::resized()
             if (s.octUp)   s.octUp->setBounds(oct.removeFromLeft(26));
             if (s.volume)  s.volume->setBounds(bot.reduced(2, 4));
         }
+    }
+    area.removeFromTop(gap);
+
+    // Registrations row: Store toggle + numbered slot buttons.
+    {
+        m_regCaption.setBounds(area.removeFromTop(18));
+        auto r = area.removeFromTop(28);
+        m_regStore.setBounds(r.removeFromLeft(70));
+        r.removeFromLeft(10);
+        const int bw = 44, bgap = 6;
+        for (auto& b : m_regButtons) { b->setBounds(r.removeFromLeft(bw)); r.removeFromLeft(bgap); }
     }
     area.removeFromTop(gap);
 

@@ -140,6 +140,8 @@ public:
         std::function<void(int, int)>  onRightInstrument;     // layer, GM program 0..127
         std::function<void(int, int)>  onRightVolume;         // layer, volume 0..127
         std::function<void(int, int)>  onRightOctave;         // layer, octave delta -1/+1
+        std::function<void(int)> onRecallRegistration;        // slot -> recall
+        std::function<void(int)> onStoreRegistration;         // slot -> store current setup
     };
 
     NativePanel();
@@ -167,6 +169,8 @@ public:
     void setSplitPoint(int midiNote);                    // init the split marker (no callback)
     // Init a Right 1/2/3 voice strip (no callback): layer 0..2.
     void setRightVoice(int layer, bool enabled, int program, int volume, int octave);
+    // Mark a registration slot as used (saved) so its button is highlighted.
+    void setRegistrationUsed(int slot, bool used);
 
     void resized() override;
     void paint(juce::Graphics&) override;
@@ -254,6 +258,13 @@ private:
         std::unique_ptr<juce::Label>        octVal;
     };
     std::array<RightVoiceStrip, 3> m_rightVoices;
+
+    // Registrations (one-button performance snapshots).
+    juce::Label        m_regCaption;
+    juce::TextButton   m_regStore { "Store" };   // armed = next slot click saves
+    bool               m_regStoreArmed = false;
+    std::vector<std::unique_ptr<juce::TextButton>> m_regButtons;
+    std::vector<bool>  m_regUsed;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NativePanel)
 };
