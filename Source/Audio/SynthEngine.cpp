@@ -120,22 +120,28 @@ public:
         if (!m_synth) return;
         const std::lock_guard<std::mutex> lock(m_mutex);
 
-        // Select the requested voice (the channel's bank was set by prior CC0/CC32).
+        if (channel == kDrumChannel) {
+            // Drum kits live on the GM percussion bank (128) in GM/GS/XG
+            // SoundFonts. Yamaha/Genos styles move this channel to the XG drum
+            // bank (CC0=127), which most SoundFonts don't have, so the kit lookup
+            // fails and drums garble. Force bank 128 where kits actually are, then
+            // select the kit, falling back to the standard kit if the style's kit
+            // number isn't present.
+            fluid_synth_bank_select(m_synth, channel, kDrumBank);
+            fluid_synth_program_change(m_synth, channel, program);
+            if (fluid_synth_get_channel_preset(m_synth, channel) == nullptr)
+                fluid_synth_program_change(m_synth, channel, 0);   // standard kit
+            return;
+        }
+
+        // Melodic: select the requested voice (bank set by prior CC0/CC32).
         fluid_synth_program_change(m_synth, channel, program);
 
         // Cross-SoundFont fallback: if the requested bank/program isn't in the
         // loaded SoundFont, FluidSynth leaves the channel with no preset. So a
         // Yamaha/XG style voice plays correctly on an XG SoundFont (e.g. Timbres
-        // of Heaven) but still gets a sensible voice on a plain GM SoundFont.
-        if (fluid_synth_get_channel_preset(m_synth, channel) != nullptr)
-            return;   // voice found in this SoundFont — nothing to do
-
-        if (channel == kDrumChannel) {
-            // Keep percussion: fall back to the standard kit on the drum bank
-            // (never bank 0 here — that would turn drums into a melodic voice).
-            fluid_synth_program_change(m_synth, channel, 0);
-        } else {
-            // Fall back to the GM bank for this program number.
+        // of Heaven) but still gets a sensible GM voice on a plain GM SoundFont.
+        if (fluid_synth_get_channel_preset(m_synth, channel) == nullptr) {
             fluid_synth_bank_select(m_synth, channel, 0);
             fluid_synth_program_change(m_synth, channel, program);
         }
@@ -172,6 +178,8 @@ private:
     // synth channel 9 the drum channel; voice fallback must not move it off the
     // percussion bank.
     static constexpr int kDrumChannel = 9;
+    // GM/GS/XG SoundFonts keep every drum kit on bank 128 (the percussion bank).
+    static constexpr int kDrumBank = 128;
 
     fluid_settings_t* m_settings = nullptr;
     fluid_synth_t*    m_synth = nullptr;
