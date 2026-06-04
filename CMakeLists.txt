@@ -38,6 +38,7 @@ add_library(cadenza_core STATIC
     Source/Midi/ChordRecognizer.cpp
     Source/Midi/ArrangerMidiRouter.cpp
     Source/Midi/LiveMelodyVoice.cpp
+    Source/Midi/RightHand.cpp
     Source/Midi/GmInstruments.cpp
     Source/Arranger/Style.cpp
     Source/Arranger/StyleLoader.cpp
@@ -84,6 +85,7 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_runtime_tests     tests/RuntimePlaybackTests.cpp)
     cadenza_add_test(cadenza_octave_tests      tests/OctaveRoutingTests.cpp)
     cadenza_add_test(cadenza_livemelody_tests  tests/LiveMelodyVoiceTests.cpp)
+    cadenza_add_test(cadenza_righthand_tests    tests/RightHandTests.cpp)
     cadenza_add_test(cadenza_sections_tests     tests/SectionButtonsTests.cpp)
     cadenza_add_test(cadenza_mixer_tests        tests/MixerModelTests.cpp)
     cadenza_add_test(cadenza_compressor_tests   tests/MasterCompressorTests.cpp)
