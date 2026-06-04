@@ -222,30 +222,19 @@ void StyleEngine::applySectionChannelSetup(const Section& section)
             }
         }
 
-        // Translate Yamaha voicing to what a GM SoundFont can actually play.
-        // Yamaha styles select voices/kits via banks a GM SoundFont doesn't have
-        // (e.g. drum bank 127, MegaVoice/Super Articulation banks), which makes
-        // FluidSynth fail the preset lookup -> wrong or missing sounds.
-        if (setup.percussion) {
-            // The drum channel is already a percussion channel (FluidSynth
-            // synth.drums-channel.active). Never send the Yamaha drum bank (127)
-            // or it leaves the GM percussion bank. Keep a standard GM kit unless
-            // the program is already a real GM kit slot.
-            int kit = setup.program.value_or(0);
-            switch (kit) {
-                case 0: case 8: case 16: case 24: case 25:
-                case 32: case 40: case 48: break;            // a real GM kit slot
-                default: kit = 0;                            // unknown Yamaha kit -> Standard
-            }
-            m_engine.programChange(setup.cadenzaChannel, kit);
-        } else {
-            // Melodic: a GM SoundFont only has bank 0, and Yamaha voice banks
-            // won't resolve. Force GM bank 0 so the program (which follows GM
-            // order) lands on the closest GM instrument.
-            m_engine.controlChange(setup.cadenzaChannel, 0, 0);    // bank MSB 0
-            m_engine.controlChange(setup.cadenzaChannel, 32, 0);   // bank LSB 0
-            m_engine.programChange(setup.cadenzaChannel, setup.program.value_or(0));
-        }
+        // Send the style's voicing as recorded. Yamaha styles are XG-based, so an
+        // XG/GS SoundFont (e.g. Timbres of Heaven) resolves the original bank+
+        // program to the intended voice/drum kit; with a plain GM SoundFont
+        // FluidSynth falls back to the GM voice for that program. (An earlier
+        // attempt to force GM bank 0 here threw away the richer XG voices.)
+        if (setup.bankMsb)
+            m_engine.controlChange(setup.cadenzaChannel, 0, *setup.bankMsb);
+        if (setup.bankLsb)
+            m_engine.controlChange(setup.cadenzaChannel, 32, *setup.bankLsb);
+        if (setup.program)
+            m_engine.programChange(setup.cadenzaChannel, *setup.program);
+        else if (setup.percussion)
+            m_engine.programChange(setup.cadenzaChannel, 0);
         if (setup.volume)
             m_engine.controlChange(setup.cadenzaChannel, 7, *setup.volume);
         if (setup.pan)
