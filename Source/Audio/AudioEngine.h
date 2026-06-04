@@ -69,7 +69,8 @@ public:
     // Per-part VST3 INSTRUMENTS. A channel (1..16) with a loaded instrument has
     // its notes routed to that plugin (and its audio summed into the mix) instead
     // of the FluidSynth SoundFont. When none are loaded there is zero overhead.
-    bool loadPartInstrument(int channel, const std::string& path, std::string& error);
+    bool loadPartInstrument(int channel, const std::string& path, std::string& error,
+                            const std::string& presetStateBase64 = {});
     void clearPartInstrument(int channel);
     void clearAllPartInstruments();
     bool hasPartInstrument(int channel) const;

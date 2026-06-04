@@ -230,7 +230,8 @@ void AudioEngine::renderPartInstruments(juce::AudioBuffer<float>& view)
     }
 }
 
-bool AudioEngine::loadPartInstrument(int channel, const std::string& path, std::string& error)
+bool AudioEngine::loadPartInstrument(int channel, const std::string& path, std::string& error,
+                                    const std::string& presetStateBase64)
 {
     if (channel <= 0 || channel >= kNumChannels) { error = "invalid channel"; return false; }
     // Idempotent: if this exact plugin is already loaded on this channel, keep it.
@@ -244,6 +245,8 @@ bool AudioEngine::loadPartInstrument(int channel, const std::string& path, std::
         error = err.toStdString();
         return false;
     }
+    if (!presetStateBase64.empty())
+        m_partInstrument[channel].applyStateBase64(juce::String(presetStateBase64));
     m_partPath[channel] = path;
     if (!m_partLoaded[channel].exchange(true))
         m_partInstrumentCount.fetch_add(1);
