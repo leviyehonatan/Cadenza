@@ -233,6 +233,11 @@ void AudioEngine::renderPartInstruments(juce::AudioBuffer<float>& view)
 bool AudioEngine::loadPartInstrument(int channel, const std::string& path, std::string& error)
 {
     if (channel <= 0 || channel >= kNumChannels) { error = "invalid channel"; return false; }
+    // Idempotent: if this exact plugin is already loaded on this channel, keep it.
+    // This makes re-applying a style (or switching to one that reuses the same
+    // plugin) cheap instead of tearing the instance down and rebuilding it.
+    if (m_partLoaded[channel].load() && m_partPath[channel] == path)
+        return true;
     m_partInstrument[channel].prepare(m_currentSampleRate, m_currentBlockSize);
     juce::String err;
     if (!m_partInstrument[channel].loadFromFile(juce::String(path), err)) {

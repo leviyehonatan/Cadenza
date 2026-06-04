@@ -1380,11 +1380,29 @@ void MainComponent::updateNativePanelStyle()
     }
 
     // Re-apply the player's saved per-style tweaks on top of the defaults.
-    // Clear any per-part VST instruments from the previous style first; applyStyleMix
-    // reloads the ones saved for this style.
-    m_audio.clearAllPartInstruments();
-    if (m_settings)
+    // Reconcile per-part VST instruments instead of tearing every plugin down and
+    // rebuilding it on each style switch (slow, froze the UI): keep a channel's
+    // plugin if the new style wants the same one, and only clear ones that change
+    // or are no longer used. applyStyleMix then loads the rest (loadPartInstrument
+    // is idempotent, so unchanged plugins are a no-op).
+    if (m_settings) {
+        std::map<int, std::string> desired;
+        const auto it = m_settings->state().styleMixes.find(m_settings->state().lastStyleId);
+        if (it != m_settings->state().styleMixes.end())
+            for (const auto& m : it->second)
+                if (!m.pluginPath.empty())
+                    desired[m.channel] = m.pluginPath;
+
+        for (int ch = 1; ch <= 16; ++ch) {
+            const auto d = desired.find(ch);
+            const std::string want = (d == desired.end()) ? std::string() : d->second;
+            if (m_audio.partInstrumentPath(ch) != want)
+                m_audio.clearPartInstrument(ch);   // changed or no longer wanted
+        }
         applyStyleMix(m_settings->state().lastStyleId);
+    } else {
+        m_audio.clearAllPartInstruments();
+    }
 
     m_panel->setMixerChannels(labels);
     for (int ch : channels) {
