@@ -9,6 +9,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <string>
@@ -134,6 +135,11 @@ public:
         std::function<void(int, int, int)> onEqChanged;       // low, mid, high gain in dB
         std::function<void(int)> onCompChanged;               // master compressor amount 0..100
         std::function<void(int)> onSplitChanged;              // keyboard split MIDI note
+        // Right 1/2/3 layered right-hand voices (layer 0..2).
+        std::function<void(int, bool)> onRightEnabled;        // layer, on/off
+        std::function<void(int, int)>  onRightInstrument;     // layer, GM program 0..127
+        std::function<void(int, int)>  onRightVolume;         // layer, volume 0..127
+        std::function<void(int, int)>  onRightOctave;         // layer, octave delta -1/+1
     };
 
     NativePanel();
@@ -159,6 +165,8 @@ public:
     void setEqGains(int lowDb, int midDb, int highDb);   // init the EQ knobs (no callback)
     void setCompAmount(int percent);                     // init the Comp knob (no callback)
     void setSplitPoint(int midiNote);                    // init the split marker (no callback)
+    // Init a Right 1/2/3 voice strip (no callback): layer 0..2.
+    void setRightVoice(int layer, bool enabled, int program, int volume, int octave);
 
     void resized() override;
     void paint(juce::Graphics&) override;
@@ -234,6 +242,18 @@ private:
     juce::Label  m_eqCaption;
     juce::Label  m_eqLowCap, m_eqMidCap, m_eqHighCap, m_compCap;
     juce::Slider m_eqLow, m_eqMid, m_eqHigh, m_comp;
+
+    // Right 1/2/3 layered right-hand voices.
+    juce::Label m_rightCaption;
+    struct RightVoiceStrip
+    {
+        std::unique_ptr<juce::ToggleButton> enable;     // "Right N"
+        std::unique_ptr<juce::TextButton>   instrument; // GM voice picker
+        std::unique_ptr<juce::Slider>       volume;     // 0..127
+        std::unique_ptr<juce::TextButton>   octDown, octUp;
+        std::unique_ptr<juce::Label>        octVal;
+    };
+    std::array<RightVoiceStrip, 3> m_rightVoices;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NativePanel)
 };

@@ -1260,6 +1260,42 @@ void MainComponent::buildNativePanel()
         }
     };
 
+    // --- Right 1/2/3 layered right-hand voices ---
+    cb.onRightEnabled = [this](int layer, bool on) {
+        if (!m_settings || layer < 0 || layer >= 3) return;
+        m_settings->state().rightLayers[layer].enabled = on;
+        applyRightHand();
+        if (!on) m_audio.allNotesOff();   // release anything the layer was holding
+        saveSettings();
+    };
+    cb.onRightInstrument = [this](int layer, int program) {
+        if (!m_settings || layer < 0 || layer >= 3) return;
+        m_settings->state().rightLayers[layer].program = program;
+        if (layer == 0) m_settings->state().melodyProgram = program;   // keep the mirror in sync
+        applyRightHand();
+        if (m_panel)
+            m_panel->setRightVoice(layer,
+                                   m_settings->state().rightLayers[layer].enabled, program,
+                                   m_settings->state().rightLayers[layer].volume,
+                                   m_settings->state().rightLayers[layer].octave);
+        saveSettings();
+    };
+    cb.onRightVolume = [this](int layer, int volume) {
+        if (!m_settings || layer < 0 || layer >= 3) return;
+        m_settings->state().rightLayers[layer].volume = volume;
+        applyRightHand();
+        saveSettings();
+    };
+    cb.onRightOctave = [this](int layer, int delta) {
+        if (!m_settings || layer < 0 || layer >= 3) return;
+        auto& L = m_settings->state().rightLayers[layer];
+        L.octave = juce::jlimit(-2, 2, L.octave + delta);
+        applyRightHand();
+        if (m_panel)
+            m_panel->setRightVoice(layer, L.enabled, L.program, L.volume, L.octave);
+        saveSettings();
+    };
+
     cb.nudgeTranspose = [this](int delta) {
         const int t = m_state.setTranspose(m_state.transpose() + delta);
         m_styleEngine.setGlobalTranspose(t);                 // transpose affects style
@@ -1324,6 +1360,10 @@ void MainComponent::buildNativePanel()
         m_panel->setEqGains(st.eqLowDb, st.eqMidDb, st.eqHighDb);
         m_panel->setCompAmount(st.compAmount);
         m_panel->setSplitPoint(st.splitNote);
+        for (int i = 0; i < 3; ++i) {
+            const auto& L = st.rightLayers[i];
+            m_panel->setRightVoice(i, L.enabled, L.program, L.volume, L.octave);
+        }
     }
     resized();
 }

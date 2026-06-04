@@ -53,6 +53,23 @@ void showInstrumentMenu(juce::Component* anchor, int channel,
         if (result > 0) onPick(result - 1);
     });
 }
+
+// GM-only voice picker (no VST options) for the Right 1/2/3 layers: 16 families
+// of 8 programs each.
+void showGmVoiceMenu(juce::Component* anchor, std::function<void(int)> onPick)
+{
+    juce::PopupMenu menu;
+    for (int fam = 0; fam < 16; ++fam) {
+        juce::PopupMenu sub;
+        for (int i = 0; i < 8; ++i) {
+            const int prog = fam * 8 + i;
+            sub.addItem(prog + 1, juce::String(prog) + "  " + cadenza::midi::gmInstrumentName(prog));
+        }
+        menu.addSubMenu(cadenza::midi::gmFamilyName(fam), sub);
+    }
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(anchor),
+                       [onPick](int result) { if (result > 0 && onPick) onPick(result - 1); });
+}
 }
 
 NativePanel::NativePanel()
@@ -182,6 +199,55 @@ NativePanel::NativePanel()
     m_comp.onValueChange = [this] { if (m_cb.onCompChanged) m_cb.onCompChanged((int) m_comp.getValue()); };
     addAndMakeVisible(m_comp);
     eqLabel(m_compCap, "Comp");
+
+    // --- Right 1/2/3 layered right-hand voices ---
+    styleCaption(m_rightCaption, "Right Voices");
+    addAndMakeVisible(m_rightCaption);
+    for (int i = 0; i < 3; ++i) {
+        auto& s = m_rightVoices[static_cast<std::size_t>(i)];
+        const int layer = i;
+
+        s.enable = std::make_unique<juce::ToggleButton>("Right " + juce::String(i + 1));
+        s.enable->setColour(juce::ToggleButton::textColourId, juce::Colours::lightgrey);
+        s.enable->onClick = [this, layer] {
+            if (m_cb.onRightEnabled)
+                m_cb.onRightEnabled(layer, m_rightVoices[static_cast<std::size_t>(layer)].enable->getToggleState());
+        };
+        addAndMakeVisible(*s.enable);
+
+        s.instrument = std::make_unique<juce::TextButton>("Grand Piano");
+        s.instrument->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff333a47));
+        s.instrument->onClick = [this, layer] {
+            showGmVoiceMenu(m_rightVoices[static_cast<std::size_t>(layer)].instrument.get(),
+                            [this, layer](int program) {
+                                if (m_cb.onRightInstrument) m_cb.onRightInstrument(layer, program);
+                            });
+        };
+        addAndMakeVisible(*s.instrument);
+
+        s.volume = std::make_unique<juce::Slider>(juce::Slider::LinearHorizontal, juce::Slider::NoTextBox);
+        s.volume->setRange(0.0, 127.0, 1.0);
+        s.volume->setValue(100.0, juce::dontSendNotification);
+        s.volume->onValueChange = [this, layer] {
+            if (m_cb.onRightVolume)
+                m_cb.onRightVolume(layer, static_cast<int>(m_rightVoices[static_cast<std::size_t>(layer)].volume->getValue()));
+        };
+        addAndMakeVisible(*s.volume);
+
+        s.octDown = std::make_unique<juce::TextButton>("-");
+        s.octDown->onClick = [this, layer] { if (m_cb.onRightOctave) m_cb.onRightOctave(layer, -1); };
+        addAndMakeVisible(*s.octDown);
+
+        s.octVal = std::make_unique<juce::Label>();
+        s.octVal->setText("0", juce::dontSendNotification);
+        s.octVal->setJustificationType(juce::Justification::centred);
+        s.octVal->setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        addAndMakeVisible(*s.octVal);
+
+        s.octUp = std::make_unique<juce::TextButton>("+");
+        s.octUp->onClick = [this, layer] { if (m_cb.onRightOctave) m_cb.onRightOctave(layer, +1); };
+        addAndMakeVisible(*s.octUp);
+    }
 
     // --- wire control callbacks (message thread) ---
     m_play.onClick          = [this] { if (m_cb.togglePlay)    m_cb.togglePlay(); };
@@ -387,6 +453,17 @@ void NativePanel::setCompAmount(int percent)
     m_comp.setValue(percent, juce::dontSendNotification);
 }
 
+void NativePanel::setRightVoice(int layer, bool enabled, int program, int volume, int octave)
+{
+    if (layer < 0 || layer >= 3)
+        return;
+    auto& s = m_rightVoices[static_cast<std::size_t>(layer)];
+    if (s.enable)     s.enable->setToggleState(enabled, juce::dontSendNotification);
+    if (s.instrument) s.instrument->setButtonText(juce::String(cadenza::midi::gmInstrumentName(program)));
+    if (s.volume)     s.volume->setValue(volume, juce::dontSendNotification);
+    if (s.octVal)     s.octVal->setText(juce::String(octave), juce::dontSendNotification);
+}
+
 void NativePanel::setSplitPoint(int midiNote)
 {
     m_splitNote = midiNote;
@@ -501,6 +578,31 @@ void NativePanel::resized()
         placeKnob(m_eqHigh, m_eqHighCap);
         r.removeFromLeft(14);
         placeKnob(m_comp, m_compCap);
+    }
+    area.removeFromTop(gap);
+
+    // Right Voices row: three layer columns (enable + instrument / volume + octave).
+    {
+        m_rightCaption.setBounds(area.removeFromTop(18));
+        auto r = area.removeFromTop(50);
+        const int colGap = 10;
+        const int colW = (r.getWidth() - 2 * colGap) / 3;
+        for (int i = 0; i < 3; ++i) {
+            auto& s = m_rightVoices[static_cast<std::size_t>(i)];
+            auto col = r.removeFromLeft(colW);
+            if (i < 2) r.removeFromLeft(colGap);
+
+            auto top = col.removeFromTop(24);
+            if (s.enable)     s.enable->setBounds(top.removeFromLeft(88));
+            if (s.instrument) s.instrument->setBounds(top.reduced(2, 1));
+
+            auto bot = col;
+            auto oct = bot.removeFromRight(94);
+            if (s.octDown) s.octDown->setBounds(oct.removeFromLeft(26));
+            if (s.octVal)  s.octVal->setBounds(oct.removeFromLeft(40));
+            if (s.octUp)   s.octUp->setBounds(oct.removeFromLeft(26));
+            if (s.volume)  s.volume->setBounds(bot.reduced(2, 4));
+        }
     }
     area.removeFromTop(gap);
 
