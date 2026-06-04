@@ -493,19 +493,19 @@ void MainComponent::installBridgeHooks()
         // On-screen piano notes go through the SAME live melody voice as hardware
         // keys, so the Octave control and the melody instrument apply to right-hand
         // (above-split) notes. Below-split notes sound directly (unshifted).
-        if (const auto ev = m_midi.handleVirtualMelodyNote(note, velocity, true)) {
-            m_audio.noteOn(ev->channel, ev->note, ev->velocity);
-            juce::Logger::writeToLog(juce::String("[Cadenza] UI melody on orig=") + juce::String(note)
-                + " shifted=" + juce::String(ev->note)
-                + " ch=" + juce::String(ev->channel)
-                + " octave=" + juce::String(m_midi.liveOctave()));
+        const auto events = m_midi.handleVirtualMelodyNote(note, velocity, true);
+        if (!events.empty()) {
+            for (const auto& ev : events)            // one per enabled Right layer
+                m_audio.noteOn(ev.channel, ev.note, ev.velocity);
         } else {
             m_audio.noteOn(channel == 0 ? 1 : channel, note, velocity);
         }
     };
     hooks.onNoteOff = [this](int channel, int note) {
-        if (const auto ev = m_midi.handleVirtualMelodyNote(note, 0, false)) {
-            m_audio.noteOff(ev->channel, ev->note);
+        const auto events = m_midi.handleVirtualMelodyNote(note, 0, false);
+        if (!events.empty()) {
+            for (const auto& ev : events)
+                m_audio.noteOff(ev.channel, ev.note);
         } else {
             m_audio.noteOff(channel == 0 ? 1 : channel, note);
         }

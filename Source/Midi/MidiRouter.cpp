@@ -58,7 +58,7 @@ void MidiRouter::closeInputs()
     m_inputs.clear();
     m_openIdentifiers.clear();
     m_router.reset();
-    m_melody.reset();
+    m_rightHand.reset();
 }
 
 int MidiRouter::refreshInputs()
@@ -110,17 +110,17 @@ void MidiRouter::setChordDetectionMode(arranger::ChordDetectionMode mode) noexce
     m_router.setChordDetectionMode(mode);
 }
 
-std::optional<LiveMelodyEvent> MidiRouter::handleVirtualMelodyNote(int note, int velocity, bool isOn)
+std::vector<LiveMelodyEvent> MidiRouter::handleVirtualMelodyNote(int note, int velocity, bool isOn)
 {
     std::lock_guard<std::mutex> lk(m_publishMutex);
     const bool melodyZone = note >= static_cast<int>(m_router.state().splitNote);
-    return m_melody.handleNote(note, velocity, isOn, melodyZone);
+    return m_rightHand.handleNote(note, velocity, isOn, melodyZone);
 }
 
 void MidiRouter::injectNote(int note, int velocity, bool isOn)
 {
     std::optional<arranger::ChordRecognitionResult> currentChord;
-    std::optional<LiveMelodyEvent> ev;
+    std::vector<LiveMelodyEvent> events;
     std::string chordName;
     bool chordChanged = false;
     {
@@ -132,14 +132,15 @@ void MidiRouter::injectNote(int note, int velocity, bool isOn)
         const auto routed = m_router.handle(wrapped);
         currentChord = m_router.detectChord();
         const auto target = routed.empty() ? arranger::RouteTarget::Ignored : routed.front().target;
-        ev = m_melody.handleNote(note, velocity, isOn, target == arranger::RouteTarget::MelodySide);
+        events = m_rightHand.handleNote(note, velocity, isOn, target == arranger::RouteTarget::MelodySide);
 
         chordName = currentChord.has_value() ? currentChord->displayName : std::string{};
         if (chordName != m_lastChordName) { m_lastChordName = chordName; chordChanged = true; }
     }
 
-    if (ev && m_onNote)
-        m_onNote(ev->channel, ev->note, ev->velocity, ev->isOn);
+    if (m_onNote)
+        for (const auto& ev : events)
+            m_onNote(ev.channel, ev.note, ev.velocity, ev.isOn);
     if (chordChanged && m_onChord)
         m_onChord(toCadenzaChord(currentChord), chordName);
 }
@@ -195,7 +196,7 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
         //    must not change chord detection.
         std::vector<arranger::RoutedMidiMessage> routed;
         arranger::RouteTarget target = arranger::RouteTarget::Ignored;
-        std::optional<LiveMelodyEvent> ev;
+        std::vector<LiveMelodyEvent> events;
         {
             std::lock_guard<std::mutex> lk(m_publishMutex);
             const auto wrapped = isOn
@@ -208,10 +209,10 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
             currentChord = m_router.detectChord();
             target = routed.empty() ? arranger::RouteTarget::Ignored : routed.front().target;
 
-            // 2. Decide the live-melody output under the same lock as routing so the
-            //    voice's per-note state is consistent with the on-screen-piano path.
-            //    Octave never reaches the chord recogniser (it saw the original pitch).
-            ev = m_melody.handleNote(note, velocity, isOn, target == arranger::RouteTarget::MelodySide);
+            // 2. Decide the live right-hand output (one event per enabled Right
+            //    layer) under the same lock as routing so per-note state stays
+            //    consistent. Octave never reaches the chord recogniser.
+            events = m_rightHand.handleNote(note, velocity, isOn, target == arranger::RouteTarget::MelodySide);
         }
 
         switch (target) {
@@ -220,19 +221,16 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
             case arranger::RouteTarget::Ignored:    debugRoute = "ignored"; break;
         }
 
-        // Only right-hand (melody-zone) notes sound, on the dedicated melody
-        // channel with the Octave shift applied; the matching note-off releases
-        // the same shifted pitch. Chord-zone notes make no melody sound.
-        if (ev) {
-            if (m_onNote) m_onNote(ev->channel, ev->note, ev->velocity, ev->isOn);
-
+        // Only right-hand (melody-zone) notes sound, on each enabled layer's
+        // channel with its Octave shift; chord-zone notes make no melody sound.
+        for (const auto& ev : events) {
+            if (m_onNote) m_onNote(ev.channel, ev.note, ev.velocity, ev.isOn);
             juce::Logger::writeToLog(
-                juce::String("[Cadenza] live melody ") + (ev->isOn ? "on " : "off")
+                juce::String("[Cadenza] live right ") + (ev.isOn ? "on " : "off")
                 + " orig=" + juce::String(note)
-                + " shifted=" + juce::String(ev->note)
-                + " ch=" + juce::String(ev->channel)
-                + " octave=" + juce::String(m_melody.octave())
-                + " vel=" + juce::String(ev->velocity));
+                + " shifted=" + juce::String(ev.note)
+                + " ch=" + juce::String(ev.channel)
+                + " vel=" + juce::String(ev.velocity));
         }
 
         // 3. Fire ChordCallback when the displayed chord changes (m_lastChordName

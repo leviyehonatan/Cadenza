@@ -16,6 +16,7 @@
 #include "ChordRecognizer.h"
 #include "ArrangerMidiRouter.h"
 #include "LiveMelodyVoice.h"
+#include "RightHand.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -65,26 +66,36 @@ public:
     void setSplitPoint(int midiNote) noexcept;
     int  splitPoint() const noexcept;
 
-    // Live Octave control: shifts only right-hand (melody-zone) live notes by N
+    // Live Octave control: shifts the primary right-hand voice (Right 1) by N
     // octaves. Does not affect chord detection or style/accompaniment playback.
-    void setLiveOctave(int octaves) noexcept { m_melody.setOctave(octaves); }
-    int  liveOctave() const noexcept { return m_melody.octave(); }
+    void setLiveOctave(int octaves) noexcept { m_rightHand.setLayerOctave(0, octaves); }
+    int  liveOctave() const noexcept { return m_rightHand.layerOctave(0); }
 
-    // Global transpose: shifts the sounding right-hand melody by N semitones,
-    // matching the accompaniment transpose. Chord detection is unaffected.
-    void setLiveTranspose(int semitones) noexcept { m_melody.setTranspose(semitones); }
-    int  liveTranspose() const noexcept { return m_melody.transpose(); }
+    // Global transpose: shifts every right-hand layer by N semitones, matching the
+    // accompaniment transpose. Chord detection is unaffected.
+    void setLiveTranspose(int semitones) noexcept { m_rightHand.setTranspose(semitones); }
+    int  liveTranspose() const noexcept { return m_rightHand.transpose(); }
 
-    // Dedicated Cadenza channel the live right-hand melody plays on.
-    int  melodyChannel() const noexcept { return m_melody.channel(); }
-    void setMelodyChannel(int channel) noexcept { m_melody.setChannel(channel); }
+    // Dedicated Cadenza channel the primary right-hand voice (Right 1) plays on.
+    int  melodyChannel() const noexcept { return m_rightHand.layerChannel(0); }
+    void setMelodyChannel(int channel) noexcept { m_rightHand.setLayerChannel(0, channel); }
+
+    // Right 1 / Right 2 / Right 3 layered voices (layer 0..2). Right 1 is on by
+    // default; enabling a layer stacks its voice on top of the right hand.
+    static constexpr int kNumRightLayers = RightHand::kNumLayers;
+    void setRightLayerEnabled(int layer, bool on) noexcept { m_rightHand.setLayerEnabled(layer, on); }
+    bool rightLayerEnabled(int layer) const noexcept { return m_rightHand.layerEnabled(layer); }
+    void setRightLayerChannel(int layer, int ch) noexcept { m_rightHand.setLayerChannel(layer, ch); }
+    int  rightLayerChannel(int layer) const noexcept { return m_rightHand.layerChannel(layer); }
+    void setRightLayerOctave(int layer, int oct) noexcept { m_rightHand.setLayerOctave(layer, oct); }
+    int  rightLayerOctave(int layer) const noexcept { return m_rightHand.layerOctave(layer); }
 
     // Play an on-screen / virtual-keyboard note through the live melody voice so
     // it gets the same Octave shift, dedicated channel and matched note-off as a
     // hardware key. Notes at/above the split point are treated as melody; this
     // does NOT feed chord detection. Returns the synth event to play, or nullopt
     // (e.g. a below-split note, which the caller may sound directly). Thread-safe.
-    std::optional<LiveMelodyEvent> handleVirtualMelodyNote(int note, int velocity, bool isOn);
+    std::vector<LiveMelodyEvent> handleVirtualMelodyNote(int note, int velocity, bool isOn);
 
     // Inject a note from a native on-screen keyboard, running the SAME path as a
     // hardware key: split routing, chord detection (below split), and the live
@@ -122,7 +133,7 @@ private:
     mutable std::mutex m_publishMutex;
 
     std::string  m_lastChordName;
-    LiveMelodyVoice m_melody;
+    RightHand    m_rightHand;
     NoteCallback  m_onNote;
     ChordCallback m_onChord;
     SyncCallback  m_onSync;
