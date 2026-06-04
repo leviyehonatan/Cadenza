@@ -40,8 +40,12 @@ std::string lower(std::string s)
 
 bool isStyleFile(const fs::path& p)
 {
-    // Extensions are ASCII, so this conversion is always safe.
-    return lower(p.extension().string()) == ".sty";
+    // Extensions are ASCII, so this conversion is always safe. Yamaha styles ship
+    // under several extensions that all hold the same SFF (SMF+CASM) payload:
+    //   .sty (user), .prs (preset), .sst (session), .fps (free play), .bcs.
+    const auto ext = lower(p.extension().string());
+    return ext == ".sty" || ext == ".prs" || ext == ".sst"
+        || ext == ".fps" || ext == ".bcs";
 }
 
 // Narrow string for display/CSV that won't throw on non-ANSI (e.g. Cyrillic)

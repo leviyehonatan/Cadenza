@@ -657,14 +657,24 @@ YamahaNtt yamahaNttFromCtb2Raw(uint8_t value, YamahaNtr ntr) noexcept
         }
     }
 
+    // SFF GE (Ctb2) NTT table. The minor scales live at EVEN indices; the odd
+    // index just above each is the same scale's "+5th" variant (differs only in
+    // how the chord 5th is treated, which our scale fit already approximates).
+    // Verified against Genos 2 preset styles, which use 4/6/8/10 (the older code
+    // wrongly used the odd values 3/5/7/9 and left these as Unknown).
     switch (base) {
-        case 0: return YamahaNtt::Bypass;
-        case 1: return YamahaNtt::Melody;
-        case 2: return YamahaNtt::Chord;
-        case 3: return YamahaNtt::MelodicMinor;
-        case 5: return YamahaNtt::HarmonicMinor;
-        case 7: return YamahaNtt::NaturalMinor;
-        case 9: return YamahaNtt::Dorian;
+        case 0:  return YamahaNtt::Bypass;
+        case 1:  return YamahaNtt::Melody;
+        case 2:  return YamahaNtt::Chord;
+        case 3:  return YamahaNtt::Melody;          // Bass: root-transpose the line
+        case 4:  return YamahaNtt::MelodicMinor;
+        case 5:  return YamahaNtt::MelodicMinor;     // +5th variant
+        case 6:  return YamahaNtt::HarmonicMinor;
+        case 7:  return YamahaNtt::HarmonicMinor;    // +5th variant
+        case 8:  return YamahaNtt::NaturalMinor;
+        case 9:  return YamahaNtt::NaturalMinor;     // +5th variant
+        case 10: return YamahaNtt::Dorian;
+        case 11: return YamahaNtt::Dorian;           // +5th variant
         default: return YamahaNtt::Unknown;
     }
 }

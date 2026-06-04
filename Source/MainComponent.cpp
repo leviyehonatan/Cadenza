@@ -45,8 +45,12 @@ bool equalsIgnoreCase(const std::string& a, const std::string& b)
 
 bool isSupportedStyleFile(const juce::File& file)
 {
+    // Cadenza's own JSON style, plus every Yamaha SFF container extension (all
+    // share the same SMF+CASM payload): .sty user, .prs preset, .sst session,
+    // .fps free play, .bcs. Genos/Genos 2 preset styles ship as .prs.
     const auto ext = lowercase(file.getFileExtension().toStdString());
-    return ext == ".cstyle" || ext == ".sty";
+    return ext == ".cstyle" || ext == ".sty" || ext == ".prs"
+        || ext == ".sst" || ext == ".fps" || ext == ".bcs";
 }
 
 bool isSupportedSoundFontFile(const juce::File& file)
@@ -727,7 +731,7 @@ void MainComponent::openStyleFileChooser()
     m_styleChooser = std::make_unique<juce::FileChooser>(
         "Choose a Cadenza or Yamaha style",
         stylesDir.isDirectory() ? stylesDir : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
-        "*.cstyle;*.sty");
+        "*.cstyle;*.sty;*.prs;*.sst;*.fps;*.bcs");
 
     juce::Component::SafePointer<MainComponent> safe(this);
     m_styleChooser->launchAsync(
