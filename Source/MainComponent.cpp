@@ -105,6 +105,7 @@ MainComponent::MainComponent()
                            static_cast<float>(st.eqHighDb));
         m_audio.setCompAmount(st.compAmount);
         m_audio.setMasterVolume(st.masterVolume);
+        m_audio.setReverbLevel(st.reverbLevel);
         m_midi.setSplitPoint(st.splitNote);
     }
     juce::Logger::writeToLog("[Cadenza] Synth engine: " + juce::String(m_audio.synthEngineName()));
@@ -1563,6 +1564,23 @@ void MainComponent::buildNativePanel()
         }
     };
 
+    cb.onReverbChanged = [this](int amount) {
+        m_audio.setReverbLevel(amount);
+        if (m_settings) {
+            m_settings->state().reverbLevel = amount;
+            saveSettings();
+        }
+    };
+
+    cb.onDrumsChanged = [this](int volume) {
+        // Quick drum-channel level (cadenza channel 10): mirror the drum mixer strip.
+        if (!m_mixer.has(10)) return;
+        m_mixer.setVolume(10, volume);
+        applyMixerState();
+        if (m_panel) m_panel->updateMixerStrip(10, volume, m_mixer.mute(10), m_mixer.solo(10));
+        persistStyleMix();
+    };
+
     cb.onSplitChanged = [this](int note) {
         m_midi.setSplitPoint(note);                 // notes < split drive chords; >= play melody
         if (m_settings) {
@@ -1674,6 +1692,7 @@ void MainComponent::buildNativePanel()
         m_panel->setEqGains(st.eqLowDb, st.eqMidDb, st.eqHighDb);
         m_panel->setCompAmount(st.compAmount);
         m_panel->setMasterVolume(st.masterVolume);
+        m_panel->setReverbAmount(st.reverbLevel);
         m_panel->setSplitPoint(st.splitNote);
         for (int i = 0; i < 3; ++i) {
             const auto& L = st.rightLayers[i];
@@ -1798,6 +1817,9 @@ void MainComponent::updateNativePanelStyle()
             : juce::String(cadenza::midi::gmInstrumentName(m_mixer.program(ch)));
         m_panel->setMixerInstrumentName(ch, insName);
     }
+
+    // Sync the quick Drums knob to the drum channel's volume.
+    m_panel->setDrumsLevel(m_mixer.has(10) ? m_mixer.volume(10) : 100);
 
     // Refresh the Right 1/2/3 voice strips (VST name if a plugin is loaded on the
     // layer's new channel, else the GM voice name).

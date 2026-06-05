@@ -159,6 +159,12 @@ public:
         for (int ch = 0; ch < 16; ++ch) fluid_synth_all_notes_off(m_synth, ch);
     }
 
+    void setReverbLevel(double level) override {
+        if (!m_synth) return;
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        fluid_synth_set_reverb_group_level(m_synth, -1, level);   // -1 = all fx groups
+    }
+
     bool loadSoundFont(const std::string& path) override {
         if (!m_synth) return false;
         const std::lock_guard<std::mutex> lock(m_mutex);

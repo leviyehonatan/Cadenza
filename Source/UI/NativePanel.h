@@ -137,6 +137,8 @@ public:
         std::function<void(int, int, int)> onEqChanged;       // low, mid, high gain in dB
         std::function<void(int)> onCompChanged;               // master compressor amount 0..100
         std::function<void(int)> onMasterChanged;             // master output volume 0..127
+        std::function<void(int)> onDrumsChanged;              // drum channel volume 0..127
+        std::function<void(int)> onReverbChanged;             // master reverb amount 0..100
         std::function<void(int)> onSplitChanged;              // keyboard split MIDI note
         // Right 1/2/3 layered right-hand voices (layer 0..2).
         std::function<void(int, bool)> onRightEnabled;        // layer, on/off
@@ -172,6 +174,8 @@ public:
     void setEqGains(int lowDb, int midDb, int highDb);   // init the EQ knobs (no callback)
     void setCompAmount(int percent);                     // init the Comp knob (no callback)
     void setMasterVolume(int percent);                   // init the Master knob (no callback)
+    void setDrumsLevel(int volume);                      // init the Drums knob (no callback)
+    void setReverbAmount(int percent);                   // init the Reverb knob (no callback)
     void setSplitPoint(int midiNote);                    // init the split marker (no callback)
     // Init a Right 1/2/3 voice strip (no callback): layer 0..2.
     void setRightVoice(int layer, bool enabled, int program, int volume, int octave);
@@ -255,8 +259,8 @@ private:
     std::vector<std::unique_ptr<juce::TextButton>> m_pads;
 
     juce::Label  m_eqCaption;
-    juce::Label  m_eqLowCap, m_eqMidCap, m_eqHighCap, m_compCap, m_masterCap;
-    juce::Slider m_eqLow, m_eqMid, m_eqHigh, m_comp, m_master;
+    juce::Label  m_eqLowCap, m_eqMidCap, m_eqHighCap, m_compCap, m_masterCap, m_drumsCap, m_reverbCap;
+    juce::Slider m_eqLow, m_eqMid, m_eqHigh, m_comp, m_master, m_drums, m_reverb;
 
     // Right 1/2/3 layered right-hand voices.
     juce::Label m_rightCaption;

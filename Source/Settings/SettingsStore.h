@@ -87,6 +87,7 @@ struct Settings
     int eqHighDb = 2;
     int compAmount = 55;             // master compressor amount 0..100 (0 = off)
     int masterVolume = 100;          // master output volume 0..127 (100 = unity)
+    int reverbLevel = 80;            // master reverb amount 0..100
     int splitNote = 60;              // keyboard split: notes < this drive chords, >= play melody
 
     // MIDI control mappings: trigger id (see MidiControlMap) -> command string

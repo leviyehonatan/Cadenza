@@ -39,6 +39,8 @@ public:
 
     // Optional: load a SoundFont file. Returns true on success. Default impl is a no-op.
     virtual bool loadSoundFont(const std::string& /*path*/) { return false; }
+    // Optional: master reverb send level (0..~1.2). Default no-op.
+    virtual void setReverbLevel(double /*level*/) {}
     virtual const char* engineName() const noexcept { return "SynthEngine"; }
     virtual bool supportsSoundFonts() const noexcept { return false; }
 

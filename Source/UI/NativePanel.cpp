@@ -241,6 +241,22 @@ NativePanel::NativePanel()
     addAndMakeVisible(m_master);
     eqLabel(m_masterCap, "Master");
 
+    m_drums.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    m_drums.setRange(0.0, 127.0, 1.0);
+    m_drums.setValue(100.0, juce::dontSendNotification);
+    m_drums.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 46, 16);
+    m_drums.onValueChange = [this] { if (m_cb.onDrumsChanged) m_cb.onDrumsChanged((int) m_drums.getValue()); };
+    addAndMakeVisible(m_drums);
+    eqLabel(m_drumsCap, "Drums");
+
+    m_reverb.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    m_reverb.setRange(0.0, 100.0, 1.0);
+    m_reverb.setValue(80.0, juce::dontSendNotification);
+    m_reverb.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 46, 16);
+    m_reverb.onValueChange = [this] { if (m_cb.onReverbChanged) m_cb.onReverbChanged((int) m_reverb.getValue()); };
+    addAndMakeVisible(m_reverb);
+    eqLabel(m_reverbCap, "Reverb");
+
     // --- Right 1/2/3 layered right-hand voices ---
     styleCaption(m_rightCaption, "Right Voices");
     addAndMakeVisible(m_rightCaption);
@@ -527,6 +543,16 @@ void NativePanel::setMasterVolume(int percent)
     m_master.setValue(percent, juce::dontSendNotification);
 }
 
+void NativePanel::setDrumsLevel(int volume)
+{
+    m_drums.setValue(volume, juce::dontSendNotification);
+}
+
+void NativePanel::setReverbAmount(int percent)
+{
+    m_reverb.setValue(percent, juce::dontSendNotification);
+}
+
 void NativePanel::setRightVoice(int layer, bool enabled, int program, int volume, int octave)
 {
     if (layer < 0 || layer >= 3)
@@ -676,6 +702,8 @@ void NativePanel::resized()
         r.removeFromLeft(14);
         placeKnob(m_comp, m_compCap);
         placeKnob(m_master, m_masterCap);
+        placeKnob(m_drums, m_drumsCap);
+        placeKnob(m_reverb, m_reverbCap);
     }
     area.removeFromTop(gap);
 

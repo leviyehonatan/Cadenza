@@ -60,6 +60,8 @@ public:
     // Master output volume 0..127 (100 = unity). A final soft limiter keeps it
     // clean when pushed, so the whole mix (drums included) can hit harder.
     void setMasterVolume(int percent) { m_masterGain.store(juce::jlimit(0, 127, percent) / 100.0f); }
+    // Master reverb amount 0..100 (maps to FluidSynth reverb level 0..~1.0).
+    void setReverbLevel(int percent) { if (m_synth) m_synth->setReverbLevel(juce::jlimit(0, 100, percent) / 100.0); }
     const char* synthEngineName() const noexcept;
     bool supportsSoundFonts() const noexcept;
 
