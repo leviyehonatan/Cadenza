@@ -213,6 +213,14 @@ NativePanel::NativePanel()
     addAndMakeVisible(m_comp);
     eqLabel(m_compCap, "Comp");
 
+    m_master.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    m_master.setRange(0.0, 127.0, 1.0);
+    m_master.setValue(100.0, juce::dontSendNotification);
+    m_master.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 46, 16);
+    m_master.onValueChange = [this] { if (m_cb.onMasterChanged) m_cb.onMasterChanged((int) m_master.getValue()); };
+    addAndMakeVisible(m_master);
+    eqLabel(m_masterCap, "Master");
+
     // --- Right 1/2/3 layered right-hand voices ---
     styleCaption(m_rightCaption, "Right Voices");
     addAndMakeVisible(m_rightCaption);
@@ -493,6 +501,11 @@ void NativePanel::setCompAmount(int percent)
     m_comp.setValue(percent, juce::dontSendNotification);
 }
 
+void NativePanel::setMasterVolume(int percent)
+{
+    m_master.setValue(percent, juce::dontSendNotification);
+}
+
 void NativePanel::setRightVoice(int layer, bool enabled, int program, int volume, int octave)
 {
     if (layer < 0 || layer >= 3)
@@ -639,6 +652,7 @@ void NativePanel::resized()
         placeKnob(m_eqHigh, m_eqHighCap);
         r.removeFromLeft(14);
         placeKnob(m_comp, m_compCap);
+        placeKnob(m_master, m_masterCap);
     }
     area.removeFromTop(gap);
 

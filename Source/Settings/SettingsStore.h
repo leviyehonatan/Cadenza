@@ -86,6 +86,7 @@ struct Settings
     int eqMidDb = 0;
     int eqHighDb = 2;
     int compAmount = 55;             // master compressor amount 0..100 (0 = off)
+    int masterVolume = 100;          // master output volume 0..127 (100 = unity)
     int splitNote = 60;              // keyboard split: notes < this drive chords, >= play melody
 
     // Per-style mixer overrides keyed by style id. Applied on top of the style's

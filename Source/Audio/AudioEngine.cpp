@@ -3,9 +3,23 @@
 #include "MidiChannel.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace cadenza::audio
 {
+namespace
+{
+// Soft limiter: linear up to 0.9, then a tanh knee so peaks stay below ~1.0
+// instead of hard-clipping when the master volume is pushed.
+inline float softLimit(float x) noexcept
+{
+    constexpr float t = 0.9f;
+    if (x >  t) return  t + std::tanh((x - t) * 2.0f) * (1.0f - t);
+    if (x < -t) return -t + std::tanh((x + t) * 2.0f) * (1.0f - t);
+    return x;
+}
+}
+
 AudioEngine::AudioEngine()
     : m_synth(createSynthEngine())
 {
@@ -77,6 +91,15 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             m_masterGlue.process(chans, nc, ns);   // console glue (no-op: disabled by default)
             m_effectMidi.clear();
             m_masterEffect.process(view, m_effectMidi);
+
+            // Master output volume + final soft limiter: lets the whole mix (drums
+            // included) be pushed loud and stay clean instead of hard-clipping.
+            const float gain = m_masterGain.load();
+            for (int c = 0; c < nc; ++c) {
+                float* d = chans[c];
+                for (int s = 0; s < ns; ++s)
+                    d[s] = softLimit(d[s] * gain);
+            }
         });
 }
 

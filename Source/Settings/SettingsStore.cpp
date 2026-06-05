@@ -46,6 +46,7 @@ bool SettingsStore::load()
     m_state.eqMidDb  = root.get("eqMidDb").asInt(m_state.eqMidDb);
     m_state.eqHighDb = root.get("eqHighDb").asInt(m_state.eqHighDb);
     m_state.compAmount = root.get("compAmount").asInt(m_state.compAmount);
+    m_state.masterVolume = root.get("masterVolume").asInt(m_state.masterVolume);
     m_state.splitNote  = root.get("splitNote").asInt(m_state.splitNote);
 
     // Right 1/2/3 layered voices. If absent (older settings), migrate Right 1 from
@@ -158,6 +159,7 @@ bool SettingsStore::save() const
     root["eqMidDb"]  = J::Value::number(m_state.eqMidDb);
     root["eqHighDb"] = J::Value::number(m_state.eqHighDb);
     root["compAmount"] = J::Value::number(m_state.compAmount);
+    root["masterVolume"] = J::Value::number(m_state.masterVolume);
     root["splitNote"]  = J::Value::number(m_state.splitNote);
 
     J::Array rightLayers;

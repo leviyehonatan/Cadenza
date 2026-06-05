@@ -57,6 +57,9 @@ public:
     void setEqGains(float lowDb, float midDb, float highDb) { m_masterEq.setGains(lowDb, midDb, highDb); }
     // Master compressor amount 0..100 (0 = bypass).
     void setCompAmount(int percent) { m_masterComp.setAmount(percent); }
+    // Master output volume 0..127 (100 = unity). A final soft limiter keeps it
+    // clean when pushed, so the whole mix (drums included) can hit harder.
+    void setMasterVolume(int percent) { m_masterGain.store(juce::jlimit(0, 127, percent) / 100.0f); }
     const char* synthEngineName() const noexcept;
     bool supportsSoundFonts() const noexcept;
 
@@ -97,6 +100,7 @@ private:
     MasterEq         m_masterEq;
     MasterCompressor m_masterComp;
     MasterGlue       m_masterGlue;
+    std::atomic<float> m_masterGain { 1.0f };   // master output volume (100% = unity)
 
     // Per-part instrument hosting (channels 1..16; index 0 unused).
     static constexpr int kNumChannels = 17;

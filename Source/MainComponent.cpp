@@ -104,6 +104,7 @@ MainComponent::MainComponent()
                            static_cast<float>(st.eqMidDb),
                            static_cast<float>(st.eqHighDb));
         m_audio.setCompAmount(st.compAmount);
+        m_audio.setMasterVolume(st.masterVolume);
         m_midi.setSplitPoint(st.splitNote);
     }
     juce::Logger::writeToLog("[Cadenza] Synth engine: " + juce::String(m_audio.synthEngineName()));
@@ -1301,6 +1302,14 @@ void MainComponent::buildNativePanel()
         }
     };
 
+    cb.onMasterChanged = [this](int volume) {
+        m_audio.setMasterVolume(volume);
+        if (m_settings) {
+            m_settings->state().masterVolume = volume;
+            saveSettings();
+        }
+    };
+
     cb.onSplitChanged = [this](int note) {
         m_midi.setSplitPoint(note);                 // notes < split drive chords; >= play melody
         if (m_settings) {
@@ -1414,6 +1423,7 @@ void MainComponent::buildNativePanel()
         const auto& st = m_settings->state();
         m_panel->setEqGains(st.eqLowDb, st.eqMidDb, st.eqHighDb);
         m_panel->setCompAmount(st.compAmount);
+        m_panel->setMasterVolume(st.masterVolume);
         m_panel->setSplitPoint(st.splitNote);
         for (int i = 0; i < 3; ++i) {
             const auto& L = st.rightLayers[i];
