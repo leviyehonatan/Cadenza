@@ -96,5 +96,10 @@ private:
     std::atomic<int> m_keyTonic { 0 };
     std::atomic<bool> m_enabled { true };
     std::atomic<bool> m_chordDirty { false };
+    // Set by the message thread (allNotesOff / setStyle) to ask the audio thread to
+    // drop all active notes. m_active is mutated ONLY on the audio thread, so the
+    // message thread never races the vector (which caused a crash on fast section
+    // switches / fills).
+    std::atomic<bool> m_panic { false };
 };
 }

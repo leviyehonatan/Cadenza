@@ -66,7 +66,7 @@ void StyleEngine::install()
 
 void StyleEngine::setStyle(std::shared_ptr<const Style> style)
 {
-    m_active.clear();
+    m_panic.store(true);          // audio thread drops active notes on its next tick
     m_engine.allNotesOff();
 
     std::lock_guard<std::mutex> lk(m_publishMutex);
@@ -170,13 +170,20 @@ PlaybackDiagnosticResult StyleEngine::exportCurrentSectionDiagnostics(const std:
 
 void StyleEngine::allNotesOff()
 {
-    m_active.clear();
+    // Don't touch m_active here — it's audio-thread-only. Ask the audio thread to
+    // clear it on its next tick, and silence the synth now (thread-safe).
+    m_panic.store(true);
     m_engine.allNotesOff();
 }
 
 void StyleEngine::onTick(int ticksAdvanced, cadenza::audio::Transport& transport)
 {
     if (!m_enabled.load()) return;
+
+    // 0) honour a panic request from the message thread (allNotesOff / setStyle):
+    //    clear active notes here so the vector is only ever mutated on this thread.
+    if (m_panic.exchange(false))
+        m_active.clear();
 
     // 1) age active notes; release any that have expired
     advanceActiveNotes(ticksAdvanced);
