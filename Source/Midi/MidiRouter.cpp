@@ -189,10 +189,10 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
         int trigger = -1;
         bool press = false;
         if (msg.isController()) {
-            trigger = controlTriggerForCC(msg.getControllerNumber());
+            trigger = controlTriggerForCC(msg.getChannel(), msg.getControllerNumber());
             press   = msg.getControllerValue() > 0;
         } else if (msg.isNoteOn()) {
-            trigger = controlTriggerForNote(msg.getNoteNumber());
+            trigger = controlTriggerForNote(msg.getChannel(), msg.getNoteNumber());
             press   = msg.getVelocity() > 0;
         }
 

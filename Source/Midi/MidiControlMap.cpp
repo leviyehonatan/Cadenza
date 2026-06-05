@@ -42,6 +42,8 @@ std::optional<int> MidiControlMap::triggerFor(const std::string& command) const
 
 std::string describeTrigger(int trigger)
 {
-    return (triggerIsCC(trigger) ? "CC " : "Note ") + std::to_string(triggerData(trigger));
+    const int ch = triggerChannel(trigger);
+    std::string chPart = ch > 0 ? ("Ch" + std::to_string(ch) + " ") : std::string();
+    return chPart + (triggerIsCC(trigger) ? "CC " : "Note ") + std::to_string(triggerData(trigger));
 }
 }

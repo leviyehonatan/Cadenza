@@ -18,13 +18,19 @@
 
 namespace cadenza::midi
 {
-// Channel-agnostic trigger ids. CC triggers are tagged so a CC number can't
-// collide with a note number.
+// Trigger ids encode the MIDI channel (1..16), a CC-vs-note flag, and the
+// data byte (CC number or note number). Including the channel lets a pad that
+// sends on its own channel be distinguished from a piano key with the same note.
+//   bits 0..6  = data (0..127)   bit 8 = CC flag   bits 9..13 = channel (1..16)
 constexpr int kControlCcFlag = 0x100;
-inline int controlTriggerForCC(int cc) noexcept   { return kControlCcFlag | (cc & 0x7F); }
-inline int controlTriggerForNote(int note) noexcept { return note & 0x7F; }
+inline int controlTrigger(int channel, bool isCC, int data1) noexcept {
+    return ((channel & 0x1F) << 9) | (isCC ? kControlCcFlag : 0) | (data1 & 0x7F);
+}
+inline int controlTriggerForCC(int channel, int cc) noexcept    { return controlTrigger(channel, true,  cc); }
+inline int controlTriggerForNote(int channel, int note) noexcept { return controlTrigger(channel, false, note); }
 inline bool triggerIsCC(int trigger) noexcept     { return (trigger & kControlCcFlag) != 0; }
 inline int  triggerData(int trigger) noexcept     { return trigger & 0x7F; }
+inline int  triggerChannel(int trigger) noexcept  { return (trigger >> 9) & 0x1F; }
 
 class MidiControlMap
 {
