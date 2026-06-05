@@ -226,6 +226,30 @@ MainComponent::MainComponent()
         pushToWeb(js);
     });
 
+    // MIDI control mapping: hardware buttons -> arranger commands (sections / play).
+    if (m_settings)
+        m_midi.setControlMap(m_settings->state().midiControlMap);
+    m_midi.setControlCallback([this](const std::string& command) {
+        juce::Component::SafePointer<MainComponent> safe(this);
+        juce::MessageManager::callAsync([safe, command] {
+            if (auto* self = safe.getComponent()) self->executeControlCommand(command);
+        });
+    });
+    m_midi.setControlLearnCallback([this](int trigger) {
+        juce::Component::SafePointer<MainComponent> safe(this);
+        juce::MessageManager::callAsync([safe, trigger] {
+            auto* self = safe.getComponent();
+            if (!self || !self->m_settings || self->m_learnCommand.empty()) return;
+            cadenza::midi::MidiControlMap map;
+            map.setEntries(self->m_settings->state().midiControlMap);
+            map.assign(trigger, self->m_learnCommand);          // one button per action
+            self->m_settings->state().midiControlMap = map.entries();
+            self->m_midi.setControlMap(map.entries());
+            self->m_learnCommand.clear();
+            self->saveSettings();   // the MIDI Settings window re-reads the map on its own timer
+        });
+    });
+
     m_midi.refreshInputs();   // open ALL available MIDI inputs (logs the device list)
 
     // Always-on timer: hot-plug MIDI rescan (~every 2s) + song-mode auto-stepping.
@@ -284,6 +308,150 @@ void MainComponent::showAudioSettings()
     juce::DialogWindow::LaunchOptions opts;
     opts.content.setOwned(selector);
     opts.dialogTitle = "Audio Output Settings";
+    opts.dialogBackgroundColour = juce::Colour(0xff2a2f3a);
+    opts.escapeKeyTriggersCloseButton = true;
+    opts.useNativeTitleBar = true;
+    opts.resizable = false;
+    opts.launchAsync();
+}
+
+namespace {
+// MIDI Settings / button-mapping window: lists connected MIDI inputs and one row
+// per arranger action (current mapping + Learn + Clear). Refreshes the displayed
+// mappings on a timer so a MIDI-learn capture shows up live.
+class MidiSettingsComponent : public juce::Component, private juce::Timer
+{
+public:
+    using MappingTextFn = std::function<juce::String(const std::string&)>;
+    using CommandFn     = std::function<void(const std::string&)>;
+
+    MidiSettingsComponent(const juce::StringArray& devices,
+                          const std::vector<std::pair<juce::String, std::string>>& actions,
+                          MappingTextFn mappingText, CommandFn onLearn, CommandFn onClear)
+        : m_mappingText(std::move(mappingText)), m_onLearn(std::move(onLearn)), m_onClear(std::move(onClear))
+    {
+        m_devices.setText(devices.isEmpty() ? "No MIDI inputs detected"
+                                            : "MIDI inputs: " + devices.joinIntoString(", "),
+                          juce::dontSendNotification);
+        m_devices.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        addAndMakeVisible(m_devices);
+
+        for (const auto& a : actions) {
+            auto row = std::make_unique<Row>();
+            row->command = a.second;
+            row->name.setText(a.first, juce::dontSendNotification);
+            row->name.setColour(juce::Label::textColourId, juce::Colours::white);
+            row->mapping.setColour(juce::Label::textColourId, juce::Colours::skyblue);
+            row->mapping.setJustificationType(juce::Justification::centred);
+            row->learn.setButtonText("Learn");
+            row->clear.setButtonText("X");
+            const std::string cmd = a.second;
+            auto* mapLabel = &row->mapping;
+            row->learn.onClick = [this, cmd, mapLabel] {
+                m_pending = cmd;
+                m_pendingPrev = m_mappingText ? m_mappingText(cmd) : juce::String();
+                mapLabel->setText("press a button...", juce::dontSendNotification);
+                if (m_onLearn) m_onLearn(cmd);
+            };
+            row->clear.onClick = [this, cmd] { if (m_onClear) m_onClear(cmd); };
+            addAndMakeVisible(row->name);
+            addAndMakeVisible(row->mapping);
+            addAndMakeVisible(row->learn);
+            addAndMakeVisible(row->clear);
+            m_rows.push_back(std::move(row));
+        }
+        refresh();
+        startTimerHz(5);
+        setSize(440, 70 + static_cast<int>(m_rows.size()) * 30);
+    }
+
+    void resized() override
+    {
+        auto a = getLocalBounds().reduced(10);
+        m_devices.setBounds(a.removeFromTop(24));
+        a.removeFromTop(8);
+        for (auto& r : m_rows) {
+            auto row = a.removeFromTop(26);
+            a.removeFromTop(4);
+            r->name.setBounds(row.removeFromLeft(120));
+            r->clear.setBounds(row.removeFromRight(30));
+            row.removeFromRight(6);
+            r->learn.setBounds(row.removeFromRight(64));
+            row.removeFromRight(8);
+            r->mapping.setBounds(row);
+        }
+    }
+
+private:
+    struct Row {
+        std::string command;
+        juce::Label name, mapping;
+        juce::TextButton learn, clear;
+    };
+
+    void refresh()
+    {
+        for (auto& r : m_rows) {
+            const juce::String t = m_mappingText ? m_mappingText(r->command) : juce::String();
+            if (m_pending == r->command) {
+                if (t != m_pendingPrev) m_pending.clear();   // a new mapping was captured
+                else { r->mapping.setText("press a button...", juce::dontSendNotification); continue; }
+            }
+            r->mapping.setText(t.isEmpty() ? juce::String("--") : t, juce::dontSendNotification);
+        }
+    }
+
+    void timerCallback() override { refresh(); }
+
+    MappingTextFn m_mappingText;
+    CommandFn m_onLearn, m_onClear;
+    juce::Label m_devices;
+    std::vector<std::unique_ptr<Row>> m_rows;
+    std::string m_pending;
+    juce::String m_pendingPrev;
+};
+}
+
+void MainComponent::showMidiSettings()
+{
+    if (!m_settings) return;
+
+    const std::vector<std::pair<juce::String, std::string>> actions = {
+        { "Start / Stop", "play" },
+        { "Intro",   "intro"  }, { "Intro B", "introB" }, { "Intro C", "introC" },
+        { "Main A",  "mainA"  }, { "Main B",  "mainB"  }, { "Main C", "mainC" }, { "Main D", "mainD" },
+        { "Fill A",  "fillAA" }, { "Fill B",  "fillBB" }, { "Fill C", "fillCC" }, { "Fill D", "fillDD" },
+        { "Ending",  "ending" }, { "Ending B","endingB" }, { "Ending C","endingC" },
+    };
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    auto mappingText = [safe](const std::string& cmd) -> juce::String {
+        auto* self = safe.getComponent();
+        if (!self || !self->m_settings) return {};
+        cadenza::midi::MidiControlMap m;
+        m.setEntries(self->m_settings->state().midiControlMap);
+        if (auto t = m.triggerFor(cmd)) return juce::String(cadenza::midi::describeTrigger(*t));
+        return {};
+    };
+    auto onLearn = [safe](const std::string& cmd) {
+        if (auto* self = safe.getComponent()) { self->m_learnCommand = cmd; self->m_midi.armControlLearn(true); }
+    };
+    auto onClear = [safe](const std::string& cmd) {
+        auto* self = safe.getComponent();
+        if (!self || !self->m_settings) return;
+        cadenza::midi::MidiControlMap m;
+        m.setEntries(self->m_settings->state().midiControlMap);
+        m.clearCommand(cmd);
+        self->m_settings->state().midiControlMap = m.entries();
+        self->m_midi.setControlMap(m.entries());
+        self->saveSettings();
+    };
+
+    auto* comp = new MidiSettingsComponent(m_midi.availableInputs(), actions,
+                                           std::move(mappingText), std::move(onLearn), std::move(onClear));
+    juce::DialogWindow::LaunchOptions opts;
+    opts.content.setOwned(comp);
+    opts.dialogTitle = "MIDI Settings & Button Mapping";
     opts.dialogBackgroundColour = juce::Colour(0xff2a2f3a);
     opts.escapeKeyTriggersCloseButton = true;
     opts.useNativeTitleBar = true;
@@ -1098,6 +1266,33 @@ std::string sectionType(const std::string& id)
 }
 }
 
+void MainComponent::togglePlayback()
+{
+    const bool play = !m_state.playing();
+    m_state.setPlaying(play);
+    if (play) {
+        if (m_songModeActive) { m_songPlayer.reset(); m_lastSongBar = -1; }
+        m_audio.play();                               // restarts the transport from bar 0
+        if (m_oneShotActive) m_oneShotStartBar = 0;   // re-anchor a pending intro/fill
+    } else {
+        m_audio.stop();
+        m_oneShotActive = false;                      // a manual stop cancels any pending transition
+    }
+    if (m_panel) m_panel->setPlaying(play);
+    pushToWeb(juce::String("window.JuceBridge && window.JuceBridge.onPlayStateChanged(")
+              + (play ? "true" : "false") + ");");
+}
+
+void MainComponent::executeControlCommand(const std::string& command)
+{
+    if (command == "play") {
+        togglePlayback();
+    } else {
+        if (m_songModeActive) setSongMode(false);
+        triggerSection(command);   // section id ("mainA", "fillAA", "intro", "ending", ...)
+    }
+}
+
 void MainComponent::triggerSection(const std::string& id)
 {
     m_styleEngine.allNotesOff();
@@ -1272,24 +1467,11 @@ void MainComponent::buildNativePanel()
 
     cadenza::ui::NativePanel::Callbacks cb;
 
-    cb.togglePlay = [this] {
-        const bool play = !m_state.playing();
-        m_state.setPlaying(play);
-        if (play) {
-            if (m_songModeActive) { m_songPlayer.reset(); m_lastSongBar = -1; }
-            m_audio.play();   // restarts the transport from bar 0
-            if (m_oneShotActive) m_oneShotStartBar = 0;   // re-anchor a pending intro/fill
-        } else {
-            m_audio.stop();
-            m_oneShotActive = false;   // a manual stop cancels any pending transition
-        }
-        if (m_panel) m_panel->setPlaying(play);
-        pushToWeb(juce::String("window.JuceBridge && window.JuceBridge.onPlayStateChanged(")
-                  + (play ? "true" : "false") + ");");
-    };
+    cb.togglePlay = [this] { togglePlayback(); };
     cb.openStyle     = [this] { openStyleFileChooser(); };
     cb.openSoundFont = [this] { openSoundFontFileChooser(); };
     cb.openAudioSettings = [this] { showAudioSettings(); };
+    cb.openMidiSettings  = [this] { showMidiSettings(); };
 
     cb.onLoadInstrumentPlugin = [this](int channel) { choosePartInstrument(channel); };
     cb.onOpenInstrumentEditor = [this](int channel) { m_audio.showPartInstrumentEditor(channel); };

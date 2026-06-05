@@ -114,6 +114,7 @@ public:
         std::function<void()> openStyle;
         std::function<void()> openSoundFont;
         std::function<void()> openAudioSettings;
+        std::function<void()> openMidiSettings;
         std::function<void()> toggleWeb;
         std::function<void(int)> nudgeTranspose;     // delta -1 / +1
         std::function<void(int)> nudgeOctave;         // delta -1 / +1
@@ -195,6 +196,7 @@ private:
     juce::TextButton m_openStyle  { "Open Style" };
     juce::TextButton m_openSf     { "Open SoundFont" };
     juce::TextButton m_openAudio  { "Audio" };
+    juce::TextButton m_openMidi   { "MIDI" };
     juce::TextButton m_webToggle  { "Web UI" };
 
     juce::Label      m_bpmCaption;

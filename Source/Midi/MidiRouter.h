@@ -17,6 +17,7 @@
 #include "ArrangerMidiRouter.h"
 #include "LiveMelodyVoice.h"
 #include "RightHand.h"
+#include "MidiControlMap.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -116,6 +117,20 @@ public:
     void setSyncCallback(SyncCallback cb)   { m_onSync  = std::move(cb); }
     void setDebugCallback(DebugCallback cb) { m_onDebug = std::move(cb); }
 
+    // --- MIDI control mapping (hardware buttons -> arranger actions) ---
+    // m_onControl fires a command string ("mainA", "fillAA", "play", ...) from a
+    // mapped button. m_onControlLearn reports the next pressed trigger while armed.
+    // Both fire on the MIDI thread — marshal to the message thread in the handler.
+    using ControlCallback = std::function<void(const std::string& command)>;
+    using ControlLearnCallback = std::function<void(int trigger)>;
+    void setControlCallback(ControlCallback cb)      { m_onControl = std::move(cb); }
+    void setControlLearnCallback(ControlLearnCallback cb) { m_onControlLearn = std::move(cb); }
+    void armControlLearn(bool on) noexcept           { m_learnArmed.store(on); }
+    void setControlMap(std::map<int, std::string> entries) {
+        std::lock_guard<std::mutex> lk(m_publishMutex);
+        m_controlMap.setEntries(std::move(entries));
+    }
+
     // juce::MidiInputCallback
     void handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& msg) override;
 
@@ -138,5 +153,10 @@ private:
     ChordCallback m_onChord;
     SyncCallback  m_onSync;
     DebugCallback m_onDebug;
+
+    MidiControlMap m_controlMap;            // guarded by m_publishMutex
+    std::atomic<bool> m_learnArmed { false };
+    ControlCallback m_onControl;
+    ControlLearnCallback m_onControlLearn;
 };
 }

@@ -89,6 +89,10 @@ struct Settings
     int masterVolume = 100;          // master output volume 0..127 (100 = unity)
     int splitNote = 60;              // keyboard split: notes < this drive chords, >= play melody
 
+    // MIDI control mappings: trigger id (see MidiControlMap) -> command string
+    // (section id or "play"). Lets hardware buttons drive the arranger.
+    std::map<int, std::string> midiControlMap;
+
     // Per-style mixer overrides keyed by style id. Applied on top of the style's
     // own defaults when a style is (re)loaded, so the player's instrument/volume/
     // mute/solo tweaks persist per style.

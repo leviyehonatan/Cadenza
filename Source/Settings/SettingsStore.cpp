@@ -109,6 +109,16 @@ bool SettingsStore::load()
         }
     }
 
+    m_state.midiControlMap.clear();
+    const auto& midiMap = root.get("midiControlMap");
+    if (midiMap.isObject()) {
+        for (const auto& [key, val] : midiMap.asObject()) {
+            if (!val.isString()) continue;
+            try { m_state.midiControlMap[std::stoi(key)] = val.asString(); }
+            catch (...) { /* skip malformed key */ }
+        }
+    }
+
     m_state.styleMixes.clear();
     const auto& styleMixes = root.get("styleMixes");
     if (styleMixes.isObject()) {
@@ -212,6 +222,11 @@ bool SettingsStore::save() const
         regs.push_back(J::Value::object(std::move(o)));
     }
     root["registrations"] = J::Value::array(std::move(regs));
+
+    J::Object midiMap;
+    for (const auto& [trigger, command] : m_state.midiControlMap)
+        midiMap[std::to_string(trigger)] = J::Value::string(command);
+    root["midiControlMap"] = J::Value::object(std::move(midiMap));
 
     J::Object styleMixes;
     for (const auto& [styleId, channels] : m_state.styleMixes) {

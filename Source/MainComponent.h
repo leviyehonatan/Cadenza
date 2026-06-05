@@ -33,6 +33,7 @@ public:
     // juce::ChangeListener — persists the audio-device choice when it changes.
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
     void showAudioSettings();
+    void showMidiSettings();        // MIDI device list + button-mapping (learn) window
     std::string audioStateFilePath() const;
 
 private:
@@ -70,6 +71,8 @@ private:
     void recallRegistration(int slot);    // restore a saved registration
     void exportPlaybackDiagnostics();
     void triggerSection(const std::string& id);   // select a section, with one-shot intro/fill/ending handling
+    void togglePlayback();                         // start/stop (shared by the Play button + MIDI map)
+    void executeControlCommand(const std::string& command);  // run a MIDI-mapped command
     bool loadAndApplyStyleFile(const juce::File& file);
     bool loadAndApplySongFile(const juce::File& file);
     bool selectStyleById(const std::string& styleId);
@@ -118,6 +121,7 @@ private:
     std::unique_ptr<juce::FileChooser> m_songChooser;
     std::unique_ptr<juce::FileChooser> m_pluginChooser;
     std::unique_ptr<juce::FileChooser> m_partPluginChooser;
+    std::string m_learnCommand;        // command currently waiting for a MIDI-learn press
 
     std::unique_ptr<cadenza::ui::NativePanel> m_panel;
     juce::WebBrowserComponent m_webView;

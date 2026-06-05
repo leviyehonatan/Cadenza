@@ -181,6 +181,39 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
 
     const bool syncBefore = m_router.state().syncroStarted;
 
+    // --- MIDI control buttons / MIDI learn (arranger control: sections, start/stop) ---
+    // A "press" is a CC with value > 0 or a note-on. Determine the trigger; if we're
+    // learning, capture it; otherwise fire any mapped command. A mapped NOTE is then
+    // consumed so it doesn't also play as a chord/melody note.
+    {
+        int trigger = -1;
+        bool press = false;
+        if (msg.isController()) {
+            trigger = controlTriggerForCC(msg.getControllerNumber());
+            press   = msg.getControllerValue() > 0;
+        } else if (msg.isNoteOn()) {
+            trigger = controlTriggerForNote(msg.getNoteNumber());
+            press   = msg.getVelocity() > 0;
+        }
+
+        if (trigger >= 0 && press && m_learnArmed.load()) {
+            m_learnArmed.store(false);
+            if (m_onControlLearn) m_onControlLearn(trigger);
+            return;   // consume: this press was for learning, not for playing
+        }
+        if (trigger >= 0) {
+            std::optional<std::string> command;
+            {
+                std::lock_guard<std::mutex> lk(m_publishMutex);
+                command = m_controlMap.commandFor(trigger);
+            }
+            if (command) {
+                if (press && m_onControl) m_onControl(*command);
+                return;   // consume: mapped controls never play notes / drive chords
+            }
+        }
+    }
+
     if (msg.isNoteOnOrOff()) {
         const int channel  = msg.getChannel();
         const int note     = msg.getNoteNumber();
