@@ -1086,6 +1086,50 @@ void MainComponent::applySongStepForBar(int bar)
     }
 }
 
+namespace {
+// Classify a section id by its name prefix.
+std::string sectionType(const std::string& id)
+{
+    auto starts = [&id](const char* p) { return id.rfind(p, 0) == 0; };
+    if (starts("intro"))  return "intro";
+    if (starts("fill"))   return "fill";
+    if (starts("ending")) return "ending";
+    return "main";
+}
+}
+
+void MainComponent::triggerSection(const std::string& id)
+{
+    m_styleEngine.allNotesOff();
+    m_styleEngine.setSection(id);
+    applyMixerState();   // re-assert mixer over the section's own channel-volume setup
+    if (m_panel) m_panel->setActiveSection(juce::String(id));
+
+    const std::string type = sectionType(id);
+    if (type == "main") {
+        m_currentMain = id;        // remember as the return target for fills/intros
+        m_oneShotActive = false;   // Mains loop
+        return;
+    }
+
+    // intro / fill / ending: play once, then transition.
+    int bars = 1;
+    if (auto style = m_styleEngine.currentStyle())
+        if (const auto* s = style->findSection(id))
+            bars = std::max(1, s->barCount);
+
+    m_oneShotActive   = true;
+    m_oneShotBars     = bars;
+    m_oneShotStartBar = m_audio.transport().positionBar();
+    if (type == "ending") {
+        m_oneShotStop = true;
+        m_oneShotNext.clear();
+    } else {
+        m_oneShotStop = false;
+        m_oneShotNext = m_currentMain.empty() ? std::string("mainA") : m_currentMain;
+    }
+}
+
 void MainComponent::timerCallback()
 {
     // Hot-plug MIDI: rescan ~every 2s (20Hz timer) so a keyboard plugged in after
@@ -1093,6 +1137,24 @@ void MainComponent::timerCallback()
     if (++m_midiRescanTicks >= 40) {
         m_midiRescanTicks = 0;
         m_midi.refreshInputs();
+    }
+
+    // Live one-shot sections: when an intro/fill/ending has played its bars, switch
+    // to the next section (or stop for an ending).
+    if (m_oneShotActive && m_audio.transport().playing()) {
+        const int barsPlayed = m_audio.transport().positionBar() - m_oneShotStartBar;
+        if (barsPlayed >= m_oneShotBars) {
+            m_oneShotActive = false;
+            if (m_oneShotStop) {
+                m_state.setPlaying(false);
+                m_audio.stop();
+                m_styleEngine.allNotesOff();
+                if (m_panel) m_panel->setPlaying(false);
+                pushToWeb("window.JuceBridge && window.JuceBridge.onPlayStateChanged(false);");
+            } else if (!m_oneShotNext.empty()) {
+                triggerSection(m_oneShotNext);   // intro/fill -> the Main
+            }
+        }
     }
 
     if (!m_songModeActive)
@@ -1215,9 +1277,11 @@ void MainComponent::buildNativePanel()
         m_state.setPlaying(play);
         if (play) {
             if (m_songModeActive) { m_songPlayer.reset(); m_lastSongBar = -1; }
-            m_audio.play();
+            m_audio.play();   // restarts the transport from bar 0
+            if (m_oneShotActive) m_oneShotStartBar = 0;   // re-anchor a pending intro/fill
         } else {
             m_audio.stop();
+            m_oneShotActive = false;   // a manual stop cancels any pending transition
         }
         if (m_panel) m_panel->setPlaying(play);
         pushToWeb(juce::String("window.JuceBridge && window.JuceBridge.onPlayStateChanged(")
@@ -1408,10 +1472,7 @@ void MainComponent::buildNativePanel()
     };
     cb.selectSection = [this](const std::string& id) {
         if (m_songModeActive) setSongMode(false);   // manual section control overrides song mode
-        m_styleEngine.allNotesOff();
-        m_styleEngine.setSection(id);
-        applyMixerState();   // re-assert mixer over the section's own channel-volume setup
-        if (m_panel) m_panel->setActiveSection(juce::String(id));
+        triggerSection(id);   // switch section + handle one-shot intro/fill/ending transitions
         saveSettings();
     };
 

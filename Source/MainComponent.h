@@ -69,6 +69,7 @@ private:
     void captureRegistration(int slot);   // snapshot the live setup into a registration
     void recallRegistration(int slot);    // restore a saved registration
     void exportPlaybackDiagnostics();
+    void triggerSection(const std::string& id);   // select a section, with one-shot intro/fill/ending handling
     bool loadAndApplyStyleFile(const juce::File& file);
     bool loadAndApplySongFile(const juce::File& file);
     bool selectStyleById(const std::string& styleId);
@@ -98,6 +99,14 @@ private:
     cadenza::arranger::SongPlayer m_songPlayer;
     bool m_songModeActive = false;
     int  m_lastSongBar = -1;
+
+    // Live one-shot sections: intro/fill/ending play once then auto-transition.
+    std::string m_currentMain = "mainA";   // last Main selected (return target)
+    bool        m_oneShotActive = false;
+    int         m_oneShotStartBar = 0;
+    int         m_oneShotBars = 0;
+    std::string m_oneShotNext;             // section to switch to when the one-shot ends
+    bool        m_oneShotStop = false;     // ending -> stop instead of switching
 
     cadenza::audio::MixerModel m_mixer;
     int m_midiRescanTicks = 0;   // timer ticks since last MIDI hot-plug rescan
