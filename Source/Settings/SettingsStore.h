@@ -25,9 +25,10 @@ struct StyleChannelMix
 struct RightLayer
 {
     bool enabled = false;   // does this layer sound?
-    int  program = 0;       // GM program 0..127
+    int  program = 0;       // GM program 0..127 (used when pluginPath is empty)
     int  volume  = 100;     // 0..127
     int  octave  = 0;       // octave shift, e.g. -2..+2
+    std::string pluginPath; // VST3 instrument for this layer ("" = GM voice)
 };
 
 // A registration: a one-button snapshot of the live performance setup, recalled

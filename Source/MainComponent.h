@@ -54,6 +54,7 @@ private:
     void openSongFileChooser();
     void openPluginFileChooser();
     void choosePartInstrument(int channel);   // load a VST3 instrument onto a mixer channel
+    void chooseRightLayerInstrument(int layer); // load a VST3 instrument onto a Right 1/2/3 layer
     bool loadAndApplyPluginFile(const juce::File& file);
     void clearMasterEffect();
     void pushPluginStateToWeb();

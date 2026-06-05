@@ -60,6 +60,7 @@ bool SettingsStore::load()
             m_state.rightLayers[i].program = e.get("program").asInt(m_state.rightLayers[i].program);
             m_state.rightLayers[i].volume  = e.get("volume").asInt(m_state.rightLayers[i].volume);
             m_state.rightLayers[i].octave  = e.get("octave").asInt(m_state.rightLayers[i].octave);
+            m_state.rightLayers[i].pluginPath = e.get("pluginPath").asString(m_state.rightLayers[i].pluginPath);
         }
     } else {
         m_state.rightLayers[0].program = m_state.melodyProgram;
@@ -101,6 +102,7 @@ bool SettingsStore::load()
                     r.rightLayers[j].program = le.get("program").asInt(r.rightLayers[j].program);
                     r.rightLayers[j].volume  = le.get("volume").asInt(r.rightLayers[j].volume);
                     r.rightLayers[j].octave  = le.get("octave").asInt(r.rightLayers[j].octave);
+                    r.rightLayers[j].pluginPath = le.get("pluginPath").asString(r.rightLayers[j].pluginPath);
                 }
             }
         }
@@ -165,6 +167,7 @@ bool SettingsStore::save() const
         o["program"] = J::Value::number(layer.program);
         o["volume"]  = J::Value::number(layer.volume);
         o["octave"]  = J::Value::number(layer.octave);
+        o["pluginPath"] = J::Value::string(layer.pluginPath);
         rightLayers.push_back(J::Value::object(std::move(o)));
     }
     root["rightLayers"] = J::Value::array(std::move(rightLayers));
@@ -177,6 +180,7 @@ bool SettingsStore::save() const
             o["program"] = J::Value::number(layer.program);
             o["volume"]  = J::Value::number(layer.volume);
             o["octave"]  = J::Value::number(layer.octave);
+            o["pluginPath"] = J::Value::string(layer.pluginPath);
             arr.push_back(J::Value::object(std::move(o)));
         }
         return arr;

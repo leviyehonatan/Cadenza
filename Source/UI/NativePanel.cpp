@@ -54,11 +54,20 @@ void showInstrumentMenu(juce::Component* anchor, int channel,
     });
 }
 
-// GM-only voice picker (no VST options) for the Right 1/2/3 layers: 16 families
-// of 8 programs each.
-void showGmVoiceMenu(juce::Component* anchor, std::function<void(int)> onPick)
+// Voice picker for the Right 1/2/3 layers: VST3 options on top, then the 16 GM
+// families of 8 programs each. Picking a GM program switches the layer back to GM.
+constexpr int kRightLoadPlugin = 900101;
+constexpr int kRightEditPlugin = 900103;
+
+void showRightVoiceMenu(juce::Component* anchor, bool hasPlugin,
+                        std::function<void(int)> onPickGm,
+                        std::function<void()> onLoadPlugin,
+                        std::function<void()> onOpenEditor)
 {
     juce::PopupMenu menu;
+    menu.addItem(kRightLoadPlugin, "Load VST3 Instrument...");
+    menu.addItem(kRightEditPlugin, "Open Plugin Editor...", hasPlugin);
+    menu.addSeparator();
     for (int fam = 0; fam < 16; ++fam) {
         juce::PopupMenu sub;
         for (int i = 0; i < 8; ++i) {
@@ -68,7 +77,11 @@ void showGmVoiceMenu(juce::Component* anchor, std::function<void(int)> onPick)
         menu.addSubMenu(cadenza::midi::gmFamilyName(fam), sub);
     }
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(anchor),
-                       [onPick](int result) { if (result > 0 && onPick) onPick(result - 1); });
+                       [onPickGm, onLoadPlugin, onOpenEditor](int result) {
+        if (result == kRightLoadPlugin) { if (onLoadPlugin) onLoadPlugin(); return; }
+        if (result == kRightEditPlugin) { if (onOpenEditor) onOpenEditor(); return; }
+        if (result > 0 && onPickGm) onPickGm(result - 1);   // GM voice
+    });
 }
 }
 
@@ -218,10 +231,11 @@ NativePanel::NativePanel()
         s.instrument = std::make_unique<juce::TextButton>("Grand Piano");
         s.instrument->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff333a47));
         s.instrument->onClick = [this, layer] {
-            showGmVoiceMenu(m_rightVoices[static_cast<std::size_t>(layer)].instrument.get(),
-                            [this, layer](int program) {
-                                if (m_cb.onRightInstrument) m_cb.onRightInstrument(layer, program);
-                            });
+            showRightVoiceMenu(m_rightVoices[static_cast<std::size_t>(layer)].instrument.get(),
+                               m_rightHasPlugin[static_cast<std::size_t>(layer)],
+                               [this, layer](int program) { if (m_cb.onRightInstrument) m_cb.onRightInstrument(layer, program); },
+                               [this, layer] { if (m_cb.onRightLoadPlugin) m_cb.onRightLoadPlugin(layer); },
+                               [this, layer] { if (m_cb.onRightOpenEditor) m_cb.onRightOpenEditor(layer); });
         };
         addAndMakeVisible(*s.instrument);
 
@@ -485,9 +499,20 @@ void NativePanel::setRightVoice(int layer, bool enabled, int program, int volume
         return;
     auto& s = m_rightVoices[static_cast<std::size_t>(layer)];
     if (s.enable)     s.enable->setToggleState(enabled, juce::dontSendNotification);
-    if (s.instrument) s.instrument->setButtonText(juce::String(cadenza::midi::gmInstrumentName(program)));
     if (s.volume)     s.volume->setValue(volume, juce::dontSendNotification);
     if (s.octVal)     s.octVal->setText(juce::String(octave), juce::dontSendNotification);
+    // Only show the GM name when no VST is loaded on this layer.
+    if (!m_rightHasPlugin[static_cast<std::size_t>(layer)] && s.instrument)
+        s.instrument->setButtonText(juce::String(cadenza::midi::gmInstrumentName(program)));
+}
+
+void NativePanel::setRightVoiceName(int layer, const juce::String& name, bool isPlugin)
+{
+    if (layer < 0 || layer >= 3)
+        return;
+    m_rightHasPlugin[static_cast<std::size_t>(layer)] = isPlugin;
+    if (auto& b = m_rightVoices[static_cast<std::size_t>(layer)].instrument)
+        b->setButtonText(name);
 }
 
 void NativePanel::setRegistrationUsed(int slot, bool used)

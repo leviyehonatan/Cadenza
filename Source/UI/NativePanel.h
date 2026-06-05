@@ -140,6 +140,8 @@ public:
         std::function<void(int, int)>  onRightInstrument;     // layer, GM program 0..127
         std::function<void(int, int)>  onRightVolume;         // layer, volume 0..127
         std::function<void(int, int)>  onRightOctave;         // layer, octave delta -1/+1
+        std::function<void(int)>       onRightLoadPlugin;     // layer -> choose+load a VST3
+        std::function<void(int)>       onRightOpenEditor;     // layer -> show the VST3 editor
         std::function<void(int)> onRecallRegistration;        // slot -> recall
         std::function<void(int)> onStoreRegistration;         // slot -> store current setup
     };
@@ -169,6 +171,8 @@ public:
     void setSplitPoint(int midiNote);                    // init the split marker (no callback)
     // Init a Right 1/2/3 voice strip (no callback): layer 0..2.
     void setRightVoice(int layer, bool enabled, int program, int volume, int octave);
+    // Show a layer's loaded VST3 name (isPlugin=true) or a GM voice name.
+    void setRightVoiceName(int layer, const juce::String& name, bool isPlugin);
     // Mark a registration slot as used (saved) so its button is highlighted.
     void setRegistrationUsed(int slot, bool used);
 
@@ -258,6 +262,7 @@ private:
         std::unique_ptr<juce::Label>        octVal;
     };
     std::array<RightVoiceStrip, 3> m_rightVoices;
+    std::array<bool, 3> m_rightHasPlugin { false, false, false };
 
     // Registrations (one-button performance snapshots).
     juce::Label        m_regCaption;

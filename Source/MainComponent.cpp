@@ -809,6 +809,46 @@ void MainComponent::choosePartInstrument(int channel)
         });
 }
 
+void MainComponent::chooseRightLayerInstrument(int layer)
+{
+    if (!m_settings || layer < 0 || layer >= 3)
+        return;
+    juce::File vst3Dir("C:\\Program Files\\Common Files\\VST3");
+    m_partPluginChooser = std::make_unique<juce::FileChooser>(
+        "Choose a VST3 instrument for Right " + juce::String(layer + 1),
+        vst3Dir.isDirectory() ? vst3Dir
+                              : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+        "*.vst3");
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    m_partPluginChooser->launchAsync(
+        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+            | juce::FileBrowserComponent::canSelectDirectories,
+        [safe, layer](const juce::FileChooser& chooser) {
+            if (auto* self = safe.getComponent()) {
+                const auto file = chooser.getResult();
+                if (file.exists()) {
+                    const int channel = self->m_midi.rightLayerChannel(layer);
+                    std::string err;
+                    if (self->m_audio.loadPartInstrument(channel, file.getFullPathName().toStdString(), err)) {
+                        auto& L = self->m_settings->state().rightLayers[layer];
+                        L.pluginPath = file.getFullPathName().toStdString();
+                        self->m_audio.controlChange(channel, 7, L.volume);   // apply the layer volume
+                        if (self->m_panel)
+                            self->m_panel->setRightVoiceName(
+                                layer, juce::String(self->m_audio.partInstrumentName(channel)), true);
+                        self->m_audio.showPartInstrumentEditor(channel);     // pop the plugin GUI
+                        self->saveSettings();
+                    } else {
+                        juce::Logger::writeToLog("[Cadenza] Right " + juce::String(layer + 1)
+                                                 + " VST load failed: " + juce::String(err));
+                    }
+                }
+                self->m_partPluginChooser.reset();
+            }
+        });
+}
+
 bool MainComponent::loadAndApplySoundFontFile(const juce::File& file, bool persist)
 {
     if (!file.existsAsFile() || !isSupportedSoundFontFile(file)) {
@@ -1142,11 +1182,20 @@ void MainComponent::applyRightHand()
         m_midi.setRightLayerEnabled(i, layer.enabled);
         m_midi.setRightLayerOctave(i, layer.octave);
         const int channel = m_midi.rightLayerChannel(i);
-        m_audio.programChange(channel, layer.program);                 // GM voice
-        m_audio.controlChange(channel, 7 /*CC7 volume*/, layer.volume);
+        if (!layer.pluginPath.empty()) {
+            // VST3 voice for this layer (notes route to the plugin by channel).
+            std::string err;
+            if (!m_audio.loadPartInstrument(channel, layer.pluginPath, err))   // idempotent
+                juce::Logger::writeToLog("[Cadenza] Right " + juce::String(i + 1)
+                                         + " VST load failed: " + juce::String(err));
+        } else {
+            m_audio.clearPartInstrument(channel);            // back to the GM SoundFont
+            m_audio.programChange(channel, layer.program);   // GM voice
+        }
+        m_audio.controlChange(channel, 7 /*CC7 volume/gain*/, layer.volume);
         juce::Logger::writeToLog("[Cadenza] Right " + juce::String(i + 1)
             + (layer.enabled ? " ON" : " off")
-            + " program=" + juce::String(layer.program)
+            + (layer.pluginPath.empty() ? (" program=" + juce::String(layer.program)) : juce::String(" VST"))
             + " vol=" + juce::String(layer.volume)
             + " oct=" + juce::String(layer.octave)
             + " ch=" + juce::String(channel));
@@ -1270,15 +1319,18 @@ void MainComponent::buildNativePanel()
     };
     cb.onRightInstrument = [this](int layer, int program) {
         if (!m_settings || layer < 0 || layer >= 3) return;
-        m_settings->state().rightLayers[layer].program = program;
+        auto& L = m_settings->state().rightLayers[layer];
+        L.program = program;
+        L.pluginPath.clear();                                           // switch back to a GM voice
         if (layer == 0) m_settings->state().melodyProgram = program;   // keep the mirror in sync
-        applyRightHand();
+        applyRightHand();                                              // clears any VST, sets the GM program
         if (m_panel)
-            m_panel->setRightVoice(layer,
-                                   m_settings->state().rightLayers[layer].enabled, program,
-                                   m_settings->state().rightLayers[layer].volume,
-                                   m_settings->state().rightLayers[layer].octave);
+            m_panel->setRightVoiceName(layer, juce::String(cadenza::midi::gmInstrumentName(program)), false);
         saveSettings();
+    };
+    cb.onRightLoadPlugin = [this](int layer) { chooseRightLayerInstrument(layer); };
+    cb.onRightOpenEditor = [this](int layer) {
+        m_audio.showPartInstrumentEditor(m_midi.rightLayerChannel(layer));
     };
     cb.onRightVolume = [this](int layer, int volume) {
         if (!m_settings || layer < 0 || layer >= 3) return;
@@ -1402,6 +1454,10 @@ void MainComponent::updateNativePanelStyle()
                 used[part.midiChannel] = true;
 
     constexpr int kLayers = cadenza::midi::MidiRouter::kNumRightLayers;
+    int oldRightCh[kLayers];
+    for (int i = 0; i < kLayers; ++i)
+        oldRightCh[i] = m_midi.rightLayerChannel(i);
+
     int layerChannel[kLayers];
     int lastFree = 1;
     for (int i = 0; i < kLayers; ++i) {
@@ -1415,6 +1471,11 @@ void MainComponent::updateNativePanelStyle()
         lastFree = ch + 1;
         m_midi.setRightLayerChannel(i, ch);
     }
+    // If a layer moved to a new channel, clear any VST left on its old channel so
+    // it doesn't linger (applyRightHand reloads the VST on the new channel).
+    for (int i = 0; i < kLayers; ++i)
+        if (oldRightCh[i] != layerChannel[i])
+            m_audio.clearPartInstrument(oldRightCh[i]);
     const int melodyChannel = layerChannel[0];   // Right 1 = the primary "Melody" strip
     applyRightHand();   // assert each layer's enable/program/volume/octave on its channel
 
@@ -1476,6 +1537,19 @@ void MainComponent::updateNativePanelStyle()
             ? juce::String("Drum Kit")
             : juce::String(cadenza::midi::gmInstrumentName(m_mixer.program(ch)));
         m_panel->setMixerInstrumentName(ch, insName);
+    }
+
+    // Refresh the Right 1/2/3 voice strips (VST name if a plugin is loaded on the
+    // layer's new channel, else the GM voice name).
+    if (m_settings) {
+        for (int i = 0; i < 3; ++i) {
+            const auto& L = m_settings->state().rightLayers[i];
+            m_panel->setRightVoice(i, L.enabled, L.program, L.volume, L.octave);
+            if (!L.pluginPath.empty())
+                m_panel->setRightVoiceName(i, juce::String(m_audio.partInstrumentName(m_midi.rightLayerChannel(i))), true);
+            else
+                m_panel->setRightVoiceName(i, juce::String(cadenza::midi::gmInstrumentName(L.program)), false);
+        }
     }
 
     applyMixerState();
