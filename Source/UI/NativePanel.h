@@ -118,6 +118,7 @@ public:
         std::function<void(int)> nudgeTranspose;     // delta -1 / +1
         std::function<void(int)> nudgeOctave;         // delta -1 / +1
         std::function<void(int)> nudgeTempo;          // delta in BPM (e.g. -1 / +1)
+        std::function<void(int)> onSetTempo;          // absolute BPM (e.g. from tap tempo)
         std::function<void(bool)> setArranger;
         std::function<void(bool)> setChordMemory;
         std::function<void(bool)> setSyncroStop;
@@ -199,7 +200,9 @@ private:
     juce::Label      m_bpmCaption;
     juce::TextButton m_bpmDown { "-" };
     juce::TextButton m_bpmUp   { "+" };
+    juce::TextButton m_bpmTap  { "Tap" };
     juce::Label      m_bpmVal;
+    std::vector<double> m_tapTimesMs;   // recent tap timestamps for tempo detection
 
     juce::Label m_styleName;
     juce::Label m_chord;

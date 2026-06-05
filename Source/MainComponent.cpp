@@ -1243,6 +1243,13 @@ void MainComponent::buildNativePanel()
         m_webView.setVisible(!m_webView.isVisible());
         resized();
     };
+    cb.onSetTempo = [this](int target) {
+        const int bpm = m_state.setBpm(target);
+        m_audio.setBpm(static_cast<double>(bpm));
+        if (m_panel) m_panel->setBpm(bpm);
+        pushToWeb("window.JuceBridge && window.JuceBridge.setBPM(" + juce::String(bpm) + ");");
+        saveSettings();
+    };
     cb.nudgeTempo = [this](int delta) {
         const int bpm = m_state.setBpm(m_state.bpm() + delta);
         m_audio.setBpm(static_cast<double>(bpm));

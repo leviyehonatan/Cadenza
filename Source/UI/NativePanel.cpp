@@ -104,6 +104,25 @@ NativePanel::NativePanel()
     addAndMakeVisible(m_bpmDown);
     addAndMakeVisible(m_bpmUp);
     addAndMakeVisible(m_bpmVal);
+    m_bpmTap.setTooltip("Tap a few beats to set the tempo");
+    m_bpmTap.onClick = [this] {
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        if (!m_tapTimesMs.empty() && now - m_tapTimesMs.back() > 2000.0)
+            m_tapTimesMs.clear();                       // gap > 2s -> start over
+        m_tapTimesMs.push_back(now);
+        if (m_tapTimesMs.size() > 4)
+            m_tapTimesMs.erase(m_tapTimesMs.begin());   // average the last few taps
+        if (m_tapTimesMs.size() >= 2) {
+            const double avgInterval = (m_tapTimesMs.back() - m_tapTimesMs.front())
+                                       / static_cast<double>(m_tapTimesMs.size() - 1);
+            if (avgInterval > 0.0) {
+                const int bpm = juce::jlimit(40, 300, juce::roundToInt(60000.0 / avgInterval));
+                m_bpmVal.setText(juce::String(bpm), juce::dontSendNotification);
+                if (m_cb.onSetTempo) m_cb.onSetTempo(bpm);
+            }
+        }
+    };
+    addAndMakeVisible(m_bpmTap);
     m_bpmVal.setJustificationType(juce::Justification::centred);
     m_bpmVal.setColour(juce::Label::textColourId, juce::Colours::white);
     m_bpmVal.setText("120", juce::dontSendNotification);
@@ -599,7 +618,8 @@ void NativePanel::resized()
         m_bpmCaption.setBounds(r.removeFromLeft(56));
         m_bpmDown.setBounds(r.removeFromLeft(36));     r.removeFromLeft(gap);
         m_bpmVal.setBounds(r.removeFromLeft(56));      r.removeFromLeft(gap);
-        m_bpmUp.setBounds(r.removeFromLeft(36));
+        m_bpmUp.setBounds(r.removeFromLeft(36));        r.removeFromLeft(gap * 2);
+        m_bpmTap.setBounds(r.removeFromLeft(56));
     }
     area.removeFromTop(gap);
 
