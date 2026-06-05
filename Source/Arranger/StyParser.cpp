@@ -1290,7 +1290,27 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
 
     // ---- MThd ----
     if (!r.match("MThd")) {
-        result.ok = false; result.error = "not a SMF (missing MThd)"; return result;
+        // No Standard MIDI File header. Identify common non-Yamaha formats so the
+        // message is understandable instead of a cryptic "missing MThd".
+        auto contains = [&bytes](const std::string& sig) {
+            const std::size_t limit = bytes.size() < 256 ? bytes.size() : 256;
+            if (sig.size() > limit) return false;
+            for (std::size_t i = 0; i + sig.size() <= limit; ++i) {
+                bool match = true;
+                for (std::size_t j = 0; j < sig.size(); ++j)
+                    if (bytes[i + j] != static_cast<uint8_t>(sig[j])) { match = false; break; }
+                if (match) return true;
+            }
+            return false;
+        };
+        result.ok = false;
+        if (bytes.empty())
+            result.error = "empty file";
+        else if (contains("KORF") || contains("KORG"))
+            result.error = "Korg style format (not supported)";
+        else
+            result.error = "not a Yamaha style (no MThd header)";
+        return result;
     }
     uint32_t headerLen = r.u32be();
     if (headerLen != 6) { result.ok = false; result.error = "unexpected MThd size"; return result; }
