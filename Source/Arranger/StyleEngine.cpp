@@ -87,6 +87,10 @@ void StyleEngine::setStyle(std::shared_ptr<const Style> style)
         m_sectionLengthTicks = 0;
     }
     m_lastFiredTickInSection = -1;
+    m_currentOnce = false;            // reset one-shot / queued sequencing for the new style
+    m_currentReturn.clear();
+    m_barsUntilReturn = 0;
+    m_hasPending.store(false);
 }
 
 std::shared_ptr<const Style> StyleEngine::currentStyle() const
@@ -95,23 +99,68 @@ std::shared_ptr<const Style> StyleEngine::currentStyle() const
     return m_style;
 }
 
-void StyleEngine::setSection(const std::string& name)
+// Caller must hold m_publishMutex. Updates the playing section + its length, runs
+// channel setup, and records one-shot state for the bar-boundary handler.
+void StyleEngine::switchToSection(const Style& style, const std::string& name,
+                                  bool once, const std::string& returnTo)
 {
-    std::lock_guard<std::mutex> lk(m_publishMutex);
-    if (!m_style) return;
-    const auto* sec = m_style->findSection(name);
-    if (!sec && !m_style->sections.empty()) {
-        // Fallback
-        m_sectionName = m_style->sections.front().name;
-    } else if (sec) {
+    const auto* sec = style.findSection(name);
+    if (!sec && !style.sections.empty())
+        m_sectionName = style.sections.front().name;
+    else if (sec)
         m_sectionName = name;
-    }
-    const auto* picked = m_style->findSection(m_sectionName);
+
+    const auto* picked = style.findSection(m_sectionName);
     if (picked) {
-        m_sectionLengthTicks = picked->barCount * m_style->beatsPerBar * m_style->ticksPerBeat;
+        m_sectionLengthTicks = picked->barCount * style.beatsPerBar * style.ticksPerBeat;
         applySectionChannelSetup(*picked);
     }
+    m_currentOnce     = once;
+    m_currentReturn   = returnTo;
+    m_barsUntilReturn = (once && picked) ? std::max(1, picked->barCount) : 0;
     m_lastFiredTickInSection = -1;
+}
+
+void StyleEngine::setSection(const std::string& name, bool once, const std::string& returnTo)
+{
+    std::lock_guard<std::mutex> lk(m_publishMutex);
+    m_hasPending.store(false);   // an immediate change cancels any queued one
+    if (!m_style) return;
+    switchToSection(*m_style, name, once, returnTo);
+}
+
+void StyleEngine::requestSection(const std::string& name, bool once, const std::string& returnTo)
+{
+    std::lock_guard<std::mutex> lk(m_publishMutex);
+    m_pendingSection = name;
+    m_pendingOnce    = once;
+    m_pendingReturn  = returnTo;
+    m_hasPending.store(true);
+}
+
+void StyleEngine::handleBarBoundary(const Style& style)
+{
+    bool changed = false, stop = false;
+    std::string newName;
+    {
+        std::lock_guard<std::mutex> lk(m_publishMutex);
+        if (m_hasPending.load()) {
+            m_hasPending.store(false);
+            switchToSection(style, m_pendingSection, m_pendingOnce, m_pendingReturn);
+            newName = m_sectionName;
+            changed = true;
+        } else if (m_currentOnce && --m_barsUntilReturn <= 0) {
+            if (m_currentReturn.empty()) { m_currentOnce = false; stop = true; }
+            else { switchToSection(style, m_currentReturn, false, {}); newName = m_sectionName; changed = true; }
+        }
+    }
+    if (changed) {
+        m_active.clear();          // drop the old section's notes (audio thread)
+        m_engine.allNotesOff();
+        if (m_onSectionChanged) m_onSectionChanged(newName);
+    }
+    if (stop && m_onStopRequested)
+        m_onStopRequested();
 }
 
 std::string StyleEngine::currentSection() const
@@ -208,8 +257,16 @@ void StyleEngine::onTick(int ticksAdvanced, cadenza::audio::Transport& transport
     const int currentTick = transport.positionTickInt();
     const int startTick   = currentTick - ticksAdvanced;
 
+    const int barTicks = style->beatsPerBar * style->ticksPerBeat;
     for (int t = startTick + 1; t <= currentTick; ++t) {
-        const int tickInSection = ((t % sectionLength) + sectionLength) % sectionLength;
+        // At each bar boundary, apply a queued section change or one-shot return
+        // (sample-tight, on the audio thread). This may change m_sectionLengthTicks.
+        if (barTicks > 0 && t > 0 && (t % barTicks) == 0)
+            handleBarBoundary(*style);
+
+        const int secLen = m_sectionLengthTicks;
+        if (secLen <= 0) continue;
+        const int tickInSection = ((t % secLen) + secLen) % secLen;
         if (tickInSection == m_lastFiredTickInSection) continue;
         firePatternNotesAtTick(tickInSection);
         m_lastFiredTickInSection = tickInSection;

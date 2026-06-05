@@ -20,6 +20,7 @@
 #include "../Midi/ChordRecognizer.h"
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -36,10 +37,21 @@ public:
     void setStyle(std::shared_ptr<const Style> style);
     std::shared_ptr<const Style> currentStyle() const;
 
-    // Choose which section ("intro", "mainA", "mainB", "ending", ...) is playing.
-    // If the named section isn't found, falls back to the first available.
-    void setSection(const std::string& name);
+    // Choose which section is playing NOW (immediate). `once`=true makes it a
+    // one-shot (intro/fill/ending): after its bars elapse the engine switches to
+    // `returnTo` (empty -> request stop). Used while stopped / for the first section.
+    void setSection(const std::string& name, bool once = false, const std::string& returnTo = {});
+    // Queue a section to switch to exactly at the next bar boundary (sample-tight,
+    // applied on the audio thread). `once`/`returnTo` as above. Used while playing.
+    void requestSection(const std::string& name, bool once, const std::string& returnTo);
     std::string currentSection() const;
+
+    // Fired (on the audio thread) when the playing section changes, and when a
+    // one-shot ending finishes and playback should stop. Marshal to the UI thread.
+    using SectionChangedCallback = std::function<void(const std::string&)>;
+    using StopRequestedCallback  = std::function<void()>;
+    void setSectionChangedCallback(SectionChangedCallback cb) { m_onSectionChanged = std::move(cb); }
+    void setStopRequestedCallback(StopRequestedCallback cb)   { m_onStopRequested  = std::move(cb); }
 
     // Set the live chord (from MidiRouter's chord recogniser, or from the web UI directly).
     void setChord(const cadenza::midi::Chord& chord);
@@ -70,6 +82,8 @@ private:
     };
 
     void onTick(int ticksAdvanced, cadenza::audio::Transport& transport);
+    void handleBarBoundary(const Style& style);   // audio thread: apply queued/one-shot section changes
+    void switchToSection(const Style& style, const std::string& name, bool once, const std::string& returnTo);
     void applySectionChannelSetup(const Section& section);
     void firePatternNotesAtTick(int tickInSection);
     void advanceActiveNotes(int ticksAdvanced);
@@ -88,6 +102,17 @@ private:
     int m_lastFiredTickInSection = -1;
     int m_sectionLengthTicks = 0;
     std::vector<ActiveNote> m_active;
+
+    // One-shot / quantized section sequencing.
+    bool        m_currentOnce = false;       // current section is a one-shot (audio thread)
+    std::string m_currentReturn;             // where to go when the one-shot ends (audio thread)
+    int         m_barsUntilReturn = 0;       // bars left before the one-shot returns (audio thread)
+    std::string m_pendingSection;            // queued section (guarded by m_publishMutex)
+    bool        m_pendingOnce = false;       // (guarded by m_publishMutex)
+    std::string m_pendingReturn;             // (guarded by m_publishMutex)
+    std::atomic<bool> m_hasPending { false };
+    SectionChangedCallback m_onSectionChanged;
+    StopRequestedCallback  m_onStopRequested;
 
     // Chord + transpose context — atomic ints + protected struct.
     mutable std::mutex m_chordMutex;

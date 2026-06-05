@@ -103,13 +103,9 @@ private:
     bool m_songModeActive = false;
     int  m_lastSongBar = -1;
 
-    // Live one-shot sections: intro/fill/ending play once then auto-transition.
-    std::string m_currentMain = "mainA";   // last Main selected (return target)
-    bool        m_oneShotActive = false;
-    int         m_oneShotStartBar = 0;
-    int         m_oneShotBars = 0;
-    std::string m_oneShotNext;             // section to switch to when the one-shot ends
-    bool        m_oneShotStop = false;     // ending -> stop instead of switching
+    // Live sections: one-shot returns / ending stops are sequenced inside the
+    // StyleEngine (sample-tight); we only track the last Main as the return target.
+    std::string m_currentMain = "mainA";
 
     cadenza::audio::MixerModel m_mixer;
     int m_midiRescanTicks = 0;   // timer ticks since last MIDI hot-plug rescan
