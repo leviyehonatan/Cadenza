@@ -151,10 +151,10 @@ void mixDefaultsFillInWhenStyleOmitsThem()
     expect(s4.reverb && *s4.reverb == 55, "explicit reverb above floor preserved");
 }
 
-void melodicPartForcesGmBankZero()
+void melodicPartPreservesVariationBankAndDefaultsMissingBank()
 {
-    // A melodic part carrying Yamaha XG/GS variation banks must play on GM bank 0
-    // (the program already selects the right GM instrument family).
+    // A melodic part with a Yamaha XG/GS variation bank should preserve that
+    // bank so XG-capable SoundFonts can use the richer preset.
     Part p;
     p.name = "harmony";
     p.midiChannel = 3;
@@ -163,9 +163,21 @@ void melodicPartForcesGmBankZero()
     p.program = 48;     // GM String Ensemble 1
 
     const auto setup = playbackSetupForPart(p);
-    expect(setup.bankMsb && *setup.bankMsb == 0, "melodic bank MSB forced to GM 0");
-    expect(setup.bankLsb && *setup.bankLsb == 0, "melodic bank LSB forced to GM 0");
+    expect(setup.bankMsb && *setup.bankMsb == 0, "melodic bank MSB preserved");
+    expect(setup.bankLsb && *setup.bankLsb == 112, "melodic bank LSB preserved");
     expect(setup.program && *setup.program == 48, "program (GM voice) preserved");
+
+    // When the style omits bank select entirely, we still start from GM bank 0/0
+    // rather than inheriting stale bank state from an earlier channel.
+    Part q;
+    q.name = "pad";
+    q.midiChannel = 4;
+    q.program = 50;
+
+    const auto setup2 = playbackSetupForPart(q);
+    expect(setup2.bankMsb && *setup2.bankMsb == 0, "melodic missing bank MSB defaults to GM 0");
+    expect(setup2.bankLsb && *setup2.bankLsb == 0, "melodic missing bank LSB defaults to GM 0");
+    expect(setup2.program && *setup2.program == 50, "melodic program preserved when bank defaults");
 }
 
 void drumPartKeepsItsBank()
@@ -626,7 +638,7 @@ int main()
     drumPartCanCarryPresetAndPercussionFlag();
     playbackSetupCarriesBankProgramAndSynthChannel();
     mixDefaultsFillInWhenStyleOmitsThem();
-    melodicPartForcesGmBankZero();
+    melodicPartPreservesVariationBankAndDefaultsMissingBank();
     drumPartKeepsItsBank();
     percussionSubRhythmRoutesToDrumChannel();
     melodicPartDoesNotRouteToDrumChannel();

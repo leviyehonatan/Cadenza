@@ -83,14 +83,14 @@ PartPlaybackSetup playbackSetupForPart(const Part& part)
         if (!setup.program)
             setup.program = 0;        // default GM drum kit
     } else {
-        // Melodic voice on a General MIDI SoundFont: Yamaha XG/GS *variation*
-        // banks (bank LSB 112/117/19, etc. from .sty files) are not present in a
-        // GM SoundFont, so forwarding them makes FluidSynth load the wrong (or no)
-        // preset. The program number already matches the GM instrument (Yamaha XG
-        // voices are GM-program-aligned), so force GM bank 0 and let the program
-        // pick the right instrument family.
-        setup.bankMsb = 0;
-        setup.bankLsb = 0;
+        // Preserve explicit Yamaha/XG variation banks when the style provides
+        // them so XG-capable SoundFonts can use the richer preset. If a melodic
+        // part omits bank select entirely, default it to GM 0/0 so the synth does
+        // not inherit a stale bank from an earlier part.
+        if (!setup.bankMsb)
+            setup.bankMsb = 0;
+        if (!setup.bankLsb)
+            setup.bankLsb = 0;
     }
     // Mix defaults so the band sounds wide and natural instead of dry and dead-
     // center. Volume/pan/chorus fill in only when the style omits them.
