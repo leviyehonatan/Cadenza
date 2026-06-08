@@ -1,5 +1,7 @@
 #include "LiveMelodyVoice.h"
 
+#include <cctype>
+
 namespace cadenza::midi
 {
 LiveMelodyVoice::LiveMelodyVoice(int melodyChannel) noexcept
@@ -46,27 +48,55 @@ void LiveMelodyVoice::reset() noexcept
 int gmProgramForBankName(const std::string& name) noexcept
 {
     // Maps the 16 UI "Bank Memory" voice names to reasonable General MIDI programs.
-    struct Entry { const char* name; int program; };
+    // Matching is intentionally forgiving: case-insensitive and punctuation-free,
+    // so the native UI can evolve without breaking persisted settings or bridge
+    // payloads that use longer descriptive names.
+    auto normalize = [](const std::string& text) {
+        std::string out;
+        out.reserve(text.size());
+        for (unsigned char c : text) {
+            if (std::isalnum(c))
+                out.push_back(static_cast<char>(std::tolower(c)));
+        }
+        return out;
+    };
+
+    const std::string key = normalize(name);
+
+    struct Entry { const char* key; int program; };
     static const Entry table[] = {
-        { "Piano",      0  },  // Acoustic Grand Piano
-        { "El Grand",   2  },  // Electric Grand Piano
-        { "Rhodes",     4  },  // Electric Piano 1
-        { "FM Piano",   5  },  // Electric Piano 2
-        { "Digi Piano", 1  },  // Bright Acoustic Piano
-        { "Rock Piano", 3  },  // Honky-tonk Piano
-        { "N. Guitar",  24 },  // Acoustic Nylon Guitar
-        { "C. Guitar",  27 },  // Electric Clean Guitar
-        { "Dist Solo",  30 },  // Distortion Guitar
-        { "80's Lead",  81 },  // Sawtooth Lead
-        { "Organ",      16 },  // Drawbar Organ
-        { "Alto Sax",   65 },  // Alto Sax
-        { "Tenor Sax",  66 },  // Tenor Sax
-        { "Trumpet",    56 },  // Trumpet
-        { "Power Pad",  88 },  // New Age Pad
-        { "Synth Stab", 62 },  // Synth Brass 1
+        { "piano",      0  },  // Acoustic Grand Piano
+        { "acousticgrandpiano", 0 },
+        { "elgrand",   2  },  // Electric Grand Piano
+        { "electricgrandpiano", 2 },
+        { "rhodes",     4  },  // Electric Piano 1
+        { "electricpiano1", 4 },
+        { "fmpiano",    5  },  // Electric Piano 2
+        { "electricpiano2", 5 },
+        { "digipiano",  1  },  // Bright Acoustic Piano
+        { "brightacousticpiano", 1 },
+        { "rockpiano",  3  },  // Honky-tonk Piano
+        { "honkytonkpiano", 3 },
+        { "nguitar",    24 },  // Acoustic Nylon Guitar
+        { "acousticnylonguitar", 24 },
+        { "cguitar",    27 },  // Electric Clean Guitar
+        { "electriccleanguitar", 27 },
+        { "distsolo",   30 },  // Distortion Guitar
+        { "distortionguitar", 30 },
+        { "80slead",    81 },  // Sawtooth Lead
+        { "sawlead",    81 },
+        { "organ",      16 },  // Drawbar Organ
+        { "drawbarorgan", 16 },
+        { "altosax",    65 },  // Alto Sax
+        { "tenorsax",   66 },  // Tenor Sax
+        { "trumpet",    56 },  // Trumpet
+        { "powerpad",   88 },  // New Age Pad
+        { "newagepad",  88 },
+        { "synthstab",  62 },  // Synth Brass 1
+        { "synthbrass1", 62 },
     };
     for (const auto& e : table)
-        if (name == e.name)
+        if (key == e.key)
             return e.program;
     return 0;  // fallback: Acoustic Grand Piano
 }

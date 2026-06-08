@@ -149,6 +149,10 @@ void bankNamesMapToGmPrograms()
     expect(gmProgramForBankName("Alto Sax") == 65, "Alto Sax -> 65");
     expect(gmProgramForBankName("Trumpet") == 56, "Trumpet -> 56");
     expect(gmProgramForBankName("N. Guitar") == 24, "N. Guitar -> 24");
+    expect(gmProgramForBankName("Electric Grand Piano") == 2, "alias Electric Grand Piano -> 2");
+    expect(gmProgramForBankName("Electric Piano 2") == 5, "alias Electric Piano 2 -> 5");
+    expect(gmProgramForBankName("Saw Lead") == 81, "alias Saw Lead -> 81");
+    expect(gmProgramForBankName("Power Pad") == 88, "alias Power Pad -> 88");
     expect(gmProgramForBankName("totally unknown voice") == 0, "unknown -> 0 (Acoustic Grand fallback)");
 }
 
