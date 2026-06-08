@@ -931,14 +931,15 @@ void completePolicyDoesNotReportParseWarnings()
     expect(r.style.parseWarnings.empty(), "complete CASM policy has no parse warnings");
 }
 
-void unmappedPolicyChannelReportsWarning()
+void unmappedPolicyChannelDoesNotWarnForLegacyLowChannels()
 {
     auto sty = makeSingleSectionStyWithCtb2(6, 0, 2);
     auto r = cadenza::arranger::parseStyBytes(sty);
-    expect(r.ok, "unmapped channel policy style parses OK");
+    expect(r.ok, "legacy low-channel policy style parses OK");
     if (!r.ok) return;
 
-    expect(hasStyleWarning(r.style, "destination role unknown"), "unmapped destination role warning stored on style");
+    expect(!hasStyleWarning(r.style, "destination role unknown"),
+           "legacy low-channel destination role stays quiet");
 }
 }
 
@@ -966,7 +967,7 @@ int main()
     malformedCasmDoesNotCrash();
     missingCasmReportsParseWarning();
     completePolicyDoesNotReportParseWarnings();
-    unmappedPolicyChannelReportsWarning();
+    unmappedPolicyChannelDoesNotWarnForLegacyLowChannels();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All StyParser tests passed\n";

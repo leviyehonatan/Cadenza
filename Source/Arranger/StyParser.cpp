@@ -1588,7 +1588,12 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
                 }
             }
 
-            if (part.yamahaPolicy && isUnknownDestinationRole(part.yamahaPolicy->destinationPart)) {
+            // Only warn for unresolved destination roles on real Yamaha style
+            // accompaniment channels. Low channels are often legacy/import data
+            // and fall back to placeholder names like part-ch4 by design.
+            if (part.midiChannel >= 9 && part.midiChannel <= 16
+                && part.yamahaPolicy
+                && isUnknownDestinationRole(part.yamahaPolicy->destinationPart)) {
                 addParseWarning(style,
                     "section " + section.name + " channel " + std::to_string(part.midiChannel)
                     + " destination role unknown/unmapped: " + part.yamahaPolicy->destinationPart);
