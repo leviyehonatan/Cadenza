@@ -319,6 +319,32 @@ std::optional<int> transposeNote(const PatternNote& note, const TransposeContext
     return n;
 }
 
+int fitToChordTones(int pitch, int rootPc, cadenza::midi::ChordQuality quality) noexcept
+{
+    bool allowed[12] = {};
+    auto add = [&](int interval) { allowed[((rootPc + interval) % 12 + 12) % 12] = true; };
+
+    using Q = cadenza::midi::ChordQuality;
+    switch (quality) {
+        case Q::Major:           add(0); add(4); add(7); add(11); break;
+        case Q::Minor:           add(0); add(3); add(7); add(10); break;
+        case Q::Dominant7:       add(0); add(4); add(7); add(10); break;
+        case Q::Major7:          add(0); add(4); add(7); add(11); break;
+        case Q::Minor7:          add(0); add(3); add(7); add(10); break;
+        case Q::MinorMajor7:     add(0); add(3); add(7); add(11); break;
+        case Q::Diminished:      add(0); add(3); add(6); add(9);  break;
+        case Q::HalfDiminished7: add(0); add(3); add(6); add(10); break;
+        case Q::Diminished7:     add(0); add(3); add(6); add(9);  break;
+        case Q::Augmented:       add(0); add(4); add(8);          break;
+        case Q::Sus2:            add(0); add(2); add(7);          break;
+        case Q::Sus4:            add(0); add(5); add(7);          break;
+        case Q::Power:
+        case Q::SingleNote:      add(0); add(7);                  break;
+    }
+
+    return snapToAllowed(pitch, allowed);
+}
+
 std::optional<int> transposeNote(const PatternNote& note,
                                  const TransposeContext& ctx,
                                  const YamahaChannelPolicy* policy)
@@ -344,14 +370,30 @@ std::optional<int> transposeNote(const PatternNote& note,
         return pitchWithPolicyLimits(note.pitch + rootDeltaForPolicy(ctx, *policy), ctx, *policy);
     }
 
+    const int shifted = applyGlobalOffsets(note.pitch + rootDeltaForPolicy(ctx, *policy), ctx);
+
     // ChordColor follows the chord by root transposition relative to this
     // channel's declared source root (e.g. a phrase recorded over G). It is then
-    // fit to a scale: the CASM-declared NTT scale if any, otherwise a scale
-    // derived from the QUALITY of the chord the player is holding, so phrases sit
-    // in key on minor / dominant / etc. chords.
+    // fit according to the declared NTT family. Guitar NTTs are a little more
+    // specific: AllPurpose keeps the scale/chord fit, Stroke prefers chord-tone
+    // shapes, and Arpeggio keeps a flowing scale-like line.
     if (note.role == NoteRole::ChordColor) {
-        const int shifted = applyGlobalOffsets(note.pitch + rootDeltaForPolicy(ctx, *policy), ctx);
-        // A CASM-declared NTT scale wins; otherwise fit to the played chord quality.
+        if (policy->ntr == YamahaNtr::Guitar) {
+            if (policy->ntt == YamahaNtt::Stroke)
+                return applyPolicyNoteLimits(fitToChordTones(shifted, ctx.chord.rootPitchClass, ctx.chord.quality), *policy);
+
+            if (policy->ntt == YamahaNtt::Arpeggio) {
+                if (auto nttMode = scaleModeForChordQuality(ctx.chord.quality))
+                    return applyPolicyNoteLimits(snapToScale(shifted, ctx.chord.rootPitchClass, *nttMode), *policy);
+                return applyPolicyNoteLimits(fitColorToneToChord(shifted, ctx.chord.rootPitchClass, ctx.chord.quality), *policy);
+            }
+
+            const int fitted = fitColorToneToChord(shifted, ctx.chord.rootPitchClass, ctx.chord.quality);
+            return applyPolicyNoteLimits(fitted, *policy);
+        }
+
+        // Non-guitar NTTs: a CASM-declared NTT scale wins; otherwise fit to the
+        // played chord quality.
         if (auto nttMode = scaleModeForNtt(policy->ntt))
             return nearestPitchInScale(shifted, ctx.chord.rootPitchClass, *nttMode, *policy);
         const int fitted = fitColorToneToChord(shifted, ctx.chord.rootPitchClass, ctx.chord.quality);
@@ -375,8 +417,18 @@ std::optional<int> transposeNote(const PatternNote& note,
     }
 
     if (policy->ntr == YamahaNtr::Guitar) {
-        // TODO: implement Yamaha guitar tables. For now, keep guitar parts safe
-        // by fitting known chord tones and root-shifting color tones above.
+        if (policy->ntt == YamahaNtt::Stroke)
+            return transposeWithPolicyLimits(note, ctx, *policy);
+
+        if (policy->ntt == YamahaNtt::Arpeggio) {
+            if (isChordRole(note.role))
+                return transposeWithPolicyLimits(note, ctx, *policy);
+            if (auto nttMode = scaleModeForChordQuality(ctx.chord.quality))
+                return applyPolicyNoteLimits(snapToScale(shifted, ctx.chord.rootPitchClass, *nttMode), *policy);
+            return transposeWithPolicyLimits(note, ctx, *policy);
+        }
+
+        // AllPurpose and unknown guitar tables fall back to the safer fitted path.
         return transposeWithPolicyLimits(note, ctx, *policy);
     }
 

@@ -372,6 +372,27 @@ void colorTonePolicyChordModeFitsPlayedQuality()
            "Chord-NTT color E over C major stays E");
 }
 
+void guitarNttDistinguishesStrokeFromArpeggio()
+{
+    // Stroke should prefer compact chord-tone shapes, while Arpeggio keeps the
+    // line more scale-like.
+    auto color = noteOf(NoteRole::ChordColor, 63);  // Eb over C.
+    auto stroke = policyOf(YamahaNtr::Guitar, YamahaNtt::Stroke, "C");
+    auto arpeggio = policyOf(YamahaNtr::Guitar, YamahaNtt::Arpeggio, "C");
+
+    expect(transposeNote(color, ctxFor(0, ChordQuality::Major), &stroke).value() == 64,
+           "Guitar Stroke snaps color tone to the nearest chord tone");
+    expect(transposeNote(color, ctxFor(0, ChordQuality::Major), &arpeggio).value() == 62,
+           "Guitar Arpeggio keeps the scale-like passing tone");
+
+    // Chord tones still track the current chord in both modes.
+    auto third = noteOf(NoteRole::Chord3, 64);
+    expect(transposeNote(third, ctxFor(0, ChordQuality::Minor), &stroke).value() == 63,
+           "Guitar Stroke still maps chord tones to the current chord");
+    expect(transposeNote(third, ctxFor(0, ChordQuality::Minor), &arpeggio).value() == 63,
+           "Guitar Arpeggio still maps chord tones to the current chord");
+}
+
 void fallbackPolicyWithRolesIsHonoured()
 {
     // A Fallback policy carrying explicit role-based NTR/NTT (as set by
@@ -438,6 +459,7 @@ int main()
     colorToneFitsPlayedChordQuality();
     colorToneFitsExoticQualities();
     colorTonePolicyChordModeFitsPlayedQuality();
+    guitarNttDistinguishesStrokeFromArpeggio();
     fallbackPolicyWithRolesIsHonoured();
     drumsStayAbsoluteWithPolicy();
 
