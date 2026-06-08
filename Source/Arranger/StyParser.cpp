@@ -208,6 +208,16 @@ struct RawNote
     int      chorus = -1;
 };
 
+// A timed controller / pitch-bend event with an absolute tick. Collected
+// alongside notes so the engine can replay a style's expression/bend curves.
+struct RawAuto
+{
+    uint64_t tick = 0;
+    uint8_t  channel = 0;   // 0..15
+    int      type = 0;      // MIDI CC number, or AutomationEvent::kPitchBend
+    int      value = 0;     // CC value 0..127, or pitch-bend 0..16383
+};
+
 struct SectionMarker
 {
     uint64_t tick = 0;
@@ -218,6 +228,7 @@ struct SectionMarker
 struct TrackData
 {
     std::vector<RawNote> notes;
+    std::vector<RawAuto> automation;   // CC1/CC11/CC64 + pitch bend, absolute ticks
     // For meta-event tempo (microseconds per quarter-note)
     std::optional<uint32_t> firstTempoMicros;
     // Per-channel program changes seen during the track (last write wins for a section).
@@ -322,6 +333,10 @@ bool parseTrack(Reader& r, uint32_t trackLen,
                         out.reverbByChannel[ch] = value;
                     else if (cc == 93)
                         out.chorusByChannel[ch] = value;
+                    else if (cc == 1 || cc == 11 || cc == 64)
+                        // Musical automation: modulation, expression, sustain.
+                        // Captured with their tick so swells/sustains replay live.
+                        out.automation.push_back({ absoluteTick, ch, cc, value });
                     break;
                 } // CC
                 case 0xC0: { // Program Change
@@ -330,7 +345,13 @@ bool parseTrack(Reader& r, uint32_t trackLen,
                     break;
                 }
                 case 0xD0: { r.u8(); break; } // channel aftertouch
-                case 0xE0: { r.u8(); r.u8(); break; } // pitch bend
+                case 0xE0: { // pitch bend (14-bit, LSB then MSB; 8192 = centre)
+                    uint8_t lsb = r.u8();
+                    uint8_t msb = r.u8();
+                    const int bend = (static_cast<int>(msb) << 7) | static_cast<int>(lsb);
+                    out.automation.push_back({ absoluteTick, ch, AutomationEvent::kPitchBend, bend });
+                    break;
+                }
                 default: r.fail("unknown midi voice msg"); break;
             }
         } else if (status == 0xFF) {
@@ -1402,6 +1423,15 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
     std::sort(all.begin(), all.end(),
               [](const FlatNote& a, const FlatNote& b) { return a.startTick < b.startTick; });
 
+    // Flatten controller/pitch-bend automation from all tracks, sorted by tick,
+    // so it can be sliced into sections exactly like notes.
+    std::vector<RawAuto> allAuto;
+    for (const auto& t : tracks)
+        for (const auto& a : t.automation)
+            allAuto.push_back(a);
+    std::sort(allAuto.begin(), allAuto.end(),
+              [](const RawAuto& a, const RawAuto& b) { return a.tick < b.tick; });
+
     // If no section markers were found, treat the whole file as one mainA section.
     if (markers.empty()) {
         SectionMarker m;
@@ -1435,6 +1465,13 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
             if (n.startTick >= startT && n.startTick < stopT) {
                 byChannel[n.channel].push_back(n);
             }
+        }
+
+        // Group this section's automation by MIDI channel, same window.
+        std::map<int, std::vector<RawAuto>> autoByChannel;
+        for (const auto& a : allAuto) {
+            if (a.tick >= startT && a.tick < stopT)
+                autoByChannel[a.channel].push_back(a);
         }
 
         // Yamaha SFF accompaniment lives on MIDI channels 9..16. Real .sty files
@@ -1592,6 +1629,22 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
                                               : assignRole(n.channel, n.pitch, part.yamahaPolicy);
                 part.notes.push_back(pn);
             }
+
+            // Attach this channel's expression/modulation/sustain/pitch-bend
+            // automation, with ticks made relative to the section start. Drums
+            // don't bend, but expression/sustain on a kit is harmless, so we
+            // keep all captured events as-is.
+            if (auto itA = autoByChannel.find(ch); itA != autoByChannel.end()) {
+                part.automation.reserve(itA->second.size());
+                for (const auto& a : itA->second) {
+                    AutomationEvent ev;
+                    ev.tick  = static_cast<int>(a.tick - startT);
+                    ev.type  = a.type;
+                    ev.value = a.value;
+                    part.automation.push_back(ev);
+                }
+            }
+
             section.parts.push_back(std::move(part));
         }
         style.sections.push_back(std::move(section));

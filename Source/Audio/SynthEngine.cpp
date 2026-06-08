@@ -168,6 +168,13 @@ public:
         fluid_synth_cc(m_synth, channel, controller, value);
     }
 
+    void pitchBend(int channel, int value14) override {
+        if (!m_synth) return;
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        // FluidSynth expects a 14-bit value (0..16383, 8192 = centre).
+        fluid_synth_pitch_bend(m_synth, channel, value14);
+    }
+
     void allNotesOff() override {
         if (!m_synth) return;
         const std::lock_guard<std::mutex> lock(m_mutex);

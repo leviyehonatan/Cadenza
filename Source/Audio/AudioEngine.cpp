@@ -213,6 +213,17 @@ void AudioEngine::controlChange(int channel, int cc, int value)
     }
 }
 
+void AudioEngine::pitchBend(int channel, int value14)
+{
+    // Pitch bend goes to the internal synth only; VST-instrument parts would
+    // need a MIDI pitch-bend in their collector (not wired yet — rare on the
+    // accompaniment channels that use VSTs).
+    if (m_synth) {
+        if (auto synthChannel = synthChannelFromCadenzaChannel(channel))
+            m_synth->pitchBend(*synthChannel, value14);
+    }
+}
+
 void AudioEngine::allNotesOff()
 {
     if (m_synth) m_synth->allNotesOff();

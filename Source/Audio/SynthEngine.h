@@ -35,6 +35,9 @@ public:
     virtual void noteOff(int channel, int note) = 0;
     virtual void programChange(int channel, int program) = 0;
     virtual void controlChange(int channel, int controller, int value) = 0;
+    // 14-bit pitch bend: 0..16383, 8192 = centre. Default no-op so synths that
+    // don't support it (or the Null engine) still compile.
+    virtual void pitchBend(int /*channel*/, int /*value14*/) {}
     virtual void allNotesOff() = 0;
 
     // Optional: load a SoundFont file. Returns true on success. Default impl is a no-op.

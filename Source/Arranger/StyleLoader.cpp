@@ -144,6 +144,15 @@ LoadResult loadStyleFromJson(const std::string& json)
                 n.scaleDegree = noteVal.get("scaleDegree").asInt(0);
                 part.notes.push_back(n);
             }
+
+            const auto& autoArr = partVal.get("automation").asArray();
+            for (const auto& aVal : autoArr) {
+                AutomationEvent ev;
+                ev.tick  = aVal.get("tick").asInt(0);
+                ev.type  = aVal.get("type").asInt(0);
+                ev.value = aVal.get("value").asInt(0);
+                part.automation.push_back(ev);
+            }
             section.parts.push_back(std::move(part));
         }
         style.sections.push_back(std::move(section));
@@ -215,6 +224,18 @@ std::string saveStyleToJson(const Style& style, bool pretty)
                 notes.push_back(J::Value::object(std::move(noteObj)));
             }
             partObj["notes"] = J::Value::array(std::move(notes));
+
+            if (!part.automation.empty()) {
+                J::Array autos;
+                for (const auto& a : part.automation) {
+                    J::Object aObj;
+                    aObj["tick"]  = J::Value::number(a.tick);
+                    aObj["type"]  = J::Value::number(a.type);
+                    aObj["value"] = J::Value::number(a.value);
+                    autos.push_back(J::Value::object(std::move(aObj)));
+                }
+                partObj["automation"] = J::Value::array(std::move(autos));
+            }
             parts.push_back(J::Value::object(std::move(partObj)));
         }
         secObj["parts"] = J::Value::array(std::move(parts));

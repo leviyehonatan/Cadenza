@@ -268,7 +268,13 @@ void StyleEngine::onTick(int ticksAdvanced, cadenza::audio::Transport& transport
         if (secLen <= 0) continue;
         const int tickInSection = ((t % secLen) + secLen) % secLen;
         if (tickInSection == m_lastFiredTickInSection) continue;
+        // At the loop restart, return expression/bend/sustain to their default
+        // so a part that faded out (or bent up) at the end of the bar doesn't
+        // start the next loop stuck quiet/detuned before its first event.
+        if (tickInSection == 0)
+            resetPartControllers();
         firePatternNotesAtTick(tickInSection);
+        fireAutomationAtTick(tickInSection);
         m_lastFiredTickInSection = tickInSection;
     }
 }
@@ -307,6 +313,13 @@ void StyleEngine::applySectionChannelSetup(const Section& section)
             m_engine.controlChange(setup.cadenzaChannel, 91, *setup.reverb);
         if (setup.chorus)
             m_engine.controlChange(setup.cadenzaChannel, 93, *setup.chorus);
+
+        // Start every section with neutral expression/bend/sustain so a new
+        // section never inherits a stuck swell or bend from the previous one.
+        m_engine.controlChange(setup.cadenzaChannel, 11, 127);
+        m_engine.controlChange(setup.cadenzaChannel, 1, 0);
+        m_engine.controlChange(setup.cadenzaChannel, 64, 0);
+        m_engine.pitchBend(setup.cadenzaChannel, 8192);
 
         juce::Logger::writeToLog(
             juce::String("[Cadenza] Style part setup section=") + juce::String(section.name)
@@ -404,6 +417,59 @@ void StyleEngine::firePatternNotesAtTick(int tickInSection)
                                            std::max(1, note.duration), note.velocity,
                                            &part, &note });
         }
+    }
+}
+
+void StyleEngine::fireAutomationAtTick(int tickInSection)
+{
+    std::shared_ptr<const Style> style;
+    std::string sectionName;
+    {
+        std::lock_guard<std::mutex> lk(m_publishMutex);
+        style = m_style;
+        sectionName = m_sectionName;
+    }
+    if (!style) return;
+
+    const Section* section = style->findSection(sectionName);
+    if (!section) return;
+
+    for (const auto& part : section->parts) {
+        if (part.automation.empty()) continue;
+        const int channel = playbackChannelForPart(part);
+        for (const auto& ev : part.automation) {
+            if (ev.tick != tickInSection) continue;
+            if (ev.type == AutomationEvent::kPitchBend)
+                m_engine.pitchBend(channel, ev.value);
+            else
+                m_engine.controlChange(channel, ev.type, ev.value);
+        }
+    }
+}
+
+void StyleEngine::resetPartControllers()
+{
+    std::shared_ptr<const Style> style;
+    std::string sectionName;
+    {
+        std::lock_guard<std::mutex> lk(m_publishMutex);
+        style = m_style;
+        sectionName = m_sectionName;
+    }
+    if (!style) return;
+
+    const Section* section = style->findSection(sectionName);
+    if (!section) return;
+
+    // Only reset channels that actually use automation, so we don't spam MIDI on
+    // parts that never bend or swell.
+    for (const auto& part : section->parts) {
+        if (part.automation.empty()) continue;
+        const int channel = playbackChannelForPart(part);
+        m_engine.controlChange(channel, 11, 127);   // expression -> full
+        m_engine.controlChange(channel, 1, 0);      // modulation -> off
+        m_engine.controlChange(channel, 64, 0);     // sustain -> off
+        m_engine.pitchBend(channel, 8192);          // pitch bend -> centre
     }
 }
 

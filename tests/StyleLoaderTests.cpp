@@ -42,6 +42,10 @@ const char* sampleStyleJson = R"({
           "notes": [
             { "tick": 0,    "duration": 480, "pitch": 36, "velocity": 90, "role": "chord-root" },
             { "tick": 960,  "duration": 240, "pitch": 36, "velocity": 80, "role": "chord-5" }
+          ],
+          "automation": [
+            { "tick": 240, "type": 11,  "value": 90 },
+            { "tick": 240, "type": 255, "value": 10240 }
           ]
         }
       ]
@@ -108,6 +112,13 @@ void pushControlChange(std::vector<uint8_t>& trk, uint32_t delta, uint8_t channe
     pushU8(trk, controller);
     pushU8(trk, value);
 }
+void pushPitchBend(std::vector<uint8_t>& trk, uint32_t delta, uint8_t channel, int value14)
+{
+    pushVLQ(trk, delta);
+    pushU8(trk, 0xE0 | (channel & 0x0F));
+    pushU8(trk, static_cast<uint8_t>(value14 & 0x7F));          // LSB
+    pushU8(trk, static_cast<uint8_t>((value14 >> 7) & 0x7F));   // MSB
+}
 void pushNoteOn(std::vector<uint8_t>& trk, uint32_t delta, uint8_t channel, uint8_t pitch, uint8_t vel)
 {
     pushVLQ(trk, delta);
@@ -161,7 +172,10 @@ std::vector<uint8_t> makeSampleSty()
     pushControlChange(notes, 0, 9, 91, 48);
     pushControlChange(notes, 0, 9, 93, 9);
     pushNoteOn(notes, 0, 1, 60, 100);
-    pushNoteOff(notes, 480, 1, 60);
+    pushControlChange(notes, 240, 1, 11, 90);   // expression swell mid-note (tick 240)
+    pushPitchBend(notes, 0, 1, 10240);          // bend up at tick 240
+    pushControlChange(notes, 0, 1, 64, 127);    // sustain on at tick 240
+    pushNoteOff(notes, 240, 1, 60);             // tick 480
     pushNoteOn(notes, 0, 1, 64, 100);
     pushNoteOff(notes, 480, 1, 64);
     pushNoteOn(notes, 960, 9, 36, 110);
@@ -205,6 +219,12 @@ void loadFromJsonSucceeds()
     expect(bass.program && *bass.program == 32, "bass program");
     expect(bass.notes[0].role == NoteRole::ChordRoot, "bass note 0 role");
     expect(bass.notes[1].role == NoteRole::Chord5, "bass note 1 role");
+    expect(bass.automation.size() == 2, "bass automation loaded");
+    if (bass.automation.size() == 2) {
+        expect(bass.automation[0].type == 11 && bass.automation[0].value == 90, "bass CC11 automation");
+        expect(bass.automation[1].type == AutomationEvent::kPitchBend
+               && bass.automation[1].value == 10240, "bass pitch-bend automation");
+    }
 }
 
 void roleStringRoundTrip()
@@ -240,6 +260,14 @@ void saveAndReload()
         expect(drums.pan && *drums.pan == 64, "pan round-trip");
         expect(drums.reverb && *drums.reverb == 38, "reverb round-trip");
         expect(drums.chorus && *drums.chorus == 6, "chorus round-trip");
+    }
+    if (b && b->parts.size() >= 2) {
+        const auto& bass = b->parts[1];
+        expect(bass.automation.size() == 2, "automation count round-trip");
+        if (bass.automation.size() == 2) {
+            expect(bass.automation[1].type == AutomationEvent::kPitchBend
+                   && bass.automation[1].value == 10240, "pitch-bend round-trip");
+        }
     }
 }
 
@@ -305,6 +333,18 @@ void loadFromStyFileSucceeds()
         expect(bass->program && *bass->program == 32, "sty bass program");
         expect(bass->notes[0].role == NoteRole::ChordRoot, "sty bass follows chord root");
         expect(bass->notes[1].role == NoteRole::Chord3, "sty harmony follows chord third");
+
+        // Expression / sustain / pitch-bend captured from the .sty MIDI stream.
+        bool sawExpr = false, sawSustain = false, sawBend = false;
+        for (const auto& a : bass->automation) {
+            if (a.type == 11 && a.value == 90 && a.tick == 240) sawExpr = true;
+            if (a.type == 64 && a.value == 127 && a.tick == 240) sawSustain = true;
+            if (a.type == AutomationEvent::kPitchBend && a.value == 10240 && a.tick == 240) sawBend = true;
+        }
+        expect(bass->automation.size() == 3, "sty bass automation captured");
+        expect(sawExpr, "sty bass expression CC11 captured");
+        expect(sawSustain, "sty bass sustain CC64 captured");
+        expect(sawBend, "sty bass pitch-bend captured");
     }
 
     const auto* mainB = r.style.findSection("mainB");

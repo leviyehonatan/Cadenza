@@ -86,6 +86,8 @@ private:
     void switchToSection(const Style& style, const std::string& name, bool once, const std::string& returnTo);
     void applySectionChannelSetup(const Section& section);
     void firePatternNotesAtTick(int tickInSection);
+    void fireAutomationAtTick(int tickInSection);   // CC/pitch-bend events due this tick
+    void resetPartControllers();                     // expression/bend/sustain back to default
     void advanceActiveNotes(int ticksAdvanced);
     // Re-pitch sustained chord-following notes when the live chord changes, so
     // held parts (e.g. pads) follow immediately instead of waiting for the loop.

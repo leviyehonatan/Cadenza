@@ -48,6 +48,7 @@ public:
     void noteOff(int channel, int note);
     void programChange(int channel, int program);
     void controlChange(int channel, int cc, int value);
+    void pitchBend(int channel, int value14);   // 14-bit, 8192 = centre
     void allNotesOff();
 
     // SoundFont loading (no-op for NullSynthEngine).

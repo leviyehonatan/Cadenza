@@ -105,6 +105,21 @@ struct PatternNote
     int scaleDegree = 0;   // only used when role==ScaleTone (0..6, 0=tonic)
 };
 
+// A timed MIDI controller/pitch-bend event inside a pattern. These carry the
+// musical "life" of a style — expression swells (CC11), modulation (CC1),
+// sustain (CC64) and pitch bends (guitar/sax slides) — that note-on/off alone
+// can't express. Played back verbatim on the part's channel as the loop runs.
+struct AutomationEvent
+{
+    // Sentinel `type` meaning "this is a 14-bit pitch-bend, not a CC". 0xFF is
+    // safe because real MIDI CC numbers only go up to 119.
+    static constexpr int kPitchBend = 0xFF;
+
+    int tick  = 0;     // start tick within the pattern (relative to section start)
+    int type  = 0;     // MIDI CC number (1/11/64...) or kPitchBend
+    int value = 0;     // CC value 0..127, or pitch-bend 0..16383 (8192 = centre)
+};
+
 struct Part
 {
     std::string name;           // "drums", "bass", "harmony"
@@ -121,6 +136,7 @@ struct Part
     int octaveOffset = 0;        // octaves added at playback (e.g. bass/pad dropped by -1)
     std::optional<YamahaChannelPolicy> yamahaPolicy;
     std::vector<PatternNote> notes;
+    std::vector<AutomationEvent> automation;  // CC/pitch-bend, sorted by tick
 };
 
 struct Section
