@@ -461,19 +461,28 @@ NoteRole assignRole(uint8_t channelZeroBased,
     return assignRole(channelZeroBased, pitch);
 }
 
-// Pick a representative MIDI program for a part = most common program across
-// this section's notes. Returns -1 if no program-change was ever seen.
-int dominantProgram(const std::vector<RawNote>& notes)
+struct DominantPresetKey
 {
-    std::unordered_map<int, int> tally;
-    for (const auto& n : notes) {
-        if (n.programChange >= 0) tally[n.programChange]++;
+    int program = -1;
+    int bankMsb = -1;
+    int bankLsb = -1;
+
+    bool operator==(const DominantPresetKey& other) const noexcept
+    {
+        return program == other.program && bankMsb == other.bankMsb && bankLsb == other.bankLsb;
     }
-    if (tally.empty()) return -1;
-    auto best = std::max_element(tally.begin(), tally.end(),
-        [](const auto& a, const auto& b) { return a.second < b.second; });
-    return best->first;
-}
+};
+
+struct DominantPresetKeyHash
+{
+    std::size_t operator()(const DominantPresetKey& key) const noexcept
+    {
+        std::size_t h = static_cast<std::size_t>(key.program + 2);
+        h = h * 1315423911u + static_cast<std::size_t>(key.bankMsb + 2);
+        h = h * 1315423911u + static_cast<std::size_t>(key.bankLsb + 2);
+        return h;
+    }
+};
 
 struct DominantPreset
 {
@@ -486,54 +495,64 @@ struct DominantPreset
     int chorus = -1;
 };
 
+// Pick a representative preset = the most common program+bank tuple across this
+// section's notes. Returns an empty preset if no program-change was ever seen.
 DominantPreset dominantPreset(const std::vector<RawNote>& notes)
 {
     DominantPreset preset;
-    preset.program = dominantProgram(notes);
 
-    auto fillFromNote = [&](const RawNote& n)
+    std::unordered_map<DominantPresetKey, int, DominantPresetKeyHash> tally;
+    for (const auto& n : notes) {
+        if (n.programChange < 0)
+            continue;
+        tally[{ n.programChange, n.bankMsb, n.bankLsb }]++;
+    }
+
+    auto fillControllers = [&](const std::vector<RawNote>& source)
     {
-        if (n.bankMsb >= 0)
-            preset.bankMsb = n.bankMsb;
-        if (n.bankLsb >= 0)
-            preset.bankLsb = n.bankLsb;
-        if (n.volume >= 0)
-            preset.volume = n.volume;
-        if (n.pan >= 0)
-            preset.pan = n.pan;
-        if (n.reverb >= 0)
-            preset.reverb = n.reverb;
-        if (n.chorus >= 0)
-            preset.chorus = n.chorus;
+        for (const auto& n : source) {
+            if (preset.bankMsb < 0 && n.bankMsb >= 0)
+                preset.bankMsb = n.bankMsb;
+            if (preset.bankLsb < 0 && n.bankLsb >= 0)
+                preset.bankLsb = n.bankLsb;
+            if (preset.volume < 0 && n.volume >= 0)
+                preset.volume = n.volume;
+            if (preset.pan < 0 && n.pan >= 0)
+                preset.pan = n.pan;
+            if (preset.reverb < 0 && n.reverb >= 0)
+                preset.reverb = n.reverb;
+            if (preset.chorus < 0 && n.chorus >= 0)
+                preset.chorus = n.chorus;
+            if (preset.bankMsb >= 0 && preset.bankLsb >= 0 &&
+                preset.volume >= 0 && preset.pan >= 0 &&
+                preset.reverb >= 0 && preset.chorus >= 0)
+                break;
+        }
     };
 
-    if (preset.program >= 0) {
-        for (auto it = notes.rbegin(); it != notes.rend(); ++it) {
-            if (it->programChange == preset.program) {
-                fillFromNote(*it);
-                break;
-            }
+    if (tally.empty()) {
+        fillControllers(notes);
+        return preset;
+    }
+
+    auto best = std::max_element(tally.begin(), tally.end(),
+        [](const auto& a, const auto& b) { return a.second < b.second; });
+
+    const auto& key = best->first;
+    for (auto it = notes.rbegin(); it != notes.rend(); ++it) {
+        if (it->programChange == key.program && it->bankMsb == key.bankMsb && it->bankLsb == key.bankLsb) {
+            preset.program = it->programChange;
+            preset.bankMsb = it->bankMsb;
+            preset.bankLsb = it->bankLsb;
+            preset.volume = it->volume;
+            preset.pan = it->pan;
+            preset.reverb = it->reverb;
+            preset.chorus = it->chorus;
+            break;
         }
     }
 
-    for (const auto& n : notes) {
-        if (preset.bankMsb < 0 && n.bankMsb >= 0)
-            preset.bankMsb = n.bankMsb;
-        if (preset.bankLsb < 0 && n.bankLsb >= 0)
-            preset.bankLsb = n.bankLsb;
-        if (preset.volume < 0 && n.volume >= 0)
-            preset.volume = n.volume;
-        if (preset.pan < 0 && n.pan >= 0)
-            preset.pan = n.pan;
-        if (preset.reverb < 0 && n.reverb >= 0)
-            preset.reverb = n.reverb;
-        if (preset.chorus < 0 && n.chorus >= 0)
-            preset.chorus = n.chorus;
-        if (preset.bankMsb >= 0 && preset.bankLsb >= 0 &&
-            preset.volume >= 0 && preset.pan >= 0 &&
-            preset.reverb >= 0 && preset.chorus >= 0)
-            break;
-    }
+    fillControllers(notes);
     return preset;
 }
 

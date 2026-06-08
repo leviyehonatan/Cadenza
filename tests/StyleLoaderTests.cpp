@@ -554,6 +554,80 @@ void dominantPresetKeepsMatchingBankAndProgram()
         expect(bass->instrument == "Electric Fingered Bass", "dominant preset instrument matches bank/program");
     }
 }
+
+std::vector<uint8_t> makeDominantPresetBankCollisionSty()
+{
+    std::vector<uint8_t> smf;
+    pushTag(smf, "MThd");
+    pushU32(smf, 6);
+    pushU16(smf, 1);
+    pushU16(smf, 2);
+    pushU16(smf, 480);
+
+    std::vector<uint8_t> markers;
+    pushTempo(markers, 0, 500000);
+    pushMarker(markers, 0, "Main A");
+    pushEndOfTrack(markers, 960);
+    appendTrack(smf, markers);
+
+    std::vector<uint8_t> notes;
+
+    // More common preset: GM-aligned bass on an otherwise unknown part.
+    pushControlChange(notes, 0, 4, 0, 0);
+    pushControlChange(notes, 0, 4, 32, 0);
+    pushProgramChange(notes, 0, 4, 32);
+    pushNoteOn(notes, 0, 4, 40, 96);
+    pushNoteOff(notes, 120, 4, 40);
+    pushNoteOn(notes, 0, 4, 43, 96);
+    pushNoteOff(notes, 120, 4, 43);
+
+    // Less common preset, same program number but a Yamaha panel bank. The
+    // parser should not let this override the more frequent GM-aligned bank.
+    pushControlChange(notes, 0, 4, 0, 104);
+    pushControlChange(notes, 0, 4, 32, 0);
+    pushProgramChange(notes, 0, 4, 32);
+    pushNoteOn(notes, 0, 4, 45, 96);
+    pushNoteOff(notes, 120, 4, 45);
+    pushEndOfTrack(notes);
+    appendTrack(smf, notes);
+
+    return smf;
+}
+
+void dominantPresetKeepsTheMostCommonBankAndProgramPair()
+{
+    const auto path = std::filesystem::temp_directory_path() / "cadenza-dominant-preset-bank-collision.sty";
+    {
+        std::ofstream out(path, std::ios::binary);
+        const auto bytes = makeDominantPresetBankCollisionSty();
+        out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+
+    auto r = loadStyleFromStyFile(path.string());
+    std::filesystem::remove(path);
+
+    expect(r.ok, "dominant preset bank collision sty load ok");
+    if (!r.ok) {
+        std::cerr << r.error << '\n';
+        return;
+    }
+
+    const auto* mainA = r.style.findSection("mainA");
+    expect(mainA != nullptr, "dominant preset bank collision mainA section");
+    const Part* part = nullptr;
+    if (mainA)
+        for (const auto& candidate : mainA->parts)
+            if (candidate.midiChannel == 5)
+                part = &candidate;
+
+    expect(part != nullptr, "dominant preset bank collision part present");
+    if (part) {
+        expect(part->bankMsb && *part->bankMsb == 0, "dominant preset kept GM bank 0");
+        expect(part->bankLsb && *part->bankLsb == 0, "dominant preset kept GM bank LSB 0");
+        expect(part->program && *part->program == 32, "dominant preset kept program 32");
+        expect(part->instrument == "Acoustic Bass", "dominant preset kept the GM bass preset");
+    }
+}
 }  // anonymous namespace
 
 int main()
@@ -567,6 +641,7 @@ int main()
     rhythm2ChannelBecomesPercussion();
     panelVoiceBankRemapsToGmRole();
     dominantPresetKeepsMatchingBankAndProgram();
+    dominantPresetKeepsTheMostCommonBankAndProgramPair();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All StyleLoader tests passed\n";
