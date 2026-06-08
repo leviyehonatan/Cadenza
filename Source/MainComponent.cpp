@@ -1261,6 +1261,7 @@ void MainComponent::applySongStepForBar(int bar)
     if (step.sectionChanged) {
         m_styleEngine.allNotesOff();
         m_styleEngine.setSection(step.section);
+        if (m_panel) m_panel->setActiveSection(juce::String(step.section));
     }
 
     if (step.chordChanged) {
