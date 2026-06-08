@@ -131,8 +131,11 @@ MainComponent::MainComponent()
     m_styleEngine.setStopRequestedCallback([this] {
         juce::Component::SafePointer<MainComponent> safe(this);
         juce::MessageManager::callAsync([safe] {
-            if (auto* self = safe.getComponent(); self && self->m_state.playing())
-                self->togglePlayback();   // ending finished -> stop
+            if (auto* self = safe.getComponent(); self && self->m_state.playing()) {
+                self->m_state.setPlaying(false);
+                if (self->m_panel) self->m_panel->setPlaying(false);
+                self->pushToWeb("window.JuceBridge && window.JuceBridge.onPlayStateChanged(false);");
+            }
         });
     });
 
@@ -1278,6 +1281,11 @@ void MainComponent::applySongStepForBar(int bar, bool applySection)
 
 void MainComponent::queueSongSectionForBar(int bar)
 {
+    if (m_songPlayer.shouldStopAtBar(bar)) {
+        m_styleEngine.requestStopAtBarBoundary();
+        return;
+    }
+
     const auto step = m_songPlayer.previewToBar(bar);
     if (step.sectionChanged)
         m_styleEngine.requestSection(step.section, false, {});

@@ -54,6 +54,9 @@ public:
     // Report what updateToBar() would emit without advancing the applied state.
     SongStep previewToBar(int bar) const;
 
+    // True at the first boundary after a non-looping chart has finished.
+    bool shouldStopAtBar(int bar) const;
+
 private:
     std::shared_ptr<const Song> m_song;
     bool m_loop = false;

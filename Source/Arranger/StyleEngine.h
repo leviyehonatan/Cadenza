@@ -48,6 +48,7 @@ public:
     // Queue a section to switch to exactly at the next bar boundary (sample-tight,
     // applied on the audio thread). `once`/`returnTo` as above. Used while playing.
     void requestSection(const std::string& name, bool once, const std::string& returnTo);
+    void requestStopAtBarBoundary();
     void cancelSectionRequest();
     std::string currentSection() const;
 
@@ -89,7 +90,7 @@ private:
     void onTick(int ticksAdvanced, cadenza::audio::Transport& transport);
     // Caller must hold m_publishMutex. Called only while stopped or on audio thread.
     void applyStyleReplacement(std::shared_ptr<const Style> style);
-    void handleBarBoundary(const Style& style);   // audio thread: apply queued/one-shot section changes
+    bool handleBarBoundary(const Style& style);   // audio thread: apply queued/one-shot section changes
     void switchToSection(const Style& style, const std::string& name, bool once, const std::string& returnTo);
     void applySectionChannelSetup(const Section& section);
     void firePatternNotesAtTick(int tickInSection);
@@ -119,6 +120,7 @@ private:
     std::string m_pendingSection;            // queued section (guarded by m_publishMutex)
     bool        m_pendingOnce = false;       // (guarded by m_publishMutex)
     std::string m_pendingReturn;             // (guarded by m_publishMutex)
+    bool        m_pendingStop = false;       // stop at next bar boundary (guarded by m_publishMutex)
     std::atomic<bool> m_hasPending { false };
     SectionChangeQueue m_immediateSectionChanges;
     StyleChangeQueue m_styleChanges;

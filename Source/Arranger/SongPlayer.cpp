@@ -72,4 +72,9 @@ SongStep SongPlayer::previewToBar(int bar) const
     auto preview = *this;
     return preview.updateToBar(bar);
 }
+
+bool SongPlayer::shouldStopAtBar(int bar) const
+{
+    return previewToBar(bar).atEnd;
+}
 }

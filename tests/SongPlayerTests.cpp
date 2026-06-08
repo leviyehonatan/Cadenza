@@ -126,6 +126,16 @@ void previewDoesNotConsumeFutureChange()
     auto applied = p.updateToBar(3);
     expect(applied.sectionChanged && applied.section == "mainA", "preview does not consume bar3 section change");
 }
+
+void stopBoundaryHonoursLooping()
+{
+    SongPlayer p;
+    p.setSong(demoSong());
+    expect(p.shouldStopAtBar(8), "non-looping song stops at first bar after final event");
+
+    p.setLooping(true);
+    expect(!p.shouldStopAtBar(8), "looping song does not stop at wrap boundary");
+}
 }
 
 int main()
@@ -139,6 +149,7 @@ int main()
     loopingWrapsAndReapplies();
     resetReapplies();
     previewDoesNotConsumeFutureChange();
+    stopBoundaryHonoursLooping();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All SongPlayer tests passed\n";

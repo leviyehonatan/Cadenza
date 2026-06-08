@@ -143,6 +143,7 @@ void StyleEngine::setSection(const std::string& name, bool once, const std::stri
     m_immediateSectionChanges.clear();
     std::lock_guard<std::mutex> lk(m_publishMutex);
     m_hasPending.store(false);   // an immediate change cancels any queued one
+    m_pendingStop = false;
     if (!m_style) return;
     switchToSection(*m_style, name, once, returnTo);
 }
@@ -153,22 +154,34 @@ void StyleEngine::requestSection(const std::string& name, bool once, const std::
     m_pendingSection = name;
     m_pendingOnce    = once;
     m_pendingReturn  = returnTo;
+    m_pendingStop    = false;
     m_hasPending.store(true);
+}
+
+void StyleEngine::requestStopAtBarBoundary()
+{
+    std::lock_guard<std::mutex> lk(m_publishMutex);
+    m_hasPending.store(false);
+    m_pendingStop = true;
 }
 
 void StyleEngine::cancelSectionRequest()
 {
     std::lock_guard<std::mutex> lk(m_publishMutex);
     m_hasPending.store(false);
+    m_pendingStop = false;
 }
 
-void StyleEngine::handleBarBoundary(const Style& style)
+bool StyleEngine::handleBarBoundary(const Style& style)
 {
     bool changed = false, stop = false;
     std::string newName;
     {
         std::lock_guard<std::mutex> lk(m_publishMutex);
-        if (m_hasPending.load()) {
+        if (m_pendingStop) {
+            m_pendingStop = false;
+            stop = true;
+        } else if (m_hasPending.load()) {
             m_hasPending.store(false);
             switchToSection(style, m_pendingSection, m_pendingOnce, m_pendingReturn);
             newName = m_sectionName;
@@ -183,8 +196,13 @@ void StyleEngine::handleBarBoundary(const Style& style)
         m_engine.allNotesOff();
         if (m_onSectionChanged) m_onSectionChanged(newName);
     }
-    if (stop && m_onStopRequested)
-        m_onStopRequested();
+    if (stop) {
+        m_active.clear();
+        m_engine.stop();
+        if (m_onStopRequested)
+            m_onStopRequested();
+    }
+    return stop;
 }
 
 std::string StyleEngine::currentSection() const
@@ -274,6 +292,7 @@ void StyleEngine::onTick(int ticksAdvanced, cadenza::audio::Transport& transport
         if (lk.owns_lock()) {
             if (auto request = m_immediateSectionChanges.tryTake()) {
                 m_hasPending.store(false);
+                m_pendingStop = false;
                 if (m_style)
                     switchToSection(*m_style, request->name, request->once, request->returnTo);
             }
@@ -309,8 +328,9 @@ void StyleEngine::onTick(int ticksAdvanced, cadenza::audio::Transport& transport
     for (int t = startTick + 1; t <= currentTick; ++t) {
         // At each bar boundary, apply a queued section change or one-shot return
         // (sample-tight, on the audio thread). This may change m_sectionLengthTicks.
-        if (barTicks > 0 && t > 0 && (t % barTicks) == 0)
-            handleBarBoundary(*style);
+        if (barTicks > 0 && t > 0 && (t % barTicks) == 0
+            && handleBarBoundary(*style))
+            return;
 
         const int secLen = m_sectionLengthTicks;
         if (secLen <= 0) continue;
