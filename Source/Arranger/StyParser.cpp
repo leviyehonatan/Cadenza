@@ -1467,13 +1467,17 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
     style.beatsPerBar  = 4;
     style.beatUnit     = 4;
     style.ticksPerBeat = ticksPerQuarter;
+    bool foundTimeSignature = false;
     for (const auto& t : tracks) {
         if (t.firstTimeSignature) {
             style.beatsPerBar = t.firstTimeSignature->first;
             style.beatUnit = t.firstTimeSignature->second;
+            foundTimeSignature = true;
             break;
         }
     }
+    if (!foundTimeSignature)
+        addParseWarning(style, "no valid MIDI time signature found, using 4/4 fallback");
     style.yamahaFormat = inferYamahaFormat(result.casm);
 
     for (const auto& warning : result.casm.warnings)
@@ -1543,6 +1547,12 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
         const uint64_t barTicks = std::max<uint64_t>(
             1, static_cast<uint64_t>(style.beatsPerBar) * style.ticksPerBeat * 4
                    / static_cast<uint64_t>(style.beatUnit));
+        if ((lenTicks % barTicks) != 0) {
+            addParseWarning(style,
+                "section timing " + section.name + " length " + std::to_string(lenTicks)
+                + " ticks is not a whole number of " + std::to_string(barTicks)
+                + "-tick bars");
+        }
         section.barCount = std::max<int>(1, static_cast<int>(lenTicks / barTicks));
 
         // Group this section's notes by MIDI channel into Parts.

@@ -18,6 +18,8 @@ void expect(bool cond, const std::string& msg) {
     std::cerr << "FAIL: " << msg << '\n';
 }
 
+bool hasStyleWarning(const cadenza::arranger::Style& style, const std::string& text);
+
 // ---------- SMF byte builders ----------
 void pushU8(std::vector<uint8_t>& b, uint8_t v) { b.push_back(v); }
 void pushU16(std::vector<uint8_t>& b, uint16_t v) { b.push_back(v >> 8); b.push_back(v & 0xFF); }
@@ -182,6 +184,7 @@ std::vector<uint8_t> makeSingleSectionSmf(uint8_t channel)
     pushU16(smf, 480);
 
     std::vector<uint8_t> t0;
+    pushTimeSignature(t0, 0, 4, 2);
     pushTempo(t0, 0, 500000);
     pushMarker(t0, 0, "Main A");
     pushEndOfTrack(t0, 1920);
@@ -348,6 +351,8 @@ void parsesHeaderAndProducesStyle()
     expect(r.style.defaultTempo == 120, "tempo 120");
     expect(r.style.beatsPerBar == 4 && r.style.beatUnit == 4,
            "missing time signature falls back to 4/4");
+    expect(hasStyleWarning(r.style, "no valid MIDI time signature"),
+           "missing time signature reports 4/4 fallback");
     expect(!r.casm.found, "plain SMF has no CASM");
 }
 
@@ -361,6 +366,8 @@ void importsThreeFourTimeSignature()
            "first valid 3/4 signature is retained");
     const auto* mainA = r.style.findSection("mainA");
     expect(mainA && mainA->barCount == 2, "3/4 section length uses 1440 ticks per bar");
+    expect(!hasStyleWarning(r.style, "section timing"),
+           "clean 3/4 section has no timing warning");
 }
 
 void importsSixEightTimeSignature()
@@ -372,6 +379,18 @@ void importsSixEightTimeSignature()
     expect(r.style.beatsPerBar == 6 && r.style.beatUnit == 8, "6/8 signature imported");
     const auto* mainA = r.style.findSection("mainA");
     expect(mainA && mainA->barCount == 2, "6/8 section length uses 1440 ticks per bar");
+    expect(!hasStyleWarning(r.style, "section timing"),
+           "clean 6/8 section has no timing warning");
+}
+
+void malformedSectionDurationReportsWarning()
+{
+    auto r = cadenza::arranger::parseStyBytes(makeTimeSignatureSmf(3, 2, 1500));
+    expect(r.ok, "misaligned 3/4 SMF parses OK");
+    if (!r.ok) return;
+
+    expect(hasStyleWarning(r.style, "section timing mainA"),
+           "section duration not divisible by bar length reports warning");
 }
 
 void sectionsAreSplitByMarkers()
@@ -1011,6 +1030,7 @@ int main()
     parsesHeaderAndProducesStyle();
     importsThreeFourTimeSignature();
     importsSixEightTimeSignature();
+    malformedSectionDurationReportsWarning();
     sectionsAreSplitByMarkers();
     mainARolesAreAssignedHeuristically();
     drumsAreAbsolute();
