@@ -1737,7 +1737,7 @@ void MainComponent::updateNativePanelStyle()
     for (int i = 0; i < kLayers; ++i) {
         int ch = lastFree;
         for (int c = lastFree; c <= 16; ++c) {
-            if (c == 10 || used[c]) continue;   // skip the drum channel and style parts
+            if (c == 9 || c == 10 || used[c]) continue;   // skip both drum channels (RHY1/RHY2) and style parts
             ch = c; break;
         }
         used[ch] = true;                        // don't hand the same channel to two layers
@@ -1809,7 +1809,9 @@ void MainComponent::updateNativePanelStyle()
         m_panel->updateMixerStrip(ch, m_mixer.volume(ch), m_mixer.mute(ch), m_mixer.solo(ch));
         const juce::String insName = (ch == 10)
             ? juce::String("Drum Kit")
-            : juce::String(cadenza::midi::gmInstrumentName(m_mixer.program(ch)));
+            : (ch == 9)
+                ? juce::String("Drum Kit (Rhythm 2)")
+                : juce::String(cadenza::midi::gmInstrumentName(m_mixer.program(ch)));
         m_panel->setMixerInstrumentName(ch, insName);
     }
 

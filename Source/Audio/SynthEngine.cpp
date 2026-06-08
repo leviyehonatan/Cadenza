@@ -135,13 +135,14 @@ public:
         if (!m_synth) return;
         const std::lock_guard<std::mutex> lock(m_mutex);
 
-        if (channel == kDrumChannel) {
+        if (isDrumSynthChannel(channel)) {
             // Drum kits live on the GM percussion bank (128) in GM/GS/XG
             // SoundFonts. Yamaha/Genos styles move this channel to the XG drum
             // bank (CC0=127), which most SoundFonts don't have, so the kit lookup
             // fails and drums garble. Force bank 128 where kits actually are, then
             // select the kit, falling back to the standard kit if the style's kit
-            // number isn't present.
+            // number isn't present. Two channels are drums: synth ch 9 = RHY1 main
+            // kit, synth ch 8 = RHY2 sub-rhythm.
             fluid_synth_bank_select(m_synth, channel, kDrumBank);
             fluid_synth_program_change(m_synth, channel, program);
             if (fluid_synth_get_channel_preset(m_synth, channel) == nullptr)
@@ -206,8 +207,14 @@ private:
     // synth channel 9 the drum channel; voice fallback must not move it off the
     // percussion bank.
     static constexpr int kDrumChannel = 9;
+    // Second drum channel for Yamaha RHY2 (sub-rhythm), mapped from cadenza ch 9.
+    static constexpr int kDrumChannel2 = 8;
     // GM/GS/XG SoundFonts keep every drum kit on bank 128 (the percussion bank).
     static constexpr int kDrumBank = 128;
+
+    static constexpr bool isDrumSynthChannel(int ch) noexcept {
+        return ch == kDrumChannel || ch == kDrumChannel2;
+    }
 
     fluid_settings_t* m_settings = nullptr;
     fluid_synth_t*    m_synth = nullptr;

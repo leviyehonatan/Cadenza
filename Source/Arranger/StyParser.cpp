@@ -1577,8 +1577,15 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
             // RHY2 sub-rhythm on channel 9. Such parts must NOT be pitch-shifted.
             const bool drumBank = (part.bankMsb == 127 || part.bankMsb == 126 || part.bankMsb == 120);
 
-            if (ch == 9) {   // MIDI channel 10 — GM drum channel
+            if (ch == 9) {   // MIDI channel 10 — RHY1 main drum kit
                 part.name = "drums";
+                part.instrument = "Standard Kit";
+                part.percussion = true;
+            } else if (ch == 8 && hasStyleChannels) {
+                // MIDI channel 9 — RHY2 sub-rhythm. In the SFF layout this channel
+                // is always percussion; treat it as drums so it doesn't play as a
+                // stray melodic voice (the "whistle"), and give it its own kit.
+                part.name = "rhythm2";
                 part.instrument = "Standard Kit";
                 part.percussion = true;
             } else if (const char* yn = yamahaStylePartName(midiCh)) {

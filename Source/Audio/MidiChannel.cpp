@@ -11,11 +11,15 @@ std::optional<int> synthChannelFromCadenzaChannel(int channel) noexcept
 
 bool isCadenzaDrumChannel(int channel) noexcept
 {
-    return channel == 10;
+    // Yamaha styles use two rhythm channels: MIDI 10 = RHY1 (main kit),
+    // MIDI 9 = RHY2 (sub-rhythm). Both are independent drum channels so each
+    // gets its own mixer strip (volume / mute / kit).
+    return channel == 9 || channel == 10;
 }
 
 bool isSynthDrumChannel(int channel) noexcept
 {
-    return channel == 9;
+    // Synth (0-based): cadenza 10 -> 9 (RHY1), cadenza 9 -> 8 (RHY2).
+    return channel == 8 || channel == 9;
 }
 }

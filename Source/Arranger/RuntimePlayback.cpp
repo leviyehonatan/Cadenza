@@ -38,7 +38,11 @@ int channelSetupPriority(const Part& part) noexcept
 int playbackChannelForPart(const Part& part) noexcept
 {
     const bool percussion = part.percussion || cadenza::audio::isCadenzaDrumChannel(part.midiChannel);
-    return percussion ? 10 : part.midiChannel;
+    if (!percussion)
+        return part.midiChannel;
+    // RHY2 (Yamaha MIDI ch 9) keeps its own drum channel so it has an independent
+    // mixer strip; any other detected percussion joins the main kit on ch 10.
+    return part.midiChannel == 9 ? 9 : 10;
 }
 
 namespace

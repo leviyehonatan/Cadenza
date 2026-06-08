@@ -40,8 +40,8 @@ void channelMappingIsOneBasedAtCadenzaBoundary()
 void drumChannelRecognitionIsConventional()
 {
     using cadenza::audio::isCadenzaDrumChannel;
-    expect(isCadenzaDrumChannel(10), "Cadenza channel 10 is drums");
-    expect(!isCadenzaDrumChannel(9), "Cadenza channel 9 is not drums");
+    expect(isCadenzaDrumChannel(10), "Cadenza channel 10 (RHY1) is drums");
+    expect(isCadenzaDrumChannel(9), "Cadenza channel 9 (RHY2) is drums");
     expect(!isCadenzaDrumChannel(11), "Cadenza channel 11 is not drums");
 }
 
@@ -197,8 +197,8 @@ void percussionSubRhythmRoutesToDrumChannel()
 
     const auto setup = playbackSetupForPart(p);
     expect(setup.sourceChannel == 9, "rhythm2 setup retains source channel");
-    expect(setup.cadenzaChannel == 10, "rhythm2 setup routes to Cadenza drum channel");
-    expect(setup.synthChannel && *setup.synthChannel == 9, "rhythm2 setup routes to synth drum channel");
+    expect(setup.cadenzaChannel == 9, "rhythm2 setup keeps its own drum channel (RHY2)");
+    expect(setup.synthChannel && *setup.synthChannel == 8, "rhythm2 setup routes to synth drum channel 8");
     expect(setup.percussion, "rhythm2 setup remains percussion");
 }
 
@@ -217,7 +217,7 @@ void melodicPartDoesNotRouteToDrumChannel()
     expect(!setup.percussion, "melodic setup is not percussion");
 }
 
-void drumChannelSetupPrefersMainDrumsOverRhythm2()
+void drumAndRhythm2GetSeparateChannels()
 {
     Section section;
     section.name = "mainA";
@@ -250,19 +250,25 @@ void drumChannelSetupPrefersMainDrumsOverRhythm2()
 
     const auto setups = playbackSetupsForSection(section);
     const PartPlaybackSetup* drumSetup = nullptr;
+    const PartPlaybackSetup* rhythm2Setup = nullptr;
     const PartPlaybackSetup* chordSetup = nullptr;
     for (const auto& setup : setups) {
         if (setup.cadenzaChannel == 10)
             drumSetup = &setup;
+        if (setup.cadenzaChannel == 9)
+            rhythm2Setup = &setup;
         if (setup.cadenzaChannel == 12)
             chordSetup = &setup;
     }
 
-    expect(drumSetup != nullptr, "drum channel setup exists");
-    expect(drumSetup && drumSetup->partName == "drums", "main drums setup wins over rhythm2");
-    expect(drumSetup && drumSetup->sourceChannel == 10, "main drums source channel retained");
-    expect(drumSetup && drumSetup->program && *drumSetup->program == 8, "main drums kit program wins");
-    expect(drumSetup && drumSetup->bankMsb && *drumSetup->bankMsb == 120, "main drums bank wins");
+    // RHY1 and RHY2 are now independent drum channels, each with its own kit.
+    expect(drumSetup != nullptr, "main drum channel setup exists");
+    expect(drumSetup && drumSetup->partName == "drums", "main drums setup on channel 10");
+    expect(drumSetup && drumSetup->program && *drumSetup->program == 8, "main drums kit program kept");
+    expect(drumSetup && drumSetup->bankMsb && *drumSetup->bankMsb == 120, "main drums bank kept");
+    expect(rhythm2Setup != nullptr, "rhythm2 has its own setup on channel 9");
+    expect(rhythm2Setup && rhythm2Setup->partName == "rhythm2", "rhythm2 setup on channel 9");
+    expect(rhythm2Setup && rhythm2Setup->percussion, "rhythm2 setup is percussion");
     expect(chordSetup != nullptr, "melodic setup still exists on its own channel");
     expect(chordSetup && chordSetup->partName == "chord1", "melodic setup is preserved");
 }
@@ -286,7 +292,7 @@ void drumChannelSetupUsesRhythm2WhenAlone()
     expect(setups.size() == 1, "rhythm2-alone section has one setup");
     expect(setups[0].partName == "rhythm2", "rhythm2 setup is used when alone");
     expect(setups[0].sourceChannel == 9, "rhythm2 source channel retained");
-    expect(setups[0].cadenzaChannel == 10, "rhythm2 routes setup to drum channel");
+    expect(setups[0].cadenzaChannel == 9, "rhythm2 keeps its own drum channel");
     expect(setups[0].program && *setups[0].program == 0, "rhythm2 kit program retained");
 }
 
@@ -551,8 +557,8 @@ void playbackDiagnosticsMidiSetupPrefersMainDrumsOnSharedChannel()
     expect(countMidiBytes(midi, { 0xC9, 0 }) == 0, "rhythm2 program does not override channel 10 setup");
 
     const auto csv = readText(outDir / "cadenza_playback_events.csv");
-    expect(csv.find("0,10,42,42,90,60,rhythm2") != std::string::npos,
-           "rhythm2 still emits notes on channel 10");
+    expect(csv.find("0,9,42,42,90,60,rhythm2") != std::string::npos,
+           "rhythm2 emits notes on its own drum channel 9");
     expect(csv.find("60,10,36,36,100,60,drums") != std::string::npos,
            "main drums still emits notes on channel 10");
 
@@ -603,8 +609,8 @@ void playbackDiagnosticsRoutesPercussionEventsToDrumChannel()
     expect(result.ok, "rhythm2 diagnostic export succeeds");
 
     const auto csv = readText(outDir / "cadenza_playback_events.csv");
-    expect(csv.find("0,10,42,42,90,60,rhythm2,absolute,127/0/0") != std::string::npos,
-           "rhythm2 diagnostic event routes to drum channel 10");
+    expect(csv.find("0,9,42,42,90,60,rhythm2,absolute,127/0/0") != std::string::npos,
+           "rhythm2 diagnostic event routes to its own drum channel 9");
     expect(csv.find("0,12,60,64,80,60,chord1,chord-3,-/-/27") != std::string::npos,
            "melodic diagnostic event keeps channel 12");
 
@@ -624,7 +630,7 @@ int main()
     drumPartKeepsItsBank();
     percussionSubRhythmRoutesToDrumChannel();
     melodicPartDoesNotRouteToDrumChannel();
-    drumChannelSetupPrefersMainDrumsOverRhythm2();
+    drumAndRhythm2GetSeparateChannels();
     drumChannelSetupUsesRhythm2WhenAlone();
     playbackSetupMarksDrumChannelAsPercussion();
     gmDrumNotesStayUnchanged();

@@ -127,16 +127,18 @@ endif()
 
 if(CADENZA_BUILD_TESTS)
     add_test(
-        NAME style_probe_shared_setup_owner
+        NAME style_probe_separate_drum_channels
         COMMAND style-probe
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/style-probe-shared-drums.cstyle"
             C
             mainA
             1
     )
-    set_tests_properties(style_probe_shared_setup_owner PROPERTIES
-        PASS_REGULAR_EXPRESSION "channel 10 setup owner: drums bankMsb=120 program=8"
-        FAIL_REGULAR_EXPRESSION "channel 10 setup owner: rhythm2"
+    # RHY1 (main kit) and RHY2 (sub-rhythm) each get their own drum channel so
+    # they have independent mixer strips: drums -> playCh 10, rhythm2 -> playCh 9.
+    set_tests_properties(style_probe_separate_drum_channels PROPERTIES
+        PASS_REGULAR_EXPRESSION "part 'rhythm2' srcCh=9 role=rhythm2 playCh=9"
+        FAIL_REGULAR_EXPRESSION "rhythm2 srcCh=9 role=rhythm2 playCh=10"
     )
 
     add_test(

@@ -363,7 +363,63 @@ void loadFromStyFileSucceeds()
         expect(drums->notes[0].role == NoteRole::Absolute, "sty drums stay absolute");
     }
 }
+// A MIDI channel 9 part (Yamaha RHY2 sub-rhythm) with NO drum bank must still be
+// treated as percussion so it doesn't play as a stray melodic voice (the "whistle").
+std::vector<uint8_t> makeRhythm2Sty()
+{
+    std::vector<uint8_t> smf;
+    pushTag(smf, "MThd");
+    pushU32(smf, 6);
+    pushU16(smf, 1);
+    pushU16(smf, 2);
+    pushU16(smf, 480);
+
+    std::vector<uint8_t> markers;
+    pushTempo(markers, 0, 500000);
+    pushMarker(markers, 0, "Main A");
+    pushEndOfTrack(markers, 1920);
+    appendTrack(smf, markers);
+
+    std::vector<uint8_t> notes;
+    // RHY2 on MIDI channel 9 (index 8), plain melodic-looking program, NO drum bank.
+    pushProgramChange(notes, 0, 8, 0);
+    pushNoteOn(notes, 0, 8, 42, 100);
+    pushNoteOff(notes, 240, 8, 42);
+    pushEndOfTrack(notes);
+    appendTrack(smf, notes);
+
+    return smf;
 }
+
+void rhythm2ChannelBecomesPercussion()
+{
+    const auto path = std::filesystem::temp_directory_path() / "cadenza-rhythm2-test.sty";
+    {
+        std::ofstream out(path, std::ios::binary);
+        const auto bytes = makeRhythm2Sty();
+        out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+    auto r = loadStyleFromStyFile(path.string());
+    std::filesystem::remove(path);
+
+    expect(r.ok, "rhythm2 sty load ok");
+    if (!r.ok) { std::cerr << r.error << '\n'; return; }
+
+    const auto* mainA = r.style.findSection("mainA");
+    expect(mainA != nullptr, "rhythm2 sty mainA section");
+    const Part* rhy2 = nullptr;
+    if (mainA)
+        for (const auto& part : mainA->parts)
+            if (part.midiChannel == 9)
+                rhy2 = &part;
+
+    expect(rhy2 != nullptr, "rhythm2 part present on MIDI channel 9");
+    if (rhy2) {
+        expect(rhy2->percussion, "RHY2 channel 9 is flagged percussion (no whistle)");
+        expect(rhy2->name == "rhythm2", "RHY2 part named rhythm2");
+    }
+}
+}  // anonymous namespace
 
 int main()
 {
@@ -373,6 +429,7 @@ int main()
     loadFromCstyleFileSucceeds();
     malformedJsonFails();
     loadFromStyFileSucceeds();
+    rhythm2ChannelBecomesPercussion();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All StyleLoader tests passed\n";
