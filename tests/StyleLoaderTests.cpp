@@ -419,6 +419,68 @@ void rhythm2ChannelBecomesPercussion()
         expect(rhy2->name == "rhythm2", "RHY2 part named rhythm2");
     }
 }
+
+// Modern Yamaha panel-voice banks often carry non-GM program numbers. The parser
+// should normalise them to a sensible GM family based on the accompaniment role.
+std::vector<uint8_t> makePanelVoiceSty()
+{
+    std::vector<uint8_t> smf;
+    pushTag(smf, "MThd");
+    pushU32(smf, 6);
+    pushU16(smf, 1);
+    pushU16(smf, 2);
+    pushU16(smf, 480);
+
+    std::vector<uint8_t> markers;
+    pushTempo(markers, 0, 500000);
+    pushMarker(markers, 0, "Main A");
+    pushEndOfTrack(markers, 960);
+    appendTrack(smf, markers);
+
+    std::vector<uint8_t> notes;
+    pushControlChange(notes, 0, 10, 0, 104);   // panel voice bank MSB
+    pushControlChange(notes, 0, 10, 32, 0);
+    pushProgramChange(notes, 0, 10, 87);        // GM-unaligned Yamaha panel voice
+    pushNoteOn(notes, 0, 10, 43, 100);
+    pushNoteOff(notes, 240, 10, 43);
+    pushEndOfTrack(notes);
+    appendTrack(smf, notes);
+
+    return smf;
+}
+
+void panelVoiceBankRemapsToGmRole()
+{
+    const auto path = std::filesystem::temp_directory_path() / "cadenza-panel-voice-test.sty";
+    {
+        std::ofstream out(path, std::ios::binary);
+        const auto bytes = makePanelVoiceSty();
+        out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+    auto r = loadStyleFromStyFile(path.string());
+    std::filesystem::remove(path);
+
+    expect(r.ok, "panel voice sty load ok");
+    if (!r.ok) { std::cerr << r.error << '\n'; return; }
+
+    const auto* mainA = r.style.findSection("mainA");
+    expect(mainA != nullptr, "panel voice mainA section");
+    const Part* bass = nullptr;
+    if (mainA)
+        for (const auto& part : mainA->parts)
+            if (part.midiChannel == 11)
+                bass = &part;
+
+    expect(bass != nullptr, "panel voice bass part present on MIDI channel 11");
+    if (bass) {
+        expect(bass->name == "bass", "panel voice part labeled bass");
+        expect(!bass->percussion, "panel voice bass remains melodic");
+        expect(bass->bankMsb && *bass->bankMsb == 0, "panel voice bank remapped to GM bank 0");
+        expect(bass->bankLsb && *bass->bankLsb == 0, "panel voice bank LSB cleared");
+        expect(bass->program && *bass->program == 33, "panel voice program remapped to Fingered Bass");
+        expect(bass->instrument == "Electric Fingered Bass", "panel voice instrument updated to GM name");
+    }
+}
 }  // anonymous namespace
 
 int main()
@@ -430,6 +492,7 @@ int main()
     malformedJsonFails();
     loadFromStyFileSucceeds();
     rhythm2ChannelBecomesPercussion();
+    panelVoiceBankRemapsToGmRole();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All StyleLoader tests passed\n";

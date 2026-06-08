@@ -537,6 +537,22 @@ const char* gmInstrumentName(int program)
     return names[program];
 }
 
+// GM program that best fits an accompaniment role, used when the style's own
+// voice is a Yamaha panel-voice bank whose program number isn't GM-aligned.
+// (Mirrors cadenza::midi::defaultGmProgramForRole; kept local so the parser in
+// cadenza_core doesn't depend on the Midi module.)
+int gmProgramForRole(const std::string& role)
+{
+    if (role == "bass")    return 33;   // Electric Fingered Bass
+    if (role == "chord1")  return 26;   // Electric Jazz Guitar
+    if (role == "chord2")  return 0;    // Acoustic Grand Piano
+    if (role == "pad")     return 48;   // String Ensemble 1
+    if (role == "phrase1") return 61;   // Brass Section
+    if (role == "phrase2") return 61;   // Brass Section
+    if (role == "harmony") return 0;    // Piano
+    return 0;                            // unknown -> piano
+}
+
 CasmCtabEntry parseAsciiCtabEntry(const std::string& record,
                                   const std::vector<uint8_t>& raw)
 {
@@ -1623,6 +1639,24 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
                 part.program = 50;   // GM Synth Strings 1 — quicker attack than 48
                 part.reverb  = 8;    // tame the long reverb tail
                 part.chorus  = 0;    // remove the chorus smear
+            }
+
+            // Modern Yamaha styles (PSR-S970, Genos, ...) voice their parts with
+            // proprietary "panel voice" banks (bank MSB >= 64, e.g. 104). In those
+            // banks the program number does NOT follow General MIDI — a bass voice
+            // can sit at program 87 ("Lead 8"), a guitar somewhere unrelated, etc.
+            // So forwarding the raw program to a GM SoundFont plays the wrong
+            // instrument (bass as a lead "whistle", guitar as a pad, ...). We can't
+            // resolve the exact Yamaha voice without its table, but the part's ROLE
+            // (bass/chord/pad/phrase) reliably maps to the right GM family, which is
+            // what the user hears as "correct". Older styles use bank MSB 0
+            // (GM-aligned) and are left untouched. Drum/SFX banks (120/126/127) are
+            // already percussion and never reach here.
+            if (!part.percussion && part.bankMsb && *part.bankMsb >= 64) {
+                part.program = gmProgramForRole(part.name);
+                part.bankMsb = 0;
+                part.bankLsb = 0;
+                part.instrument = gmInstrumentName(*part.program);
             }
 
             for (const auto& n : notes) {
