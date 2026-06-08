@@ -1131,12 +1131,7 @@ bool MainComponent::loadAndApplyStyleFile(const juce::File& file)
     }
 
     pushRuntimeStateToWeb();
-    const auto styleJs = juce::String("window.JuceBridge && window.JuceBridge.onStyleLoaded({id:")
-        + jsString(sharedStyle->id)
-        + ",name:" + jsString(sharedStyle->name)
-        + ",path:" + jsString(file.getFullPathName())
-        + "});";
-    pushToWeb(styleJs);
+
     saveSettings();
 
     juce::Logger::writeToLog("[Cadenza] Loaded style: " + juce::String(sharedStyle->name)
