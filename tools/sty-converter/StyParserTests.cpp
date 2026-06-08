@@ -52,6 +52,17 @@ void pushTempo(std::vector<uint8_t>& trk, uint32_t delta, uint32_t micros)
     pushU8(trk, micros & 0xFF);
 }
 
+void pushTimeSignature(std::vector<uint8_t>& trk, uint32_t delta,
+                       uint8_t numerator, uint8_t denominatorPower)
+{
+    pushVLQ(trk, delta);
+    pushU8(trk, 0xFF); pushU8(trk, 0x58); pushVLQ(trk, 4);
+    pushU8(trk, numerator);
+    pushU8(trk, denominatorPower);
+    pushU8(trk, 24);
+    pushU8(trk, 8);
+}
+
 // Append a Note On.
 void pushNoteOn(std::vector<uint8_t>& trk, uint32_t delta, uint8_t channel, uint8_t pitch, uint8_t vel)
 {
@@ -133,6 +144,32 @@ std::vector<uint8_t> makeSampleSmf()
     pushEndOfTrack(t1, 0);
     appendTrack(smf, t1);
 
+    return smf;
+}
+
+std::vector<uint8_t> makeTimeSignatureSmf(uint8_t numerator, uint8_t denominatorPower,
+                                          uint32_t sectionTicks,
+                                          bool addLaterFourFour = false)
+{
+    std::vector<uint8_t> smf;
+    pushTag(smf, "MThd"); pushU32(smf, 6);
+    pushU16(smf, 1);
+    pushU16(smf, 2);
+    pushU16(smf, 480);
+
+    std::vector<uint8_t> t0;
+    pushTimeSignature(t0, 0, numerator, denominatorPower);
+    if (addLaterFourFour)
+        pushTimeSignature(t0, 0, 4, 2);
+    pushMarker(t0, 0, "Main A");
+    pushEndOfTrack(t0, sectionTicks);
+    appendTrack(smf, t0);
+
+    std::vector<uint8_t> t1;
+    pushNoteOn(t1, 0, 9, 36, 100);
+    pushNoteOff(t1, sectionTicks, 9, 36);
+    pushEndOfTrack(t1);
+    appendTrack(smf, t1);
     return smf;
 }
 
@@ -309,7 +346,32 @@ void parsesHeaderAndProducesStyle()
     if (!r.ok) return;
     expect(r.style.ticksPerBeat == 480, "ppq 480");
     expect(r.style.defaultTempo == 120, "tempo 120");
+    expect(r.style.beatsPerBar == 4 && r.style.beatUnit == 4,
+           "missing time signature falls back to 4/4");
     expect(!r.casm.found, "plain SMF has no CASM");
+}
+
+void importsThreeFourTimeSignature()
+{
+    auto r = cadenza::arranger::parseStyBytes(makeTimeSignatureSmf(3, 2, 2880, true));
+    expect(r.ok, "3/4 SMF parses OK");
+    if (!r.ok) return;
+
+    expect(r.style.beatsPerBar == 3 && r.style.beatUnit == 4,
+           "first valid 3/4 signature is retained");
+    const auto* mainA = r.style.findSection("mainA");
+    expect(mainA && mainA->barCount == 2, "3/4 section length uses 1440 ticks per bar");
+}
+
+void importsSixEightTimeSignature()
+{
+    auto r = cadenza::arranger::parseStyBytes(makeTimeSignatureSmf(6, 3, 2880));
+    expect(r.ok, "6/8 SMF parses OK");
+    if (!r.ok) return;
+
+    expect(r.style.beatsPerBar == 6 && r.style.beatUnit == 8, "6/8 signature imported");
+    const auto* mainA = r.style.findSection("mainA");
+    expect(mainA && mainA->barCount == 2, "6/8 section length uses 1440 ticks per bar");
 }
 
 void sectionsAreSplitByMarkers()
@@ -947,6 +1009,8 @@ int main()
 {
     markerMappingIsCaseInsensitive();
     parsesHeaderAndProducesStyle();
+    importsThreeFourTimeSignature();
+    importsSixEightTimeSignature();
     sectionsAreSplitByMarkers();
     mainARolesAreAssignedHeuristically();
     drumsAreAbsolute();

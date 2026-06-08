@@ -231,6 +231,8 @@ struct TrackData
     std::vector<RawAuto> automation;   // CC1/CC11/CC64 + pitch bend, absolute ticks
     // For meta-event tempo (microseconds per quarter-note)
     std::optional<uint32_t> firstTempoMicros;
+    // First valid MIDI time-signature meta event: numerator / denominator.
+    std::optional<std::pair<int, int>> firstTimeSignature;
     // Per-channel program changes seen during the track (last write wins for a section).
     std::unordered_map<int, int> programByChannel;
     std::unordered_map<int, int> bankMsbByChannel;
@@ -372,6 +374,20 @@ bool parseTrack(Reader& r, uint32_t trackLen,
                 if (metaLen == 3 && !out.firstTempoMicros) {
                     uint32_t a = r.u8(), b = r.u8(), c = r.u8();
                     out.firstTempoMicros = (a << 16) | (b << 8) | c;
+                } else {
+                    r.skip(metaLen);
+                }
+            } else if (metaType == 0x58 /*time signature*/) {
+                if (metaLen == 4) {
+                    const uint8_t numerator = r.u8();
+                    const uint8_t denominatorPower = r.u8();
+                    r.u8(); // MIDI clocks per metronome click
+                    r.u8(); // notated 32nd notes per MIDI quarter note
+                    if (!out.firstTimeSignature && numerator > 0 && denominatorPower < 31)
+                        out.firstTimeSignature = {
+                            static_cast<int>(numerator),
+                            1 << denominatorPower
+                        };
                 } else {
                     r.skip(metaLen);
                 }
@@ -1451,6 +1467,13 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
     style.beatsPerBar  = 4;
     style.beatUnit     = 4;
     style.ticksPerBeat = ticksPerQuarter;
+    for (const auto& t : tracks) {
+        if (t.firstTimeSignature) {
+            style.beatsPerBar = t.firstTimeSignature->first;
+            style.beatUnit = t.firstTimeSignature->second;
+            break;
+        }
+    }
     style.yamahaFormat = inferYamahaFormat(result.casm);
 
     for (const auto& warning : result.casm.warnings)
@@ -1517,7 +1540,10 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
         Section section;
         section.name = sm.cadenzaName;
         uint64_t lenTicks = stopT - startT;
-        section.barCount = std::max<int>(1, static_cast<int>(lenTicks / (style.beatsPerBar * style.ticksPerBeat)));
+        const uint64_t barTicks = std::max<uint64_t>(
+            1, static_cast<uint64_t>(style.beatsPerBar) * style.ticksPerBeat * 4
+                   / static_cast<uint64_t>(style.beatUnit));
+        section.barCount = std::max<int>(1, static_cast<int>(lenTicks / barTicks));
 
         // Group this section's notes by MIDI channel into Parts.
         std::map<int, std::vector<FlatNote>> byChannel;
