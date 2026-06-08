@@ -38,6 +38,11 @@ void AudioEngine::prepareToPlay(int samplesPerBlock, double sampleRate)
     m_masterEffect.prepare(sampleRate, samplesPerBlock > 0 ? samplesPerBlock : 512);
     m_masterEq.prepare(sampleRate, 2);
     m_masterComp.prepare(sampleRate);
+    // Master-bus compression is OFF by default: with an arranger the kick + bass
+    // make a low-threshold comp duck the whole band on every beat, and adding a
+    // right-hand melody pumps it harder ("loses power"). Peaks are already caught
+    // cleanly by the final soft-limiter, so the mix stays loud without breathing.
+    m_masterComp.setEnabled(false);
     m_masterGlue.prepare(sampleRate);
 
     m_currentSampleRate = sampleRate;
@@ -113,6 +118,19 @@ void AudioEngine::startAudioDevice(const juce::XmlElement* savedState)
         error = m_deviceManager.initialise(0, 2, savedState, true);
     else
         error = m_deviceManager.initialiseWithDefaultDevices(0, 2);
+
+    // Tighter live latency: if the device opened with a large block, nudge it
+    // down toward a live-play buffer so right-hand melody feels responsive. Only
+    // ever reduce (never raise) so we respect a deliberately-larger saved choice.
+    {
+        auto setup = m_deviceManager.getAudioDeviceSetup();
+        constexpr int kLiveBuffer = 256;
+        if (setup.bufferSize > kLiveBuffer) {
+            setup.bufferSize = kLiveBuffer;
+            m_deviceManager.setAudioDeviceSetup(setup, true);
+        }
+    }
+
     m_sourcePlayer.setSource(this);
     m_deviceManager.addAudioCallback(&m_sourcePlayer);
 

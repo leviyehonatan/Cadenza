@@ -64,18 +64,33 @@ public:
             fluid_settings_setint(m_settings, "synth.lock-memory", 0);
             fluid_settings_setint(m_settings, "synth.drums-channel.active", 1);
 
-            // Ambience: drive an explicit hall-ish reverb + light chorus so the
-            // band has depth and air instead of the dry, dead "GM default" sound.
-            // Parts still control how much they send via CC91/CC93.
+            // Plenty of voices: drums + bass + chords + 3 right-hand layers on a
+            // busy style can exceed the 256 default and steal/cut notes.
+            fluid_settings_setint(m_settings, "synth.polyphony", 512);
+
+            // Ambience: a moderate hall reverb + gentle chorus so the band has
+            // depth and air without sounding washed-out/muddy. Pulled back from
+            // the old very-wet defaults. Parts still control send via CC91/CC93,
+            // and the user's Reverb knob overrides the level live.
             fluid_settings_setint(m_settings, "synth.reverb.active", 1);
             fluid_settings_setint(m_settings, "synth.chorus.active", 1);
-            fluid_settings_setnum(m_settings, "synth.reverb.room-size", 0.75);
-            fluid_settings_setnum(m_settings, "synth.reverb.damp", 0.30);
-            fluid_settings_setnum(m_settings, "synth.reverb.width", 0.90);
-            fluid_settings_setnum(m_settings, "synth.reverb.level", 0.80);
+            fluid_settings_setnum(m_settings, "synth.reverb.room-size", 0.60);
+            fluid_settings_setnum(m_settings, "synth.reverb.damp", 0.40);
+            fluid_settings_setnum(m_settings, "synth.reverb.width", 0.80);
+            fluid_settings_setnum(m_settings, "synth.reverb.level", 0.55);
+            // Gentle chorus (defaults are too deep/fast and make pads sea-sick).
+            fluid_settings_setint(m_settings, "synth.chorus.nr", 3);
+            fluid_settings_setnum(m_settings, "synth.chorus.level", 1.0);
+            fluid_settings_setnum(m_settings, "synth.chorus.speed", 0.30);
+            fluid_settings_setnum(m_settings, "synth.chorus.depth", 5.0);
 
             m_synth = new_fluid_synth(m_settings);
-            juce::Logger::writeToLog("[Cadenza] FluidSynth GM drum channel active: synth channel 9; reverb+chorus on");
+            if (m_synth) {
+                // Highest-quality sample interpolation on every channel: smoother,
+                // less "digital"/aliased tone than the 4th-order default.
+                fluid_synth_set_interp_method(m_synth, -1, FLUID_INTERP_HIGHEST);
+            }
+            juce::Logger::writeToLog("[Cadenza] FluidSynth GM drum channel active: synth channel 9; reverb+chorus on; interp=highest; poly=512");
         }
     }
 
