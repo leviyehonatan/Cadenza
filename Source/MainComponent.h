@@ -77,7 +77,8 @@ private:
     bool loadAndApplySongFile(const juce::File& file);
     bool selectStyleById(const std::string& styleId);
     void setSongMode(bool enabled);
-    void applySongStepForBar(int bar);
+    void applySongStepForBar(int bar, bool applySection = true);
+    void queueSongSectionForBar(int bar);
     bool loadAndApplySoundFontFile(const juce::File& file, bool persist);
     juce::Array<juce::File> factoryStyleFiles() const;
     void pushFactoryStylesToWeb();

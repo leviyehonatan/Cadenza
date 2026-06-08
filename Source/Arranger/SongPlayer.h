@@ -51,6 +51,9 @@ public:
     // the previous applied bar. When looping, bars past the last event wrap.
     SongStep updateToBar(int bar);
 
+    // Report what updateToBar() would emit without advancing the applied state.
+    SongStep previewToBar(int bar) const;
+
 private:
     std::shared_ptr<const Song> m_song;
     bool m_loop = false;

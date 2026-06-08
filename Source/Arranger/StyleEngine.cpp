@@ -156,6 +156,12 @@ void StyleEngine::requestSection(const std::string& name, bool once, const std::
     m_hasPending.store(true);
 }
 
+void StyleEngine::cancelSectionRequest()
+{
+    std::lock_guard<std::mutex> lk(m_publishMutex);
+    m_hasPending.store(false);
+}
+
 void StyleEngine::handleBarBoundary(const Style& style)
 {
     bool changed = false, stop = false;

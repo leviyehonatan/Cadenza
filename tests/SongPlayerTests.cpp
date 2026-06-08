@@ -113,6 +113,19 @@ void resetReapplies()
     auto step = p.updateToBar(1);
     expect(step.sectionChanged && step.chordChanged, "reset re-emits active section + chord");
 }
+
+void previewDoesNotConsumeFutureChange()
+{
+    SongPlayer p;
+    p.setSong(demoSong());
+    p.updateToBar(1);
+
+    auto preview = p.previewToBar(3);
+    expect(preview.sectionChanged && preview.section == "mainA", "preview sees bar3 section change");
+
+    auto applied = p.updateToBar(3);
+    expect(applied.sectionChanged && applied.section == "mainA", "preview does not consume bar3 section change");
+}
 }
 
 int main()
@@ -125,6 +138,7 @@ int main()
     endFlagSetPastLastEvent();
     loopingWrapsAndReapplies();
     resetReapplies();
+    previewDoesNotConsumeFutureChange();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All SongPlayer tests passed\n";

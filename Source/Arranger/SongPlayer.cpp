@@ -66,4 +66,10 @@ SongStep SongPlayer::updateToBar(int bar)
     m_haveApplied = true;
     return step;
 }
+
+SongStep SongPlayer::previewToBar(int bar) const
+{
+    auto preview = *this;
+    return preview.updateToBar(bar);
+}
 }

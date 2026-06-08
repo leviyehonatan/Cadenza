@@ -48,6 +48,7 @@ public:
     // Queue a section to switch to exactly at the next bar boundary (sample-tight,
     // applied on the audio thread). `once`/`returnTo` as above. Used while playing.
     void requestSection(const std::string& name, bool once, const std::string& returnTo);
+    void cancelSectionRequest();
     std::string currentSection() const;
 
     // Fired (on the audio thread) when the playing section changes, and when a

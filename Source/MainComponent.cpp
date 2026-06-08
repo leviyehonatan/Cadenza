@@ -707,6 +707,8 @@ void MainComponent::installBridgeHooks()
             if (m_songModeActive) {
                 m_songPlayer.reset();
                 m_lastSongBar = -1;
+                applySongStepForBar(1);
+                queueSongSectionForBar(2);
             }
             m_audio.play();
         } else {
@@ -1247,6 +1249,8 @@ void MainComponent::setSongMode(bool enabled)
         // the chart even before the transport rolls. (The always-on timer in the
         // ctor drives the per-bar stepping.)
         applySongStepForBar(std::max(1, m_audio.transport().positionBar() + 1));
+    } else {
+        m_styleEngine.cancelSectionRequest();
     }
 
     const auto js = juce::String("window.JuceBridge && window.JuceBridge.onSongModeChanged && ")
@@ -1254,11 +1258,11 @@ void MainComponent::setSongMode(bool enabled)
     pushToWeb(js);
 }
 
-void MainComponent::applySongStepForBar(int bar)
+void MainComponent::applySongStepForBar(int bar, bool applySection)
 {
     auto step = m_songPlayer.updateToBar(bar);
 
-    if (step.sectionChanged) {
+    if (applySection && step.sectionChanged) {
         m_styleEngine.allNotesOff();
         m_styleEngine.setSection(step.section);
         if (m_panel) m_panel->setActiveSection(juce::String(step.section));
@@ -1270,6 +1274,13 @@ void MainComponent::applySongStepForBar(int bar)
         pushToWeb(juce::String("window.JuceBridge && window.JuceBridge.onChordChanged(")
                   + jsString(juce::String(chordName)) + ");");
     }
+}
+
+void MainComponent::queueSongSectionForBar(int bar)
+{
+    const auto step = m_songPlayer.previewToBar(bar);
+    if (step.sectionChanged)
+        m_styleEngine.requestSection(step.section, false, {});
 }
 
 namespace {
@@ -1289,7 +1300,12 @@ void MainComponent::togglePlayback()
     const bool play = !m_state.playing();
     m_state.setPlaying(play);
     if (play) {
-        if (m_songModeActive) { m_songPlayer.reset(); m_lastSongBar = -1; }
+        if (m_songModeActive) {
+            m_songPlayer.reset();
+            m_lastSongBar = -1;
+            applySongStepForBar(1);
+            queueSongSectionForBar(2);
+        }
         m_audio.play();   // restarts the transport from bar 0
     } else {
         m_audio.stop();
@@ -1356,7 +1372,10 @@ void MainComponent::timerCallback()
         return;
 
     m_lastSongBar = bar;
-    applySongStepForBar(bar);
+    // Consume the current chart state without re-switching its section after the
+    // boundary, then queue the following section one full bar ahead.
+    applySongStepForBar(bar, false);
+    queueSongSectionForBar(bar + 1);
 }
 
 void MainComponent::openPluginFileChooser()
