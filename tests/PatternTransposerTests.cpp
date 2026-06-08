@@ -393,6 +393,33 @@ void guitarNttDistinguishesStrokeFromArpeggio()
            "Guitar Arpeggio still maps chord tones to the current chord");
 }
 
+void guitarChordRolesUseRootShiftedVoicingAnchor()
+{
+    auto third = noteOf(NoteRole::Chord3, 64); // E in the source C-major shape.
+    auto guitar = policyOf(YamahaNtr::Guitar, YamahaNtt::Stroke, "C");
+
+    expect(transposeNote(third, ctxFor(7, ChordQuality::Minor), &guitar).value() == 58,
+           "Guitar G-minor third stays near the root-shifted source shape");
+
+    guitar.noteLowLimit = 60;
+    guitar.noteHighLimit = 72;
+    expect(transposeNote(third, ctxFor(7, ChordQuality::Minor), &guitar).value() == 70,
+           "Guitar root-shifted chord tone is folded through existing note limits");
+}
+
+void rootShiftedGuitarAnchorDoesNotChangeOtherPolicies()
+{
+    auto third = noteOf(NoteRole::Chord3, 64);
+    auto nonGuitar = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Chord, "C");
+    expect(transposeNote(third, ctxFor(7, ChordQuality::Minor), &nonGuitar).value() == 70,
+           "non-guitar chord policy keeps nearest-source-tone mapping");
+
+    auto fallbackGuitar = policyOf(YamahaNtr::Guitar, YamahaNtt::Stroke, "C");
+    fallbackGuitar.source = YamahaPolicySource::Fallback;
+    expect(transposeNote(third, ctxFor(7, ChordQuality::Minor), &fallbackGuitar).value() == 70,
+           "fallback guitar policy keeps existing mapping");
+}
+
 void fallbackPolicyWithRolesIsHonoured()
 {
     // A Fallback policy carrying explicit role-based NTR/NTT (as set by
@@ -460,6 +487,8 @@ int main()
     colorToneFitsExoticQualities();
     colorTonePolicyChordModeFitsPlayedQuality();
     guitarNttDistinguishesStrokeFromArpeggio();
+    guitarChordRolesUseRootShiftedVoicingAnchor();
+    rootShiftedGuitarAnchorDoesNotChangeOtherPolicies();
     fallbackPolicyWithRolesIsHonoured();
     drumsStayAbsoluteWithPolicy();
 

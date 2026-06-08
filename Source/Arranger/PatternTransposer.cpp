@@ -400,6 +400,22 @@ std::optional<int> transposeNote(const PatternNote& note,
         return applyPolicyNoteLimits(fitted, *policy);
     }
 
+    if (policy->ntr == YamahaNtr::Guitar
+        && policy->source != YamahaPolicySource::Fallback
+        && isChordRole(note.role)) {
+        // Anchor the target chord tone to the source shape after its root move.
+        // This avoids octave inversions when the root delta and a quality change
+        // (for example C major -> G minor) cross the nearest-tone fold boundary.
+        const int anchor = note.pitch + rootDeltaForPolicy(ctx, *policy);
+        const int interval = chordIntervalForRole(ctx.chord.quality, note.role);
+        const int targetPc = (ctx.chord.rootPitchClass + interval) % 12;
+        const int anchorPc = ((anchor % 12) + 12) % 12;
+        int chordToneDelta = ((targetPc - anchorPc) % 12 + 12) % 12;
+        if (chordToneDelta > 6)
+            chordToneDelta -= 12;
+        return pitchWithPolicyLimits(anchor + chordToneDelta, ctx, *policy);
+    }
+
     if (policy->bassOn && note.role == NoteRole::ChordRoot)
         return transposeWithPolicyLimits(note, ctx, *policy);
 
