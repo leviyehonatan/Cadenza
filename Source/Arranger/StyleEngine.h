@@ -17,6 +17,7 @@
 #include "PatternTransposer.h"
 #include "PlaybackDiagnostics.h"
 #include "SectionChangeQueue.h"
+#include "StyleChangeQueue.h"
 #include "../Audio/AudioEngine.h"
 #include "../Midi/ChordRecognizer.h"
 
@@ -34,7 +35,8 @@ class StyleEngine
 public:
     explicit StyleEngine(cadenza::audio::AudioEngine& engine);
 
-    // Replace the currently-loaded style. Snapshot taken atomically.
+    // Replace the currently-loaded style. While stopped this applies immediately;
+    // while playing it is handed to the audio thread for the next callback.
     void setStyle(std::shared_ptr<const Style> style);
     std::shared_ptr<const Style> currentStyle() const;
 
@@ -84,6 +86,8 @@ private:
     };
 
     void onTick(int ticksAdvanced, cadenza::audio::Transport& transport);
+    // Caller must hold m_publishMutex. Called only while stopped or on audio thread.
+    void applyStyleReplacement(std::shared_ptr<const Style> style);
     void handleBarBoundary(const Style& style);   // audio thread: apply queued/one-shot section changes
     void switchToSection(const Style& style, const std::string& name, bool once, const std::string& returnTo);
     void applySectionChannelSetup(const Section& section);
@@ -116,6 +120,7 @@ private:
     std::string m_pendingReturn;             // (guarded by m_publishMutex)
     std::atomic<bool> m_hasPending { false };
     SectionChangeQueue m_immediateSectionChanges;
+    StyleChangeQueue m_styleChanges;
     SectionChangedCallback m_onSectionChanged;
     StopRequestedCallback  m_onStopRequested;
 
