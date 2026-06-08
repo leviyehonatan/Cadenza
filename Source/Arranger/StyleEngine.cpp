@@ -68,6 +68,7 @@ void StyleEngine::setStyle(std::shared_ptr<const Style> style)
 {
     m_panic.store(true);          // audio thread drops active notes on its next tick
     m_engine.allNotesOff();
+    m_immediateSectionChanges.clear();
 
     std::lock_guard<std::mutex> lk(m_publishMutex);
     m_style = std::move(style);
@@ -123,6 +124,12 @@ void StyleEngine::switchToSection(const Style& style, const std::string& name,
 
 void StyleEngine::setSection(const std::string& name, bool once, const std::string& returnTo)
 {
+    if (m_engine.transport().playing()) {
+        m_immediateSectionChanges.publish(name, once, returnTo);
+        return;
+    }
+
+    m_immediateSectionChanges.clear();
     std::lock_guard<std::mutex> lk(m_publishMutex);
     m_hasPending.store(false);   // an immediate change cancels any queued one
     if (!m_style) return;
@@ -234,10 +241,19 @@ void StyleEngine::onTick(int ticksAdvanced, cadenza::audio::Transport& transport
     if (m_panic.exchange(false))
         m_active.clear();
 
-    // 1) age active notes; release any that have expired
+    // 1) Apply an immediate section request published by the message thread.
+    // The non-blocking take defers by one callback if the producer is publishing.
+    if (auto request = m_immediateSectionChanges.tryTake()) {
+        std::lock_guard<std::mutex> lk(m_publishMutex);
+        m_hasPending.store(false);
+        if (m_style)
+            switchToSection(*m_style, request->name, request->once, request->returnTo);
+    }
+
+    // 2) age active notes; release any that have expired
     advanceActiveNotes(ticksAdvanced);
 
-    // 2) snapshot pointers (single lock acquisition)
+    // 3) snapshot pointers (single lock acquisition)
     std::shared_ptr<const Style> style;
     std::string sectionName;
     int sectionLength;
@@ -249,11 +265,11 @@ void StyleEngine::onTick(int ticksAdvanced, cadenza::audio::Transport& transport
     }
     if (!style || sectionName.empty() || sectionLength <= 0) return;
 
-    // 2b) if the chord changed since last tick, re-voice sustained held notes now.
+    // 3b) if the chord changed since last tick, re-voice sustained held notes now.
     if (m_chordDirty.exchange(false))
         revoiceActiveNotes(*style);
 
-    // 3) determine which ticks within the section were crossed during this audio block
+    // 4) determine which ticks within the section were crossed during this audio block
     const int currentTick = transport.positionTickInt();
     const int startTick   = currentTick - ticksAdvanced;
 

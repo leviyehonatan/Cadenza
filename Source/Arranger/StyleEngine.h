@@ -16,6 +16,7 @@
 #include "Style.h"
 #include "PatternTransposer.h"
 #include "PlaybackDiagnostics.h"
+#include "SectionChangeQueue.h"
 #include "../Audio/AudioEngine.h"
 #include "../Midi/ChordRecognizer.h"
 
@@ -37,9 +38,10 @@ public:
     void setStyle(std::shared_ptr<const Style> style);
     std::shared_ptr<const Style> currentStyle() const;
 
-    // Choose which section is playing NOW (immediate). `once`=true makes it a
-    // one-shot (intro/fill/ending): after its bars elapse the engine switches to
-    // `returnTo` (empty -> request stop). Used while stopped / for the first section.
+    // Choose which section is playing now. While stopped this applies immediately;
+    // while playing it is handed to the audio thread for the next callback.
+    // `once`=true makes it a one-shot (intro/fill/ending): after its bars elapse
+    // the engine switches to `returnTo` (empty -> request stop).
     void setSection(const std::string& name, bool once = false, const std::string& returnTo = {});
     // Queue a section to switch to exactly at the next bar boundary (sample-tight,
     // applied on the audio thread). `once`/`returnTo` as above. Used while playing.
@@ -113,6 +115,7 @@ private:
     bool        m_pendingOnce = false;       // (guarded by m_publishMutex)
     std::string m_pendingReturn;             // (guarded by m_publishMutex)
     std::atomic<bool> m_hasPending { false };
+    SectionChangeQueue m_immediateSectionChanges;
     SectionChangedCallback m_onSectionChanged;
     StopRequestedCallback  m_onStopRequested;
 
