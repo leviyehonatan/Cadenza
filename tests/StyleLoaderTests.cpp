@@ -481,6 +481,79 @@ void panelVoiceBankRemapsToGmRole()
         expect(bass->instrument == "Electric Fingered Bass", "panel voice instrument updated to GM name");
     }
 }
+
+std::vector<uint8_t> makeMixedPresetSty()
+{
+    std::vector<uint8_t> smf;
+    pushTag(smf, "MThd");
+    pushU32(smf, 6);
+    pushU16(smf, 1);
+    pushU16(smf, 2);
+    pushU16(smf, 480);
+
+    std::vector<uint8_t> markers;
+    pushTempo(markers, 0, 500000);
+    pushMarker(markers, 0, "Main A");
+    pushEndOfTrack(markers, 960);
+    appendTrack(smf, markers);
+
+    std::vector<uint8_t> notes;
+    // First preset: GM-aligned bass.
+    pushControlChange(notes, 0, 1, 0, 0);
+    pushControlChange(notes, 0, 1, 32, 0);
+    pushProgramChange(notes, 0, 1, 32);
+    pushNoteOn(notes, 0, 1, 48, 100);
+    pushNoteOff(notes, 120, 1, 48);
+
+    // Second preset: Yamaha panel-voice bank with a non-GM program. This should
+    // be the dominant preset because it appears later and is used by more notes.
+    pushControlChange(notes, 0, 1, 0, 104);
+    pushControlChange(notes, 0, 1, 32, 0);
+    pushProgramChange(notes, 0, 1, 87);
+    pushNoteOn(notes, 0, 1, 50, 100);
+    pushNoteOff(notes, 120, 1, 50);
+    pushNoteOn(notes, 0, 1, 52, 100);
+    pushNoteOff(notes, 120, 1, 52);
+    pushEndOfTrack(notes);
+    appendTrack(smf, notes);
+
+    return smf;
+}
+
+void dominantPresetKeepsMatchingBankAndProgram()
+{
+    const auto path = std::filesystem::temp_directory_path() / "cadenza-dominant-preset-test.sty";
+    {
+        std::ofstream out(path, std::ios::binary);
+        const auto bytes = makeMixedPresetSty();
+        out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+
+    auto r = loadStyleFromStyFile(path.string());
+    std::filesystem::remove(path);
+
+    expect(r.ok, "dominant preset sty load ok");
+    if (!r.ok) {
+        std::cerr << r.error << '\n';
+        return;
+    }
+
+    const auto* mainA = r.style.findSection("mainA");
+    expect(mainA != nullptr, "dominant preset mainA section");
+    const Part* bass = nullptr;
+    if (mainA)
+        for (const auto& part : mainA->parts)
+            if (part.midiChannel == 2)
+                bass = &part;
+
+    expect(bass != nullptr, "dominant preset bass part present");
+    if (bass) {
+        expect(bass->bankMsb && *bass->bankMsb == 0, "dominant preset remapped to GM bank 0");
+        expect(bass->bankLsb && *bass->bankLsb == 0, "dominant preset bank LSB cleared");
+        expect(bass->program && *bass->program == 33, "dominant preset remapped to Fingered Bass");
+        expect(bass->instrument == "Electric Fingered Bass", "dominant preset instrument matches bank/program");
+    }
+}
 }  // anonymous namespace
 
 int main()
@@ -493,6 +566,7 @@ int main()
     loadFromStyFileSucceeds();
     rhythm2ChannelBecomesPercussion();
     panelVoiceBankRemapsToGmRole();
+    dominantPresetKeepsMatchingBankAndProgram();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All StyleLoader tests passed\n";

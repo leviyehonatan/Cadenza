@@ -461,8 +461,8 @@ NoteRole assignRole(uint8_t channelZeroBased,
     return assignRole(channelZeroBased, pitch);
 }
 
-// Pick a representative MIDI program for a part = most-recently-set program on that channel
-// across this section's notes. Returns -1 if no program-change was ever seen.
+// Pick a representative MIDI program for a part = most common program across
+// this section's notes. Returns -1 if no program-change was ever seen.
 int dominantProgram(const std::vector<RawNote>& notes)
 {
     std::unordered_map<int, int> tally;
@@ -490,6 +490,31 @@ DominantPreset dominantPreset(const std::vector<RawNote>& notes)
 {
     DominantPreset preset;
     preset.program = dominantProgram(notes);
+
+    auto fillFromNote = [&](const RawNote& n)
+    {
+        if (n.bankMsb >= 0)
+            preset.bankMsb = n.bankMsb;
+        if (n.bankLsb >= 0)
+            preset.bankLsb = n.bankLsb;
+        if (n.volume >= 0)
+            preset.volume = n.volume;
+        if (n.pan >= 0)
+            preset.pan = n.pan;
+        if (n.reverb >= 0)
+            preset.reverb = n.reverb;
+        if (n.chorus >= 0)
+            preset.chorus = n.chorus;
+    };
+
+    if (preset.program >= 0) {
+        for (auto it = notes.rbegin(); it != notes.rend(); ++it) {
+            if (it->programChange == preset.program) {
+                fillFromNote(*it);
+                break;
+            }
+        }
+    }
 
     for (const auto& n : notes) {
         if (preset.bankMsb < 0 && n.bankMsb >= 0)
