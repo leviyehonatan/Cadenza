@@ -593,7 +593,7 @@ void playbackDiagnosticsRoutesPercussionEventsToDrumChannel()
     rhythm2.name = "rhythm2";
     rhythm2.midiChannel = 9;
     rhythm2.instrument = "XG Percussion";
-    rhythm2.percussion = true;
+    rhythm2.percussion = false; // channel identity alone must classify RHY2 as percussion.
     rhythm2.bankMsb = 127;
     rhythm2.bankLsb = 0;
     rhythm2.program = 0;
@@ -623,6 +623,9 @@ void playbackDiagnosticsRoutesPercussionEventsToDrumChannel()
     const auto csv = readText(outDir / "cadenza_playback_events.csv");
     expect(csv.find("0,9,42,42,90,60,rhythm2,absolute,127/0/0") != std::string::npos,
            "rhythm2 diagnostic event routes to its own drum channel 9");
+    const auto summary = readText(outDir / "playback_summary.md");
+    expect(summary.find("- 42") != std::string::npos,
+           "rhythm2 diagnostic summary classifies channel 9 as percussion");
     expect(csv.find("0,12,60,64,80,60,chord1,chord-3,-/-/27") != std::string::npos,
            "melodic diagnostic event keeps channel 12");
 

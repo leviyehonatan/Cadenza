@@ -418,6 +418,18 @@ void rhythm2ChannelBecomesPercussion()
         expect(rhy2->percussion, "RHY2 channel 9 is flagged percussion (no whistle)");
         expect(rhy2->name == "rhythm2", "RHY2 part named rhythm2");
     }
+
+    bool reportsDedicatedRhy2Channel = false;
+    bool reportsMainDrumChannel = false;
+    for (const auto& warning : r.style.parseWarnings) {
+        if (warning.find("RHY2 drum playback channel 9") != std::string::npos)
+            reportsDedicatedRhy2Channel = true;
+        if (warning.find("channel 9 percussion detected, routing to GM drum playback channel 10")
+            != std::string::npos)
+            reportsMainDrumChannel = true;
+    }
+    expect(reportsDedicatedRhy2Channel, "RHY2 diagnostic reports dedicated playback channel 9");
+    expect(!reportsMainDrumChannel, "RHY2 diagnostic does not claim routing to channel 10");
 }
 
 // Modern Yamaha panel-voice banks often carry non-GM program numbers. The parser

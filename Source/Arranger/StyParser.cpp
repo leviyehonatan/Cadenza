@@ -1704,9 +1704,14 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
                 part.percussion = true;
 
             if (part.percussion && part.midiChannel != 10) {
-                addParseWarning(style,
-                    "channel " + std::to_string(part.midiChannel)
-                    + " percussion detected, routing to GM drum playback channel 10");
+                if (part.midiChannel == 9) {
+                    addParseWarning(style,
+                        "channel 9 percussion detected, routing on dedicated RHY2 drum playback channel 9");
+                } else {
+                    addParseWarning(style,
+                        "channel " + std::to_string(part.midiChannel)
+                        + " percussion detected, routing to main drum playback channel 10");
+                }
             }
 
             // The pad often sits an octave too high; drop it one octave at playback.

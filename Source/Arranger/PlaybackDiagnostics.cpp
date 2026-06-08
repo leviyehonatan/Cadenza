@@ -1,6 +1,7 @@
 #include "PlaybackDiagnostics.h"
 
 #include "RuntimePlayback.h"
+#include "../Audio/MidiChannel.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -414,7 +415,8 @@ PlaybackDiagnosticResult exportPlaybackDiagnostics(const Style& style,
                     continue;
 
                 const int channel = playbackChannelForPart(part);
-                const bool percussion = part.percussion || channel == 10;
+                const bool percussion = part.percussion
+                                     || cadenza::audio::isCadenzaDrumChannel(channel);
                 const auto drum = percussion ? drumNoteForPlayback(part, note.pitch) : DrumNoteRemap{};
                 DiagnosticEvent ev;
                 ev.tick = tick;
