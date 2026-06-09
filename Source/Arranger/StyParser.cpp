@@ -805,6 +805,20 @@ YamahaRetriggerRule yamahaRetriggerRuleFromRaw(uint8_t value) noexcept
     }
 }
 
+const char* unsupportedYamahaRetriggerRuleName(YamahaRetriggerRule rule) noexcept
+{
+    switch (rule) {
+        case YamahaRetriggerRule::Stop: return "Stop";
+        case YamahaRetriggerRule::PitchShift: return nullptr;
+        case YamahaRetriggerRule::PitchShiftToRoot: return "PitchShiftToRoot";
+        case YamahaRetriggerRule::Retrigger: return "Retrigger";
+        case YamahaRetriggerRule::RetriggerToRoot: return "RetriggerToRoot";
+        case YamahaRetriggerRule::NoteGenerator: return "NoteGenerator";
+        case YamahaRetriggerRule::Unknown: return "Unknown";
+    }
+    return "Unknown";
+}
+
 YamahaNtr yamahaNtrFromText(const std::string& value)
 {
     const auto text = normalise(value);
@@ -1484,6 +1498,17 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
         addParseWarning(style, warning);
     if (!result.casm.found)
         addParseWarning(style, "missing CASM policy, using fallback role mapping");
+    for (const auto& cseg : result.casm.csegs) {
+        for (const auto& entry : cseg.ctabEntries) {
+            if (!entry.policy || !entry.policy->rawRtr)
+                continue;
+            if (const auto* mode = unsupportedYamahaRetriggerRuleName(entry.policy->retriggerRule)) {
+                addParseWarning(style,
+                    "unsupported Yamaha RTR " + std::string(mode)
+                    + " behavior; using Cadenza sustained-note pitch shifting");
+            }
+        }
+    }
 
     // Flatten all notes from all tracks for easier section splitting.
     struct FlatNote {

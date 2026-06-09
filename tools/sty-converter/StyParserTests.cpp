@@ -306,7 +306,8 @@ std::vector<uint8_t> makeSingleSectionStyWithCtb2(uint8_t channel,
                                                   uint8_t chordRootUpperLimit = 11,
                                                   uint8_t noteLowLimit = 24,
                                                   uint8_t noteHighLimit = 108,
-                                                  uint8_t sourceHighByte = 0x7F)
+                                                  uint8_t sourceHighByte = 0x7F,
+                                                  bool duplicatePolicy = false)
 {
     auto sty = makeSingleSectionSmf(channel);
 
@@ -337,6 +338,8 @@ std::vector<uint8_t> makeSingleSectionStyWithCtb2(uint8_t channel,
 
     std::vector<uint8_t> casm;
     appendChunk(casm, "CSEG", cseg);
+    if (duplicatePolicy)
+        appendChunk(casm, "CSEG", cseg);
     appendChunk(sty, "CASM", casm);
     return sty;
 }
@@ -991,6 +994,43 @@ bool hasStyleWarning(const cadenza::arranger::Style& style, const std::string& t
     return false;
 }
 
+int countStyleWarnings(const cadenza::arranger::Style& style, const std::string& text)
+{
+    int count = 0;
+    for (const auto& warning : style.parseWarnings)
+        if (warning.find(text) != std::string::npos)
+            ++count;
+    return count;
+}
+
+void unsupportedRtrModesReportDeduplicatedWarnings()
+{
+    struct Case {
+        uint8_t raw;
+        const char* name;
+    };
+    const Case cases[] = {
+        { 0, "Stop" },
+        { 2, "PitchShiftToRoot" },
+        { 3, "Retrigger" },
+        { 4, "RetriggerToRoot" },
+        { 5, "NoteGenerator" },
+        { 99, "Unknown" },
+    };
+
+    for (const auto& c : cases) {
+        auto sty = makeSingleSectionStyWithCtb2(
+            11, 0, 2, 0, 19, c.raw, 11, 24, 108, 0x7F, true);
+        auto r = cadenza::arranger::parseStyBytes(sty);
+        expect(r.ok, std::string("RTR ") + c.name + " style parses OK");
+        if (!r.ok) continue;
+
+        const std::string warning = std::string("unsupported Yamaha RTR ") + c.name + " behavior";
+        expect(countStyleWarnings(r.style, warning) == 1,
+               std::string("RTR ") + c.name + " warning is deduplicated by mode");
+    }
+}
+
 void missingCasmReportsParseWarning()
 {
     auto smf = makeSampleSmf();
@@ -1010,6 +1050,8 @@ void completePolicyDoesNotReportParseWarnings()
     if (!r.ok) return;
 
     expect(r.style.parseWarnings.empty(), "complete CASM policy has no parse warnings");
+    expect(!hasStyleWarning(r.style, "unsupported Yamaha RTR"),
+           "PitchShift RTR does not warn");
 }
 
 void unmappedPolicyChannelDoesNotWarnForLegacyLowChannels()
@@ -1049,6 +1091,7 @@ int main()
     unknownPolicyFallsBackToHeuristic();
     drumsRemainAbsoluteEvenWithPolicy();
     malformedCasmDoesNotCrash();
+    unsupportedRtrModesReportDeduplicatedWarnings();
     missingCasmReportsParseWarning();
     completePolicyDoesNotReportParseWarnings();
     unmappedPolicyChannelDoesNotWarnForLegacyLowChannels();
