@@ -551,12 +551,12 @@ DominantPreset dominantPreset(const std::vector<RawNote>& notes)
         return preset;
     }
 
-    auto best = std::max_element(tally.begin(), tally.end(),
-        [](const auto& a, const auto& b) { return a.second < b.second; });
-
-    const auto& key = best->first;
+    const int maxCount = std::max_element(tally.begin(), tally.end(),
+        [](const auto& a, const auto& b) { return a.second < b.second; })->second;
     for (auto it = notes.rbegin(); it != notes.rend(); ++it) {
-        if (it->programChange == key.program && it->bankMsb == key.bankMsb && it->bankLsb == key.bankLsb) {
+        const DominantPresetKey key { it->programChange, it->bankMsb, it->bankLsb };
+        const auto count = tally.find(key);
+        if (count != tally.end() && count->second == maxCount) {
             preset.program = it->programChange;
             preset.bankMsb = it->bankMsb;
             preset.bankLsb = it->bankLsb;

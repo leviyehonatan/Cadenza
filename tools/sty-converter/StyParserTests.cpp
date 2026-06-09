@@ -206,6 +206,31 @@ std::vector<uint8_t> makeSingleSectionSmf(uint8_t channel)
     return smf;
 }
 
+std::vector<uint8_t> makePresetSelectionSmf(const std::vector<uint8_t>& programs)
+{
+    std::vector<uint8_t> smf;
+    pushTag(smf, "MThd"); pushU32(smf, 6);
+    pushU16(smf, 1);
+    pushU16(smf, 2);
+    pushU16(smf, 480);
+
+    std::vector<uint8_t> t0;
+    pushTimeSignature(t0, 0, 4, 2);
+    pushMarker(t0, 0, "Main A");
+    pushEndOfTrack(t0, 1920);
+    appendTrack(smf, t0);
+
+    std::vector<uint8_t> t1;
+    for (uint8_t program : programs) {
+        pushProgramChange(t1, 0, 1, program);
+        pushNoteOn(t1, 0, 1, static_cast<uint8_t>(60 + program / 8), 100);
+        pushNoteOff(t1, 480, 1, static_cast<uint8_t>(60 + program / 8));
+    }
+    pushEndOfTrack(t1);
+    appendTrack(smf, t1);
+    return smf;
+}
+
 std::vector<uint8_t> makeSampleStyWithCasm()
 {
     auto sty = makeSampleSmf();
@@ -476,6 +501,50 @@ void markerMappingIsCaseInsensitive()
     expect(mapSectionMarker("Intro B").value() == "introB",   "Intro B -> introB");
     expect(mapSectionMarker("Fill In AA").value() == "fillAA","Fill In AA");
     expect(!mapSectionMarker("Random text").has_value(),      "non-marker rejected");
+}
+
+void equalPresetCountsPreferLatestPreset()
+{
+    auto smf = makePresetSelectionSmf({ 56, 8, 8, 56 });
+    auto r = cadenza::arranger::parseStyBytes(smf);
+    expect(r.ok, "equal-preset tie style parses OK");
+    if (!r.ok) return;
+
+    const auto* mainA = r.style.findSection("mainA");
+    expect(mainA != nullptr, "equal-preset tie mainA found");
+    if (!mainA) return;
+
+    const cadenza::arranger::Part* part = nullptr;
+    for (const auto& candidate : mainA->parts)
+        if (candidate.midiChannel == 2)
+            part = &candidate;
+    expect(part != nullptr, "equal-preset tie channel 2 part found");
+    if (!part) return;
+
+    expect(part->program && *part->program == 56,
+           "equal preset counts choose the latest matching preset");
+}
+
+void clearDominantPresetStillWins()
+{
+    auto smf = makePresetSelectionSmf({ 24, 24, 24, 56 });
+    auto r = cadenza::arranger::parseStyBytes(smf);
+    expect(r.ok, "clear dominant preset style parses OK");
+    if (!r.ok) return;
+
+    const auto* mainA = r.style.findSection("mainA");
+    expect(mainA != nullptr, "clear dominant preset mainA found");
+    if (!mainA) return;
+
+    const cadenza::arranger::Part* part = nullptr;
+    for (const auto& candidate : mainA->parts)
+        if (candidate.midiChannel == 2)
+            part = &candidate;
+    expect(part != nullptr, "clear dominant preset channel 2 part found");
+    if (!part) return;
+
+    expect(part->program && *part->program == 24,
+           "clear highest-count preset wins over latest minority preset");
 }
 
 void casmChunkIsDetectedAndParsed()
@@ -1095,6 +1164,8 @@ int main()
     sectionsAreSplitByMarkers();
     mainARolesAreAssignedHeuristically();
     drumsAreAbsolute();
+    equalPresetCountsPreferLatestPreset();
+    clearDominantPresetStillWins();
     casmChunkIsDetectedAndParsed();
     binaryCtabDecodesKnownFields();
     sff1CtabNttByte3MapsToMelodyBassOn();
