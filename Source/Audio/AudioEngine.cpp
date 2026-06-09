@@ -161,7 +161,11 @@ void AudioEngine::play()
         m_transport.startFromBeginning();
 }
 
-void AudioEngine::stop()  { m_transport.stop(); if (m_synth) m_synth->allNotesOff(); }
+void AudioEngine::stop()
+{
+    m_transport.stop();
+    allNotesOff();
+}
 void AudioEngine::setBpm(double bpm) { m_transport.setBpm(bpm); }
 
 void AudioEngine::noteOn(int channel, int note, int velocity)
@@ -227,6 +231,20 @@ void AudioEngine::pitchBend(int channel, int value14)
 void AudioEngine::allNotesOff()
 {
     if (m_synth) m_synth->allNotesOff();
+
+    const double timestamp = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    for (int channel = 1; channel < kNumChannels; ++channel) {
+        if (!m_partLoaded[channel].load())
+            continue;
+
+        auto notesOff = juce::MidiMessage::allNotesOff(1);
+        notesOff.setTimeStamp(timestamp);
+        m_partCollector[channel].addMessageToQueue(notesOff);
+
+        auto soundOff = juce::MidiMessage::allSoundOff(1);
+        soundOff.setTimeStamp(timestamp);
+        m_partCollector[channel].addMessageToQueue(soundOff);
+    }
 }
 
 bool AudioEngine::loadSoundFont(const std::string& path)
