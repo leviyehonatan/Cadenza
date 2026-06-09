@@ -1,4 +1,5 @@
 #include "Metronome.h"
+#include "../MusicalTiming.h"
 
 #include <cmath>
 
@@ -33,9 +34,10 @@ void Metronome::renderBlock(juce::AudioBuffer<float>& buffer, Transport& transpo
     // Strategy: ask transport for total beats; if it advanced to a new beat
     // anywhere in this block, fire a click at the start of the block.
     // (Per-sample precision can be added later.)
-    const int ppq = transport.ticksPerBeat();
-    if (ppq > 0) {
-        const int totalBeats = transport.positionTickInt() / ppq;
+    const int beatTicks = cadenza::ticksPerNotatedBeat(
+        transport.ticksPerBeat(), transport.beatUnit());
+    if (beatTicks > 0) {
+        const int totalBeats = transport.positionTickInt() / beatTicks;
         if (totalBeats != m_lastBeatFiredAt) {
             m_lastBeatFiredAt = totalBeats;
             const bool accent = (transport.beatsPerBar() > 0)

@@ -1,4 +1,5 @@
 #include "StyParser.h"
+#include "../MusicalTiming.h"
 
 #include <algorithm>
 #include <cctype>
@@ -1575,9 +1576,8 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
         Section section;
         section.name = sm.cadenzaName;
         uint64_t lenTicks = stopT - startT;
-        const uint64_t barTicks = std::max<uint64_t>(
-            1, static_cast<uint64_t>(style.beatsPerBar) * style.ticksPerBeat * 4
-                   / static_cast<uint64_t>(style.beatUnit));
+        const uint64_t barTicks = static_cast<uint64_t>(std::max(
+            1, cadenza::ticksPerBar(style.ticksPerBeat, style.beatsPerBar, style.beatUnit)));
         if ((lenTicks % barTicks) != 0) {
             addParseWarning(style,
                 "section timing " + section.name + " length " + std::to_string(lenTicks)

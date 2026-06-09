@@ -2,6 +2,7 @@
 
 #include "RuntimePlayback.h"
 #include "../Audio/MidiChannel.h"
+#include "../MusicalTiming.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -399,8 +400,10 @@ PlaybackDiagnosticResult exportPlaybackDiagnostics(const Style& style,
     }
 
     const int exportBars = std::max(1, bars);
-    const int horizonTicks = exportBars * style.beatsPerBar * style.ticksPerBeat;
-    const int sectionTicks = std::max(1, section->barCount * style.beatsPerBar * style.ticksPerBeat);
+    const int barTicks = std::max(
+        1, cadenza::ticksPerBar(style.ticksPerBeat, style.beatsPerBar, style.beatUnit));
+    const int horizonTicks = exportBars * barTicks;
+    const int sectionTicks = std::max(1, section->barCount * barTicks);
 
     std::vector<DiagnosticEvent> events;
     for (const auto& part : section->parts) {

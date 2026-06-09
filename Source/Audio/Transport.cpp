@@ -1,4 +1,5 @@
 #include "Transport.h"
+#include "../MusicalTiming.h"
 
 namespace cadenza::audio
 {
@@ -61,15 +62,16 @@ int Transport::advance(int numFrames) noexcept
 
 int Transport::positionBar() const noexcept
 {
-    if (m_ticksPerBeat <= 0 || m_beatsPerBar <= 0) return 0;
-    const int beatsTotal = static_cast<int>(m_positionTicks) / m_ticksPerBeat;
-    return beatsTotal / m_beatsPerBar;
+    const int barTicks = cadenza::ticksPerBar(m_ticksPerBeat, m_beatsPerBar, m_beatUnit);
+    if (barTicks <= 0) return 0;
+    return static_cast<int>(m_positionTicks) / barTicks;
 }
 
 int Transport::positionBeat() const noexcept
 {
-    if (m_ticksPerBeat <= 0 || m_beatsPerBar <= 0) return 0;
-    const int beatsTotal = static_cast<int>(m_positionTicks) / m_ticksPerBeat;
-    return beatsTotal % m_beatsPerBar;
+    const int beatTicks = cadenza::ticksPerNotatedBeat(m_ticksPerBeat, m_beatUnit);
+    const int barTicks = cadenza::ticksPerBar(m_ticksPerBeat, m_beatsPerBar, m_beatUnit);
+    if (beatTicks <= 0 || barTicks <= 0) return 0;
+    return (static_cast<int>(m_positionTicks) % barTicks) / beatTicks;
 }
 }

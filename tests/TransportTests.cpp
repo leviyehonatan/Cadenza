@@ -1,6 +1,7 @@
 #include "Audio/Transport.h"
 #include "Arranger/RuntimePlayback.h"
 #include "Arranger/Style.h"
+#include "MusicalTiming.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -16,6 +17,20 @@ void expect(bool cond, const std::string& msg) {
 }
 
 using cadenza::audio::Transport;
+
+void denominatorAwareBarLengths()
+{
+    expect(cadenza::ticksPerNotatedBeat(480, 4) == 480,
+           "4/4 notated beat is one quarter note");
+    expect(cadenza::ticksPerBar(480, 4, 4) == 1920,
+           "4/4 at PPQ 480 is 1920 ticks per bar");
+    expect(cadenza::ticksPerBar(480, 3, 4) == 1440,
+           "3/4 at PPQ 480 is 1440 ticks per bar");
+    expect(cadenza::ticksPerNotatedBeat(480, 8) == 240,
+           "6/8 notated beat is one eighth note");
+    expect(cadenza::ticksPerBar(480, 6, 8) == 1440,
+           "6/8 at PPQ 480 is 1440 ticks per bar");
+}
 
 void defaultsAreSensible()
 {
@@ -76,6 +91,32 @@ void barAndBeatRollOverCorrectly()
     t.advance(96000);
     expect(t.positionBar() == 1, "after 4 beats, bar 1");
     expect(t.positionBeat() == 0, "beat 0 of bar 1");
+}
+
+void barAndBeatRespectBeatUnit()
+{
+    Transport threeFour;
+    threeFour.setSampleRate(48000.0);
+    threeFour.setBpm(120.0);
+    threeFour.setTicksPerBeat(480);
+    threeFour.setTimeSignature(3, 4);
+    threeFour.start();
+    threeFour.advance(72000); // 1.5 seconds = 3 quarter notes = one 3/4 bar.
+    expect(threeFour.positionBar() == 1, "3/4 reaches bar 1 after 1440 ticks");
+    expect(threeFour.positionBeat() == 0, "3/4 rolls over to beat 0");
+
+    Transport sixEight;
+    sixEight.setSampleRate(48000.0);
+    sixEight.setBpm(120.0);
+    sixEight.setTicksPerBeat(480);
+    sixEight.setTimeSignature(6, 8);
+    sixEight.start();
+    sixEight.advance(12000); // 0.25 seconds = 240 ticks = one eighth-note beat.
+    expect(sixEight.positionBar() == 0, "6/8 remains in bar 0 after one eighth note");
+    expect(sixEight.positionBeat() == 1, "6/8 advances by one notated eighth-note beat");
+    sixEight.advance(60000); // Five more eighth notes complete the 1440-tick bar.
+    expect(sixEight.positionBar() == 1, "6/8 reaches bar 1 after 1440 ticks");
+    expect(sixEight.positionBeat() == 0, "6/8 rolls over to beat 0");
 }
 
 void changingBpmTakesEffectImmediately()
@@ -147,11 +188,13 @@ void styleTimingAppliesToTransport()
 
 int main()
 {
+    denominatorAwareBarLengths();
     defaultsAreSensible();
     samplesPerTickAt120BpmAnd48kHz();
     stoppedDoesNotAdvance();
     playingAdvancesByExpectedTicks();
     barAndBeatRollOverCorrectly();
+    barAndBeatRespectBeatUnit();
     changingBpmTakesEffectImmediately();
     resetClears();
     startFromBeginningResetsStoppedTransport();

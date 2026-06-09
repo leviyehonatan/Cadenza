@@ -1,5 +1,6 @@
 #include "StyleEngine.h"
 #include "RuntimePlayback.h"
+#include "../MusicalTiming.h"
 
 #include <algorithm>
 #include <optional>
@@ -92,7 +93,8 @@ void StyleEngine::applyStyleReplacement(std::shared_ptr<const Style> style)
         }
         const auto* sec = m_style->findSection(m_sectionName);
         if (sec) {
-            m_sectionLengthTicks = sec->barCount * m_style->beatsPerBar * m_style->ticksPerBeat;
+            m_sectionLengthTicks = sec->barCount * cadenza::ticksPerBar(
+                m_style->ticksPerBeat, m_style->beatsPerBar, m_style->beatUnit);
             applySectionChannelSetup(*sec);
         }
     } else {
@@ -124,7 +126,8 @@ void StyleEngine::switchToSection(const Style& style, const std::string& name,
 
     const auto* picked = style.findSection(m_sectionName);
     if (picked) {
-        m_sectionLengthTicks = picked->barCount * style.beatsPerBar * style.ticksPerBeat;
+        m_sectionLengthTicks = picked->barCount * cadenza::ticksPerBar(
+            style.ticksPerBeat, style.beatsPerBar, style.beatUnit);
         applySectionChannelSetup(*picked);
     }
     m_currentOnce     = once;
@@ -324,7 +327,8 @@ void StyleEngine::onTick(int ticksAdvanced, cadenza::audio::Transport& transport
     const int currentTick = transport.positionTickInt();
     const int startTick   = currentTick - ticksAdvanced;
 
-    const int barTicks = style->beatsPerBar * style->ticksPerBeat;
+    const int barTicks = cadenza::ticksPerBar(
+        style->ticksPerBeat, style->beatsPerBar, style->beatUnit);
     for (int t = startTick + 1; t <= currentTick; ++t) {
         // At each bar boundary, apply a queued section change or one-shot return
         // (sample-tight, on the audio thread). This may change m_sectionLengthTicks.
