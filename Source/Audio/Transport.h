@@ -4,10 +4,14 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 namespace cadenza::audio
 {
+static_assert(std::atomic<double>::is_always_lock_free,
+              "Transport BPM publication must remain lock-free on the audio thread");
+
 class Transport
 {
 public:
@@ -19,12 +23,12 @@ public:
     void setTimeSignature(int beatsPerBar, int beatUnit) noexcept;
 
     double sampleRate()    const noexcept { return m_sampleRate; }
-    double bpm()           const noexcept { return m_bpm; }
+    double bpm()           const noexcept { return m_publishedBpm.load(std::memory_order_relaxed); }
     int    ticksPerBeat()  const noexcept { return m_ticksPerBeat; }
     int    beatsPerBar()   const noexcept { return m_beatsPerBar; }
     int    beatUnit()      const noexcept { return m_beatUnit; }
 
-    bool   playing()       const noexcept { return m_playing; }
+    bool   playing()       const noexcept { return m_publishedPlaying.load(std::memory_order_relaxed); }
     void   start() noexcept;
     void   startFromBeginning() noexcept;
     void   stop() noexcept;
@@ -47,10 +51,12 @@ public:
 private:
     double m_sampleRate = 48000.0;
     double m_bpm = 120.0;
+    std::atomic<double> m_publishedBpm { 120.0 };
     int    m_ticksPerBeat = 960;
     int    m_beatsPerBar = 4;
     int    m_beatUnit = 4;
     bool   m_playing = false;
+    std::atomic<bool> m_publishedPlaying { false };
     double m_positionTicks = 0.0;
     double m_phaseAccumFrames = 0.0;
 };

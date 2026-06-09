@@ -11,6 +11,7 @@
 #include "PluginHost.h"
 #include "SynthEngine.h"
 #include "Transport.h"
+#include "TransportCommandMailbox.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -39,6 +40,7 @@ public:
     // Transport control
     void play();
     void stop();
+    void stopFromAudioThread();
     void setBpm(double bpm);
     void setMetronomeEnabled(bool enabled) { m_metronome.setEnabled(enabled); }
     bool isMetronomeEnabled() const        { return m_metronome.isEnabled(); }
@@ -99,6 +101,7 @@ private:
     std::unique_ptr<SynthEngine> m_synth;
     Metronome m_metronome;
     Transport m_transport;
+    TransportCommandMailbox m_transportCommands;
     PluginHost m_masterEffect;
     MasterEq         m_masterEq;
     MasterCompressor m_masterComp;
@@ -107,6 +110,7 @@ private:
 
     // Per-part instrument hosting (channels 1..16; index 0 unused).
     static constexpr int kNumChannels = 17;
+    void consumeTransportCommands();   // audio thread, before transport advance
     void renderPartInstruments(juce::AudioBuffer<float>& view);   // audio thread
     PluginHost               m_partInstrument[kNumChannels];
     juce::MidiMessageCollector m_partCollector[kNumChannels];

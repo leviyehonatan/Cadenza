@@ -3,6 +3,7 @@
 #include "MidiChannel.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace cadenza::audio
@@ -75,6 +76,7 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
     // one block late. See AudioBlockPipeline.h for the ordering rationale.
     runAudioBlock(
         [&] {  // 1) advance transport and let StyleEngine push due MIDI to the synth
+            consumeTransportCommands();
             const int ticksAdvanced = m_transport.advance(info.numSamples);
             if (m_onTick && ticksAdvanced > 0)
                 m_onTick(ticksAdvanced, m_transport);
@@ -157,16 +159,48 @@ void AudioEngine::stopAudioDevice()
 
 void AudioEngine::play()
 {
-    if (!m_transport.playing())
-        m_transport.startFromBeginning();
+    if (!m_transportCommands.publish({ TransportCommandType::Play, 0.0 }))
+        juce::Logger::writeToLog("[Cadenza] Transport command mailbox overflow; oldest command replaced.");
 }
 
 void AudioEngine::stop()
 {
+    if (!m_transportCommands.publish({ TransportCommandType::Stop, 0.0 }))
+        juce::Logger::writeToLog("[Cadenza] Transport command mailbox overflow; oldest command replaced.");
+    allNotesOff();
+}
+
+void AudioEngine::stopFromAudioThread()
+{
     m_transport.stop();
     allNotesOff();
 }
-void AudioEngine::setBpm(double bpm) { m_transport.setBpm(bpm); }
+
+void AudioEngine::setBpm(double bpm)
+{
+    if (!m_transportCommands.publish({ TransportCommandType::SetBpm, bpm }))
+        juce::Logger::writeToLog("[Cadenza] Transport command mailbox overflow; oldest command replaced.");
+}
+
+void AudioEngine::consumeTransportCommands()
+{
+    std::array<TransportCommand, TransportCommandMailbox::capacity> commands {};
+    const auto count = m_transportCommands.tryTakeAll(commands);
+    for (std::size_t i = 0; i < count; ++i) {
+        switch (commands[i].type) {
+            case TransportCommandType::Play:
+                if (!m_transport.playing())
+                    m_transport.startFromBeginning();
+                break;
+            case TransportCommandType::Stop:
+                m_transport.stop();
+                break;
+            case TransportCommandType::SetBpm:
+                m_transport.setBpm(commands[i].bpm);
+                break;
+        }
+    }
+}
 
 void AudioEngine::noteOn(int channel, int note, int velocity)
 {

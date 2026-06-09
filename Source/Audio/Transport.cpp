@@ -10,7 +10,10 @@ void Transport::setSampleRate(double rate) noexcept
 
 void Transport::setBpm(double bpm) noexcept
 {
-    if (bpm > 0.0) m_bpm = bpm;
+    if (bpm > 0.0) {
+        m_bpm = bpm;
+        m_publishedBpm.store(bpm, std::memory_order_relaxed);
+    }
 }
 
 void Transport::setTicksPerBeat(int ppq) noexcept
@@ -24,14 +27,22 @@ void Transport::setTimeSignature(int beatsPerBar, int beatUnit) noexcept
     if (beatUnit > 0)    m_beatUnit = beatUnit;
 }
 
-void Transport::start() noexcept { m_playing = true; }
+void Transport::start() noexcept
+{
+    m_playing = true;
+    m_publishedPlaying.store(true, std::memory_order_relaxed);
+}
 void Transport::startFromBeginning() noexcept
 {
     reset();
     start();
 }
 
-void Transport::stop()  noexcept { m_playing = false; }
+void Transport::stop() noexcept
+{
+    m_playing = false;
+    m_publishedPlaying.store(false, std::memory_order_relaxed);
+}
 void Transport::reset() noexcept
 {
     m_positionTicks = 0.0;

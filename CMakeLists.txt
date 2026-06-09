@@ -58,6 +58,7 @@ add_library(cadenza_core STATIC
     Source/Audio/MasterCompressor.cpp
     Source/Audio/VoiceMap.cpp
     Source/Audio/Transport.cpp
+    Source/Audio/TransportCommandMailbox.cpp
     Source/Settings/SettingsStore.cpp
 )
 
@@ -93,6 +94,7 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_sections_tests     tests/SectionButtonsTests.cpp)
     cadenza_add_test(cadenza_section_queue_tests tests/SectionChangeQueueTests.cpp)
     cadenza_add_test(cadenza_style_queue_tests tests/StyleChangeQueueTests.cpp)
+    cadenza_add_test(cadenza_transport_command_tests tests/TransportCommandMailboxTests.cpp)
     cadenza_add_test(cadenza_mixer_tests        tests/MixerModelTests.cpp)
     cadenza_add_test(cadenza_compressor_tests   tests/MasterCompressorTests.cpp)
     cadenza_add_test(cadenza_voicemap_tests     tests/VoiceMapTests.cpp)

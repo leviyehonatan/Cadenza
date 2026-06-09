@@ -201,7 +201,7 @@ bool StyleEngine::handleBarBoundary(const Style& style)
     }
     if (stop) {
         m_active.clear();
-        m_engine.stop();
+        m_engine.stopFromAudioThread();
         if (m_onStopRequested)
             m_onStopRequested();
     }
