@@ -1499,6 +1499,12 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
     if (!result.casm.found)
         addParseWarning(style, "missing CASM policy, using fallback role mapping");
     for (const auto& cseg : result.casm.csegs) {
+        for (const auto& tag : cseg.childBlockTags) {
+            if (tag == "Cntt") {
+                addParseWarning(style,
+                    "unsupported Yamaha Cntt override metadata; using base Ctab/Ctb2 policy");
+            }
+        }
         for (const auto& entry : cseg.ctabEntries) {
             if (!entry.policy || !entry.policy->rawRtr)
                 continue;

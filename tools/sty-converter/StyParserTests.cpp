@@ -307,7 +307,8 @@ std::vector<uint8_t> makeSingleSectionStyWithCtb2(uint8_t channel,
                                                   uint8_t noteLowLimit = 24,
                                                   uint8_t noteHighLimit = 108,
                                                   uint8_t sourceHighByte = 0x7F,
-                                                  bool duplicatePolicy = false)
+                                                  bool duplicatePolicy = false,
+                                                  int cnttCount = 0)
 {
     auto sty = makeSingleSectionSmf(channel);
 
@@ -335,6 +336,8 @@ std::vector<uint8_t> makeSingleSectionStyWithCtb2(uint8_t channel,
     std::vector<uint8_t> cseg;
     appendChunk(cseg, "Sdec", sdec);
     appendChunk(cseg, "Ctb2", ctb2);
+    for (int i = 0; i < cnttCount; ++i)
+        appendChunk(cseg, "Cntt", { static_cast<uint8_t>(i) });
 
     std::vector<uint8_t> casm;
     appendChunk(casm, "CSEG", cseg);
@@ -1031,6 +1034,20 @@ void unsupportedRtrModesReportDeduplicatedWarnings()
     }
 }
 
+void cnttOverridesReportOneStyleWarning()
+{
+    auto sty = makeSingleSectionStyWithCtb2(
+        11, 0, 2, 0, 19, 1, 11, 24, 108, 0x7F, false, 2);
+    auto r = cadenza::arranger::parseStyBytes(sty);
+    expect(r.ok, "style with repeated Cntt overrides parses OK");
+    if (!r.ok) return;
+
+    const std::string warning =
+        "unsupported Yamaha Cntt override metadata; using base Ctab/Ctb2 policy";
+    expect(countStyleWarnings(r.style, warning) == 1,
+           "repeated Cntt overrides produce one style warning");
+}
+
 void missingCasmReportsParseWarning()
 {
     auto smf = makeSampleSmf();
@@ -1052,6 +1069,8 @@ void completePolicyDoesNotReportParseWarnings()
     expect(r.style.parseWarnings.empty(), "complete CASM policy has no parse warnings");
     expect(!hasStyleWarning(r.style, "unsupported Yamaha RTR"),
            "PitchShift RTR does not warn");
+    expect(!hasStyleWarning(r.style, "unsupported Yamaha Cntt"),
+           "normal Ctb2 policy does not report Cntt warning");
 }
 
 void unmappedPolicyChannelDoesNotWarnForLegacyLowChannels()
@@ -1092,6 +1111,7 @@ int main()
     drumsRemainAbsoluteEvenWithPolicy();
     malformedCasmDoesNotCrash();
     unsupportedRtrModesReportDeduplicatedWarnings();
+    cnttOverridesReportOneStyleWarning();
     missingCasmReportsParseWarning();
     completePolicyDoesNotReportParseWarnings();
     unmappedPolicyChannelDoesNotWarnForLegacyLowChannels();
