@@ -77,6 +77,35 @@ static int valueOrMinusOne(const std::optional<int>& value)
     return value.value_or(-1);
 }
 
+static void printOts(const Style& style)
+{
+    bool any = false;
+    for (const auto& slot : style.ots)
+        if (slot.present) any = true;
+    if (!any) {
+        std::printf("OTS: none\n");
+        return;
+    }
+    std::printf("OTS:\n");
+    static const char* layerNames[3] = { "R1", "R2", "R3" };
+    for (std::size_t s = 0; s < style.ots.size(); ++s) {
+        const auto& slot = style.ots[s];
+        if (!slot.present) {
+            std::printf("  slot %zu: --\n", s + 1);
+            continue;
+        }
+        std::printf("  slot %zu:", s + 1);
+        for (std::size_t i = 0; i < slot.layers.size(); ++i) {
+            const auto& v = slot.layers[i];
+            if (v.present)
+                std::printf("  %s prog %d vol %d", layerNames[i], v.program, v.volume);
+            else
+                std::printf("  %s --", layerNames[i]);
+        }
+        std::printf("\n");
+    }
+}
+
 int main(int argc, char** argv)
 {
     if (argc < 2) { std::printf("usage: style-probe <file.sty|.cstyle> [chord=C] [section] [n=10]\n"); return 2; }
@@ -149,6 +178,7 @@ int main(int argc, char** argv)
         for (const auto& warning : style.parseWarnings)
             std::printf("- warning: %s\n", warning.c_str());
     }
+    printOts(style);
 
     const TransposeContext ctx = makeStylePlaybackContext(*chord, /*key=*/0, /*transpose=*/0);
 

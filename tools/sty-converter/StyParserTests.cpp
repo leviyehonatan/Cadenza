@@ -1166,6 +1166,9 @@ std::vector<uint8_t> makeStyWithOts()
     auto sty = makeSampleSmf();
 
     std::vector<uint8_t> body;
+    // Real Genos files put an "OTSi" info sub-block before the setup tracks;
+    // the parser must skip it and find the MTrk signatures.
+    appendChunk(body, "OTSi", { 0, 0, 0, 0, 0, 0, 0, 0 });
     {   // OTS 1: Right1 = Grand Piano (0) vol 110, Right2 = Strings (48) vol 80.
         std::vector<uint8_t> t;
         pushProgramChange(t, 0, static_cast<uint8_t>(kOtsChannelRight1), 0);
@@ -1186,7 +1189,7 @@ std::vector<uint8_t> makeStyWithOts()
         pushEndOfTrack(t);
         appendTrack(body, t);
     }
-    appendChunk(sty, "OTS ", body);
+    appendChunk(sty, "OTSc", body);
     return sty;
 }
 
@@ -1226,7 +1229,7 @@ void missingOtsChunkLeavesSlotsAbsent()
 void truncatedOtsChunkWarnsButStillParses()
 {
     auto sty = makeSampleSmf();
-    pushTag(sty, "OTS ");
+    pushTag(sty, "OTSc");
     pushU32(sty, 4096);          // declared size far beyond the file end
     pushU8(sty, 0x00);           // a single garbage body byte
     auto r = cadenza::arranger::parseStyBytes(sty);
@@ -1244,7 +1247,7 @@ void unexpectedOtsChannelReportsWarning()
     pushProgramChange(t, 0, 5, 40);   // channel 5 is not a mapped OTS panel channel
     pushEndOfTrack(t);
     appendTrack(body, t);
-    appendChunk(sty, "OTS ", body);
+    appendChunk(sty, "OTSc", body);
 
     auto r = parseStyBytes(sty);
     expect(r.ok, "unexpected OTS channel still parses");

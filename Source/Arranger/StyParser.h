@@ -72,14 +72,14 @@ struct CasmInfo
 };
 
 // MIDI channels (0-based) that Yamaha OTS setup tracks use to address the
-// panel voices. PROVISIONAL — verified and corrected against the user's real
-// Genos preset styles in the verification task of
-// docs/superpowers/plans/2026-06-10-one-touch-settings.md. If real files
-// warn about "unexpected MIDI channel", fix THESE constants, nothing else.
-inline constexpr int kOtsChannelLeft   = 8;
-inline constexpr int kOtsChannelRight1 = 9;
-inline constexpr int kOtsChannelRight2 = 10;
-inline constexpr int kOtsChannelRight3 = 11;
+// panel voices. Verified against Genos2 preset styles: every OTSc setup track
+// programs channels 0..2 with the slot's Right 1/2/3 voices and channel 3
+// with the style's (constant) Left voice. If other generations differ, the
+// importer warns about "unexpected MIDI channel" — fix THESE constants then.
+inline constexpr int kOtsChannelRight1 = 0;
+inline constexpr int kOtsChannelRight2 = 1;
+inline constexpr int kOtsChannelRight3 = 2;
+inline constexpr int kOtsChannelLeft   = 3;
 
 struct StyParseResult
 {

@@ -1394,20 +1394,33 @@ YamahaStyleFormat inferYamahaFormat(const CasmInfo& casm) noexcept
     return hasCtab ? YamahaStyleFormat::SFF1 : YamahaStyleFormat::Unknown;
 }
 
-// Parse the Yamaha "OTS " chunk: up to four embedded MTrk setup tracks, one
-// per One Touch Setting. Each track carries bank/program/volume events that
-// address panel voices by MIDI channel (see kOtsChannel* in StyParser.h).
+// Find a 4-byte tag at or after `from`. Returns npos when absent.
+std::size_t findChunkTag(const std::vector<uint8_t>& bytes, std::size_t from,
+                         const char* tag)
+{
+    for (std::size_t pos = from; pos + 4 <= bytes.size(); ++pos) {
+        if (bytes[pos] == static_cast<uint8_t>(tag[0]) &&
+            bytes[pos + 1] == static_cast<uint8_t>(tag[1]) &&
+            bytes[pos + 2] == static_cast<uint8_t>(tag[2]) &&
+            bytes[pos + 3] == static_cast<uint8_t>(tag[3]))
+            return pos;
+    }
+    return std::string::npos;
+}
+
+// Parse the Yamaha OTS chunk ("OTSc" in real Genos/PSR files): up to four
+// embedded MTrk setup tracks, one per One Touch Setting. The container also
+// holds non-track sub-blocks (e.g. "OTSi") and its declared size is not
+// reliable across generations, so we scan for the MTrk signatures instead of
+// walking strict tag+length pairs. Each track carries bank/program/volume
+// events that address panel voices by MIDI channel (see kOtsChannel* in
+// StyParser.h).
 void parseOtsAfterSmf(const std::vector<uint8_t>& bytes, std::size_t smfEnd,
                       Style& style, bool verbose)
 {
-    std::size_t otsOffset = std::string::npos;
-    for (std::size_t pos = smfEnd; pos + 4 <= bytes.size(); ++pos) {
-        if (bytes[pos] == 'O' && bytes[pos + 1] == 'T' &&
-            bytes[pos + 2] == 'S' && bytes[pos + 3] == ' ') {
-            otsOffset = pos;
-            break;
-        }
-    }
+    std::size_t otsOffset = findChunkTag(bytes, smfEnd, "OTSc");
+    if (otsOffset == std::string::npos)
+        otsOffset = findChunkTag(bytes, smfEnd, "OTS ");
     if (otsOffset == std::string::npos)
         return;   // most styles simply have no OTS chunk
 
@@ -1415,30 +1428,30 @@ void parseOtsAfterSmf(const std::vector<uint8_t>& bytes, std::size_t smfEnd,
         addParseWarning(style, "truncated OTS chunk header");
         return;
     }
-    const uint32_t declaredSize = readU32be(bytes, otsOffset + 4);
-    const std::size_t bodyStart = otsOffset + 8;
-    std::size_t bodyEnd = bodyStart + declaredSize;
-    if (bodyEnd > bytes.size() || bodyEnd < bodyStart) {
-        addParseWarning(style, "OTS declared size exceeds available bytes");
-        bodyEnd = bytes.size();
-    }
 
     Reader r(bytes);
-    r.pos = bodyStart;
     std::vector<SectionMarker> ignoredMarkers;
+    std::size_t searchFrom = otsOffset + 8;
     int slot = 0;
-    while (r.pos + 8 <= bodyEnd && slot < static_cast<int>(style.ots.size())) {
-        if (!r.match("MTrk")) {
-            addParseWarning(style, "unexpected data in OTS chunk");
+    while (slot < static_cast<int>(style.ots.size())) {
+        const std::size_t trackPos = findChunkTag(bytes, searchFrom, "MTrk");
+        if (trackPos == std::string::npos)
+            break;
+        r.pos = trackPos;
+        r.match("MTrk");
+        const uint32_t trackLen = r.u32be();
+        if (r.pos + trackLen > bytes.size()) {
+            addParseWarning(style, "truncated OTS setup track "
+                                       + std::to_string(slot + 1));
             break;
         }
-        const uint32_t trackLen = r.u32be();
         TrackData td;
         if (!parseTrack(r, trackLen, td, ignoredMarkers)) {
             addParseWarning(style, "malformed OTS setup track "
                                        + std::to_string(slot + 1));
             break;
         }
+        searchFrom = r.pos;
 
         auto& setting = style.ots[static_cast<std::size_t>(slot)];
         const struct { int channel; int layer; } panelMap[3] = {
@@ -1484,9 +1497,8 @@ void parseOtsAfterSmf(const std::vector<uint8_t>& bytes, std::size_t smfEnd,
         ++slot;
     }
 
-    // A real OTS chunk carries four setup tracks; fewer means the file is odd
-    // (only reachable when the loop ran out of body bytes, not on a break).
-    if (slot < static_cast<int>(style.ots.size()) && r.pos + 8 > bodyEnd)
+    // A real OTS chunk carries four setup tracks; fewer means the file is odd.
+    if (slot < static_cast<int>(style.ots.size()))
         addParseWarning(style, "OTS chunk defines only " + std::to_string(slot)
                                    + " setup tracks");
 }
