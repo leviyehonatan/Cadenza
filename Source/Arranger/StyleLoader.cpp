@@ -43,6 +43,119 @@ std::string styleIdFromName(const std::string& name)
         id.pop_back();
     return id.empty() ? std::string("imported-style") : id;
 }
+
+const char* yamahaFormatToString(YamahaStyleFormat format) noexcept
+{
+    switch (format) {
+        case YamahaStyleFormat::SFF1:    return "sff1";
+        case YamahaStyleFormat::SFF2:    return "sff2";
+        case YamahaStyleFormat::Unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+YamahaStyleFormat yamahaFormatFromString(const std::string& value) noexcept
+{
+    if (value == "sff1") return YamahaStyleFormat::SFF1;
+    if (value == "sff2") return YamahaStyleFormat::SFF2;
+    return YamahaStyleFormat::Unknown;
+}
+
+const char* yamahaNtrToString(YamahaNtr value) noexcept
+{
+    switch (value) {
+        case YamahaNtr::RootTransposition: return "root-transposition";
+        case YamahaNtr::RootFixed:         return "root-fixed";
+        case YamahaNtr::Guitar:            return "guitar";
+        case YamahaNtr::Unknown:           return "unknown";
+    }
+    return "unknown";
+}
+
+YamahaNtr yamahaNtrFromString(const std::string& value) noexcept
+{
+    if (value == "root-transposition") return YamahaNtr::RootTransposition;
+    if (value == "root-fixed") return YamahaNtr::RootFixed;
+    if (value == "guitar") return YamahaNtr::Guitar;
+    return YamahaNtr::Unknown;
+}
+
+const char* yamahaNttToString(YamahaNtt value) noexcept
+{
+    switch (value) {
+        case YamahaNtt::Bypass:        return "bypass";
+        case YamahaNtt::Melody:        return "melody";
+        case YamahaNtt::Chord:         return "chord";
+        case YamahaNtt::MelodicMinor:  return "melodic-minor";
+        case YamahaNtt::HarmonicMinor: return "harmonic-minor";
+        case YamahaNtt::NaturalMinor:  return "natural-minor";
+        case YamahaNtt::Dorian:        return "dorian";
+        case YamahaNtt::AllPurpose:    return "all-purpose";
+        case YamahaNtt::Stroke:        return "stroke";
+        case YamahaNtt::Arpeggio:      return "arpeggio";
+        case YamahaNtt::Unknown:       return "unknown";
+    }
+    return "unknown";
+}
+
+YamahaNtt yamahaNttFromString(const std::string& value) noexcept
+{
+    if (value == "bypass") return YamahaNtt::Bypass;
+    if (value == "melody") return YamahaNtt::Melody;
+    if (value == "chord") return YamahaNtt::Chord;
+    if (value == "melodic-minor") return YamahaNtt::MelodicMinor;
+    if (value == "harmonic-minor") return YamahaNtt::HarmonicMinor;
+    if (value == "natural-minor") return YamahaNtt::NaturalMinor;
+    if (value == "dorian") return YamahaNtt::Dorian;
+    if (value == "all-purpose") return YamahaNtt::AllPurpose;
+    if (value == "stroke") return YamahaNtt::Stroke;
+    if (value == "arpeggio") return YamahaNtt::Arpeggio;
+    return YamahaNtt::Unknown;
+}
+
+const char* yamahaRetriggerRuleToString(YamahaRetriggerRule value) noexcept
+{
+    switch (value) {
+        case YamahaRetriggerRule::Stop:             return "stop";
+        case YamahaRetriggerRule::PitchShift:       return "pitch-shift";
+        case YamahaRetriggerRule::PitchShiftToRoot: return "pitch-shift-to-root";
+        case YamahaRetriggerRule::Retrigger:        return "retrigger";
+        case YamahaRetriggerRule::RetriggerToRoot:  return "retrigger-to-root";
+        case YamahaRetriggerRule::NoteGenerator:    return "note-generator";
+        case YamahaRetriggerRule::Unknown:          return "unknown";
+    }
+    return "unknown";
+}
+
+YamahaRetriggerRule yamahaRetriggerRuleFromString(const std::string& value) noexcept
+{
+    if (value == "stop") return YamahaRetriggerRule::Stop;
+    if (value == "pitch-shift") return YamahaRetriggerRule::PitchShift;
+    if (value == "pitch-shift-to-root") return YamahaRetriggerRule::PitchShiftToRoot;
+    if (value == "retrigger") return YamahaRetriggerRule::Retrigger;
+    if (value == "retrigger-to-root") return YamahaRetriggerRule::RetriggerToRoot;
+    if (value == "note-generator") return YamahaRetriggerRule::NoteGenerator;
+    return YamahaRetriggerRule::Unknown;
+}
+
+const char* yamahaPolicySourceToString(YamahaPolicySource value) noexcept
+{
+    switch (value) {
+        case YamahaPolicySource::CASM:     return "casm";
+        case YamahaPolicySource::Ctb2:     return "ctb2";
+        case YamahaPolicySource::Ctab:     return "ctab";
+        case YamahaPolicySource::Fallback: return "fallback";
+    }
+    return "fallback";
+}
+
+YamahaPolicySource yamahaPolicySourceFromString(const std::string& value) noexcept
+{
+    if (value == "casm") return YamahaPolicySource::CASM;
+    if (value == "ctb2") return YamahaPolicySource::Ctb2;
+    if (value == "ctab") return YamahaPolicySource::Ctab;
+    return YamahaPolicySource::Fallback;
+}
 }
 
 const char* roleToString(NoteRole role) noexcept
@@ -93,6 +206,7 @@ LoadResult loadStyleFromJson(const std::string& json)
     style.name         = root.get("name").asString();
     style.defaultTempo = root.get("tempo").asInt(style.defaultTempo);
     style.ticksPerBeat = root.get("ticksPerBeat").asInt(style.ticksPerBeat);
+    style.yamahaFormat = yamahaFormatFromString(root.get("yamahaFormat").asString());
     for (const auto& warning : root.get("parseWarnings").asArray()) {
         const auto text = warning.asString();
         if (!text.empty())
@@ -106,7 +220,7 @@ LoadResult loadStyleFromJson(const std::string& json)
     }
 
     const auto& sectionsObj = root.get("sections").asObject();
-    for (const auto& [secName, secVal] : sectionsObj) {
+    auto loadSection = [&](const std::string& secName, const cadenza::json::Value& secVal) {
         Section section;
         section.name = secName;
         section.barCount = secVal.get("barCount").asInt(section.barCount);
@@ -132,6 +246,34 @@ LoadResult loadStyleFromJson(const std::string& json)
             if (partVal.get("chorus").isNumber())
                 part.chorus = partVal.get("chorus").asInt();
             part.percussion = partVal.get("percussion").asBool(part.midiChannel == 10);
+            part.octaveOffset = partVal.get("octaveOffset").asInt(part.octaveOffset);
+
+            const auto& policyVal = partVal.get("yamahaPolicy");
+            if (policyVal.isObject()) {
+                YamahaChannelPolicy policy;
+                policy.source = yamahaPolicySourceFromString(
+                    policyVal.get("source").asString());
+                policy.sourceChannel = policyVal.get("sourceChannel").asInt(policy.sourceChannel);
+                policy.destinationPart = policyVal.get("destinationPart").asString();
+                policy.destinationType = policyVal.get("destinationType").asString();
+                policy.destinationName = policyVal.get("destinationName").asString();
+                if (policyVal.get("sourceRoot").isString())
+                    policy.sourceRoot = policyVal.get("sourceRoot").asString();
+                if (policyVal.get("sourceChord").isString())
+                    policy.sourceChord = policyVal.get("sourceChord").asString();
+                policy.ntr = yamahaNtrFromString(policyVal.get("ntr").asString());
+                policy.ntt = yamahaNttFromString(policyVal.get("ntt").asString());
+                policy.bassOn = policyVal.get("bassOn").asBool(policy.bassOn);
+                if (policyVal.get("chordRootUpperLimit").isNumber())
+                    policy.chordRootUpperLimit = policyVal.get("chordRootUpperLimit").asInt();
+                if (policyVal.get("noteLowLimit").isNumber())
+                    policy.noteLowLimit = policyVal.get("noteLowLimit").asInt();
+                if (policyVal.get("noteHighLimit").isNumber())
+                    policy.noteHighLimit = policyVal.get("noteHighLimit").asInt();
+                policy.retriggerRule = yamahaRetriggerRuleFromString(
+                    policyVal.get("retriggerRule").asString());
+                part.yamahaPolicy = std::move(policy);
+            }
 
             const auto& notesArr = partVal.get("notes").asArray();
             for (const auto& noteVal : notesArr) {
@@ -156,6 +298,24 @@ LoadResult loadStyleFromJson(const std::string& json)
             section.parts.push_back(std::move(part));
         }
         style.sections.push_back(std::move(section));
+    };
+
+    std::vector<std::string> loadedSectionNames;
+    for (const auto& orderVal : root.get("sectionOrder").asArray()) {
+        const auto sectionName = orderVal.asString();
+        const auto it = sectionsObj.find(sectionName);
+        if (sectionName.empty() || it == sectionsObj.end()
+            || std::find(loadedSectionNames.begin(), loadedSectionNames.end(), sectionName)
+                != loadedSectionNames.end())
+            continue;
+        loadSection(it->first, it->second);
+        loadedSectionNames.push_back(sectionName);
+    }
+    for (const auto& [secName, secVal] : sectionsObj) {
+        if (std::find(loadedSectionNames.begin(), loadedSectionNames.end(), secName)
+            != loadedSectionNames.end())
+            continue;
+        loadSection(secName, secVal);
     }
 
     for (const auto& slotVal : root.get("ots").asArray()) {
@@ -190,6 +350,7 @@ std::string saveStyleToJson(const Style& style, bool pretty)
     root["name"]         = J::Value::string(style.name);
     root["tempo"]        = J::Value::number(style.defaultTempo);
     root["ticksPerBeat"] = J::Value::number(style.ticksPerBeat);
+    root["yamahaFormat"] = J::Value::string(yamahaFormatToString(style.yamahaFormat));
     if (!style.parseWarnings.empty()) {
         J::Array warnings;
         for (const auto& warning : style.parseWarnings)
@@ -203,7 +364,9 @@ std::string saveStyleToJson(const Style& style, bool pretty)
     root["timeSignature"] = J::Value::array(std::move(ts));
 
     J::Object sections;
+    J::Array sectionOrder;
     for (const auto& sec : style.sections) {
+        sectionOrder.push_back(J::Value::string(sec.name));
         J::Object secObj;
         secObj["barCount"] = J::Value::number(sec.barCount);
 
@@ -227,8 +390,34 @@ std::string saveStyleToJson(const Style& style, bool pretty)
                 partObj["reverb"] = J::Value::number(*part.reverb);
             if (part.chorus)
                 partObj["chorus"] = J::Value::number(*part.chorus);
-            if (part.percussion)
-                partObj["percussion"] = J::Value::boolean(true);
+            partObj["percussion"] = J::Value::boolean(part.percussion);
+            partObj["octaveOffset"] = J::Value::number(part.octaveOffset);
+
+            if (part.yamahaPolicy) {
+                const auto& policy = *part.yamahaPolicy;
+                J::Object policyObj;
+                policyObj["source"] = J::Value::string(yamahaPolicySourceToString(policy.source));
+                policyObj["sourceChannel"] = J::Value::number(policy.sourceChannel);
+                policyObj["destinationPart"] = J::Value::string(policy.destinationPart);
+                policyObj["destinationType"] = J::Value::string(policy.destinationType);
+                policyObj["destinationName"] = J::Value::string(policy.destinationName);
+                if (policy.sourceRoot)
+                    policyObj["sourceRoot"] = J::Value::string(*policy.sourceRoot);
+                if (policy.sourceChord)
+                    policyObj["sourceChord"] = J::Value::string(*policy.sourceChord);
+                policyObj["ntr"] = J::Value::string(yamahaNtrToString(policy.ntr));
+                policyObj["ntt"] = J::Value::string(yamahaNttToString(policy.ntt));
+                policyObj["bassOn"] = J::Value::boolean(policy.bassOn);
+                if (policy.chordRootUpperLimit)
+                    policyObj["chordRootUpperLimit"] = J::Value::number(*policy.chordRootUpperLimit);
+                if (policy.noteLowLimit)
+                    policyObj["noteLowLimit"] = J::Value::number(*policy.noteLowLimit);
+                if (policy.noteHighLimit)
+                    policyObj["noteHighLimit"] = J::Value::number(*policy.noteHighLimit);
+                policyObj["retriggerRule"] = J::Value::string(
+                    yamahaRetriggerRuleToString(policy.retriggerRule));
+                partObj["yamahaPolicy"] = J::Value::object(std::move(policyObj));
+            }
 
             J::Array notes;
             for (const auto& n : part.notes) {
@@ -238,8 +427,7 @@ std::string saveStyleToJson(const Style& style, bool pretty)
                 noteObj["pitch"]    = J::Value::number(n.pitch);
                 noteObj["velocity"] = J::Value::number(n.velocity);
                 noteObj["role"]     = J::Value::string(roleToString(n.role));
-                if (n.role == NoteRole::ScaleTone)
-                    noteObj["scaleDegree"] = J::Value::number(n.scaleDegree);
+                noteObj["scaleDegree"] = J::Value::number(n.scaleDegree);
                 notes.push_back(J::Value::object(std::move(noteObj)));
             }
             partObj["notes"] = J::Value::array(std::move(notes));
@@ -261,6 +449,7 @@ std::string saveStyleToJson(const Style& style, bool pretty)
         sections[sec.name] = J::Value::object(std::move(secObj));
     }
     root["sections"] = J::Value::object(std::move(sections));
+    root["sectionOrder"] = J::Value::array(std::move(sectionOrder));
 
     bool anyOts = false;
     for (const auto& slot : style.ots)

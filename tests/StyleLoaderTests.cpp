@@ -685,6 +685,153 @@ void missingOtsKeyLoadsAsAbsent()
     for (const auto& slot : r.style.ots)
         expect(!slot.present, "old cstyle ots slots are absent");
 }
+
+void semanticRuntimeMetadataRoundTrips()
+{
+    Style style;
+    style.id = "semantic-runtime-style";
+    style.name = "Semantic Runtime Style";
+    style.yamahaFormat = YamahaStyleFormat::SFF2;
+
+    Section intro;
+    intro.name = "intro";
+    intro.barCount = 1;
+
+    Part part;
+    part.name = "pad";
+    part.midiChannel = 10;
+    part.percussion = false;
+    part.octaveOffset = -1;
+
+    YamahaChannelPolicy policy;
+    policy.source = YamahaPolicySource::Ctb2;
+    policy.sourceChannel = 14;
+    policy.destinationPart = "pad";
+    policy.destinationType = "accompaniment";
+    policy.destinationName = "Pad";
+    policy.sourceRoot = "F#";
+    policy.sourceChord = "Maj7";
+    policy.ntr = YamahaNtr::Guitar;
+    policy.ntt = YamahaNtt::Arpeggio;
+    policy.bassOn = true;
+    policy.chordRootUpperLimit = 7;
+    policy.noteLowLimit = 48;
+    policy.noteHighLimit = 84;
+    policy.retriggerRule = YamahaRetriggerRule::RetriggerToRoot;
+    policy.rawNtr = 2;
+    policy.rawNtt = 2;
+    policy.rawRtr = 4;
+    policy.rawBytes = { 1, 2, 3, 4 };
+    part.yamahaPolicy = policy;
+
+    part.notes.push_back(PatternNote{ 0, 240, 60, 90, NoteRole::Absolute, 6 });
+    part.notes.push_back(PatternNote{ 240, 240, 64, 90, NoteRole::Chord3, 4 });
+    part.notes.push_back(PatternNote{ 480, 240, 67, 90, NoteRole::ScaleTone, 2 });
+    intro.parts.push_back(std::move(part));
+
+    Section main;
+    main.name = "mainB";
+    main.barCount = 2;
+
+    style.sections.push_back(std::move(intro));
+    style.sections.push_back(std::move(main));
+
+    const auto json = saveStyleToJson(style, false);
+    const auto r = loadStyleFromJson(json);
+    expect(r.ok, "semantic runtime metadata round trip load ok");
+    if (!r.ok)
+        return;
+
+    expect(r.style.yamahaFormat == YamahaStyleFormat::SFF2, "yamaha format round-trip");
+    expect(r.style.sections.size() == 2, "section count round-trip");
+    if (r.style.sections.size() != 2)
+        return;
+    expect(r.style.sections[0].name == "intro", "section order keeps intro first");
+    expect(r.style.sections[1].name == "mainB", "section order keeps mainB second");
+
+    expect(r.style.sections[0].parts.size() == 1, "semantic part round-trip");
+    if (r.style.sections[0].parts.empty())
+        return;
+
+    const auto& loadedPart = r.style.sections[0].parts[0];
+    expect(!loadedPart.percussion, "explicit channel-10 percussion false round-trip");
+    expect(loadedPart.octaveOffset == -1, "octave offset round-trip");
+    expect(loadedPart.yamahaPolicy.has_value(), "yamaha policy round-trip");
+    expect(loadedPart.notes.size() == 3, "semantic note count round-trip");
+    if (loadedPart.notes.size() == 3) {
+        expect(loadedPart.notes[0].scaleDegree == 6, "absolute note scale degree round-trip");
+        expect(loadedPart.notes[1].scaleDegree == 4, "chord note scale degree round-trip");
+        expect(loadedPart.notes[2].scaleDegree == 2, "scale-tone degree round-trip");
+    }
+
+    if (!loadedPart.yamahaPolicy)
+        return;
+    const auto& loadedPolicy = *loadedPart.yamahaPolicy;
+    expect(loadedPolicy.source == YamahaPolicySource::Ctb2, "policy source round-trip");
+    expect(loadedPolicy.sourceChannel == 14, "policy source channel round-trip");
+    expect(loadedPolicy.destinationPart == "pad", "policy destination part round-trip");
+    expect(loadedPolicy.destinationType == "accompaniment", "policy destination type round-trip");
+    expect(loadedPolicy.destinationName == "Pad", "policy destination name round-trip");
+    expect(loadedPolicy.sourceRoot && *loadedPolicy.sourceRoot == "F#", "policy source root round-trip");
+    expect(loadedPolicy.sourceChord && *loadedPolicy.sourceChord == "Maj7", "policy source chord round-trip");
+    expect(loadedPolicy.ntr == YamahaNtr::Guitar, "policy NTR round-trip");
+    expect(loadedPolicy.ntt == YamahaNtt::Arpeggio, "policy NTT round-trip");
+    expect(loadedPolicy.bassOn, "policy bass-on round-trip");
+    expect(loadedPolicy.chordRootUpperLimit && *loadedPolicy.chordRootUpperLimit == 7,
+           "policy chord root upper limit round-trip");
+    expect(loadedPolicy.noteLowLimit && *loadedPolicy.noteLowLimit == 48,
+           "policy note low limit round-trip");
+    expect(loadedPolicy.noteHighLimit && *loadedPolicy.noteHighLimit == 84,
+           "policy note high limit round-trip");
+    expect(loadedPolicy.retriggerRule == YamahaRetriggerRule::RetriggerToRoot,
+           "policy retrigger rule round-trip");
+    expect(!loadedPolicy.rawNtr, "raw NTR is intentionally not persisted");
+    expect(!loadedPolicy.rawNtt, "raw NTT is intentionally not persisted");
+    expect(!loadedPolicy.rawRtr, "raw RTR is intentionally not persisted");
+    expect(loadedPolicy.rawBytes.empty(), "raw policy bytes are intentionally not persisted");
+}
+
+void oldJsonWithoutSemanticMetadataUsesDefaults()
+{
+    const std::string json = R"({
+      "$schema": "cadenza.style.v1",
+      "id": "old-style",
+      "name": "Old Style",
+      "sections": {
+        "mainA": {
+          "parts": [{
+            "name": "bass",
+            "channel": 2,
+            "notes": [{
+              "tick": 0,
+              "duration": 120,
+              "pitch": 36,
+              "velocity": 90,
+              "role": "chord-root"
+            }]
+          }]
+        }
+      }
+    })";
+
+    const auto r = loadStyleFromJson(json);
+    expect(r.ok, "old cstyle without semantic metadata loads ok");
+    if (!r.ok)
+        return;
+
+    expect(r.style.yamahaFormat == YamahaStyleFormat::Unknown, "old cstyle yamaha format default");
+    const auto* mainA = r.style.findSection("mainA");
+    expect(mainA != nullptr && !mainA->parts.empty(), "old cstyle mainA part loads");
+    if (!mainA || mainA->parts.empty())
+        return;
+
+    const auto& part = mainA->parts[0];
+    expect(part.octaveOffset == 0, "old cstyle octave offset default");
+    expect(!part.yamahaPolicy, "old cstyle yamaha policy default");
+    expect(!part.percussion, "old melodic channel percussion default");
+    expect(!part.notes.empty() && part.notes[0].scaleDegree == 0,
+           "old cstyle scale degree default");
+}
 }  // anonymous namespace
 
 int main()
@@ -701,6 +848,8 @@ int main()
     dominantPresetKeepsTheMostCommonBankAndProgramPair();
     otsRoundTripsThroughCstyleJson();
     missingOtsKeyLoadsAsAbsent();
+    semanticRuntimeMetadataRoundTrips();
+    oldJsonWithoutSemanticMetadataUsesDefaults();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All StyleLoader tests passed\n";
