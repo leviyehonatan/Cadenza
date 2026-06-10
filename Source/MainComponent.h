@@ -69,6 +69,9 @@ private:
     void persistStyleMix();          // save current mixer strips for the current style
     void captureRegistration(int slot);   // snapshot the live setup into a registration
     void recallRegistration(int slot);    // restore a saved registration
+    void applyOts(int slot);                                // recall one One Touch Setting slot
+    void applyOtsLinkForSection(const std::string& name);   // OTS Link on Main A-D changes
+    void refreshOtsAvailability();                          // dim/enable the panel's OTS buttons
     void exportPlaybackDiagnostics();
     void triggerSection(const std::string& id);   // select a section, with one-shot intro/fill/ending handling
     void togglePlayback();                         // start/stop (shared by the Play button + MIDI map)
@@ -107,6 +110,10 @@ private:
     // Live sections: one-shot returns / ending stops are sequenced inside the
     // StyleEngine (sample-tight); we only track the last Main as the return target.
     std::string m_currentMain = "mainA";
+
+    // Last Main that OTS Link applied, so a fill returning to the same Main
+    // doesn't re-trigger the OTS (which would undo manual voice tweaks).
+    std::string m_lastLinkedMain;
 
     cadenza::audio::MixerModel m_mixer;
     int m_midiRescanTicks = 0;   // timer ticks since last MIDI hot-plug rescan

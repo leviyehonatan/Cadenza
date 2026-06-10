@@ -4,6 +4,7 @@
 #include "Audio/MidiChannel.h"
 #include "Midi/LiveMelodyVoice.h"
 #include "Midi/GmInstruments.h"
+#include "Arranger/OtsRecall.h"
 #include "Arranger/SectionButtons.h"
 #include "UI/NativePanel.h"
 
@@ -125,6 +126,7 @@ MainComponent::MainComponent()
             if (auto* self = safe.getComponent()) {
                 self->applyMixerState();
                 if (self->m_panel) self->m_panel->setActiveSection(n);
+                self->applyOtsLinkForSection(n.toStdString());
             }
         });
     });
@@ -1649,6 +1651,13 @@ void MainComponent::buildNativePanel()
     cb.onStoreRegistration  = [this](int slot) { captureRegistration(slot); };
     cb.onRecallRegistration = [this](int slot) { recallRegistration(slot); };
 
+    cb.onOts = [this](int slot) { applyOts(slot); };
+    cb.setOtsLink = [this](bool on) {
+        if (!m_settings) return;
+        m_settings->state().otsLinkEnabled = on;
+        saveSettings();
+    };
+
     cb.nudgeTranspose = [this](int delta) {
         const int t = m_state.setTranspose(m_state.transpose() + delta);
         m_styleEngine.setGlobalTranspose(t);                 // transpose affects style
@@ -1718,7 +1727,9 @@ void MainComponent::buildNativePanel()
         }
         for (int i = 0; i < cadenza::settings::Settings::kNumRegistrations; ++i)
             m_panel->setRegistrationUsed(i, st.registrations[i].used);
+        m_panel->setOtsLinkEnabled(st.otsLinkEnabled);
     }
+    refreshOtsAvailability();
     resized();
 }
 
@@ -1730,6 +1741,8 @@ void MainComponent::updateNativePanelStyle()
     if (!style) {
         m_panel->setStyleName({});
         m_panel->setSections({});
+        refreshOtsAvailability();
+        m_lastLinkedMain.clear();
         return;
     }
 
@@ -1741,6 +1754,8 @@ void MainComponent::updateNativePanelStyle()
         pairs.emplace_back(b.sectionId, b.label);
     m_panel->setSections(pairs);
     m_panel->setActiveSection(juce::String(m_styleEngine.currentSection()));
+    refreshOtsAvailability();
+    m_lastLinkedMain.clear();   // a new style means OTS Link starts fresh
 
     // --- Assign a free channel to each Right 1/2/3 layer that the style does NOT
     //     use, so the right-hand voices never collide with style parts. ---
@@ -2003,6 +2018,82 @@ void MainComponent::recallRegistration(int slot)
     }
     saveSettings();
     juce::Logger::writeToLog("[Cadenza] Recalled registration " + juce::String(slot + 1));
+}
+
+void MainComponent::applyOts(int slot)
+{
+    if (!m_settings || slot < 0 || slot >= 4)
+        return;
+    const auto style = m_styleEngine.currentStyle();
+    if (!style)
+        return;
+    const auto& setting = style->ots[static_cast<std::size_t>(slot)];
+    if (!setting.present) {
+        juce::Logger::writeToLog("[Cadenza] OTS " + juce::String(slot + 1)
+                                 + ": style defines no setting");
+        return;
+    }
+
+    auto& st = m_settings->state();
+    const auto targets = cadenza::arranger::otsRecallTargets(setting);
+    bool anyLayerDisabled = false;
+    for (int i = 0; i < 3; ++i) {
+        auto& L = st.rightLayers[i];
+        if (L.enabled && !targets[i].enabled)
+            anyLayerDisabled = true;
+        L.enabled = targets[i].enabled;
+        if (targets[i].setProgram) {
+            L.program = targets[i].program;
+            L.pluginPath.clear();   // OTS voices are GM; drop any per-layer VST
+        }
+        if (targets[i].setVolume)
+            L.volume = targets[i].volume;
+    }
+    st.melodyProgram = st.rightLayers[0].program;
+
+    applyRightHand();
+    if (anyLayerDisabled)
+        m_audio.allNotesOff();   // release anything a now-disabled layer held
+
+    if (m_panel) {
+        for (int i = 0; i < 3; ++i) {
+            const auto& L = st.rightLayers[i];
+            m_panel->setRightVoice(i, L.enabled, L.program, L.volume, L.octave);
+            if (L.pluginPath.empty())
+                m_panel->setRightVoiceName(
+                    i, juce::String(cadenza::midi::gmInstrumentName(L.program)), false);
+        }
+    }
+    saveSettings();
+    juce::Logger::writeToLog("[Cadenza] Applied OTS " + juce::String(slot + 1));
+}
+
+void MainComponent::applyOtsLinkForSection(const std::string& name)
+{
+    if (!m_settings || !m_settings->state().otsLinkEnabled)
+        return;
+    int slot = -1;
+    if      (name == "mainA") slot = 0;
+    else if (name == "mainB") slot = 1;
+    else if (name == "mainC") slot = 2;
+    else if (name == "mainD") slot = 3;
+    if (slot < 0)
+        return;                        // fills/intros/endings never retrigger
+    if (name == m_lastLinkedMain)
+        return;                        // fill returning to the same Main
+    m_lastLinkedMain = name;
+    applyOts(slot);
+}
+
+void MainComponent::refreshOtsAvailability()
+{
+    if (!m_panel)
+        return;
+    std::array<bool, 4> available { false, false, false, false };
+    if (const auto style = m_styleEngine.currentStyle())
+        for (std::size_t i = 0; i < available.size(); ++i)
+            available[i] = style->ots[i].present;
+    m_panel->setOtsAvailable(available);
 }
 
 void MainComponent::handleBridgePayload(const juce::var& payload)
