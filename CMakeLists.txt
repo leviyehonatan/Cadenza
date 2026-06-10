@@ -103,6 +103,7 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_song_tests        tests/SongLoaderTests.cpp)
     cadenza_add_test(cadenza_songplayer_tests  tests/SongPlayerTests.cpp)
     cadenza_add_test(cadenza_arranger_router_tests tests/ArrangerMidiRouterTests.cpp)
+    cadenza_add_test(cadenza_ots_tests         tests/OtsRecallTests.cpp)
 endif()
 
 # ============================================================
