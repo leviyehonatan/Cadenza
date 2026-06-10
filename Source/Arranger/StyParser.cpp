@@ -1394,6 +1394,103 @@ YamahaStyleFormat inferYamahaFormat(const CasmInfo& casm) noexcept
     return hasCtab ? YamahaStyleFormat::SFF1 : YamahaStyleFormat::Unknown;
 }
 
+// Parse the Yamaha "OTS " chunk: up to four embedded MTrk setup tracks, one
+// per One Touch Setting. Each track carries bank/program/volume events that
+// address panel voices by MIDI channel (see kOtsChannel* in StyParser.h).
+void parseOtsAfterSmf(const std::vector<uint8_t>& bytes, std::size_t smfEnd,
+                      Style& style, bool verbose)
+{
+    std::size_t otsOffset = std::string::npos;
+    for (std::size_t pos = smfEnd; pos + 4 <= bytes.size(); ++pos) {
+        if (bytes[pos] == 'O' && bytes[pos + 1] == 'T' &&
+            bytes[pos + 2] == 'S' && bytes[pos + 3] == ' ') {
+            otsOffset = pos;
+            break;
+        }
+    }
+    if (otsOffset == std::string::npos)
+        return;   // most styles simply have no OTS chunk
+
+    if (otsOffset + 8 > bytes.size()) {
+        addParseWarning(style, "truncated OTS chunk header");
+        return;
+    }
+    const uint32_t declaredSize = readU32be(bytes, otsOffset + 4);
+    const std::size_t bodyStart = otsOffset + 8;
+    std::size_t bodyEnd = bodyStart + declaredSize;
+    if (bodyEnd > bytes.size() || bodyEnd < bodyStart) {
+        addParseWarning(style, "OTS declared size exceeds available bytes");
+        bodyEnd = bytes.size();
+    }
+
+    Reader r(bytes);
+    r.pos = bodyStart;
+    std::vector<SectionMarker> ignoredMarkers;
+    int slot = 0;
+    while (r.pos + 8 <= bodyEnd && slot < static_cast<int>(style.ots.size())) {
+        if (!r.match("MTrk")) {
+            addParseWarning(style, "unexpected data in OTS chunk");
+            break;
+        }
+        const uint32_t trackLen = r.u32be();
+        TrackData td;
+        if (!parseTrack(r, trackLen, td, ignoredMarkers)) {
+            addParseWarning(style, "malformed OTS setup track "
+                                       + std::to_string(slot + 1));
+            break;
+        }
+
+        auto& setting = style.ots[static_cast<std::size_t>(slot)];
+        const struct { int channel; int layer; } panelMap[3] = {
+            { kOtsChannelRight1, 0 },
+            { kOtsChannelRight2, 1 },
+            { kOtsChannelRight3, 2 },
+        };
+        for (const auto& m : panelMap) {
+            const auto itProgram = td.programByChannel.find(m.channel);
+            const auto itVolume  = td.volumeByChannel.find(m.channel);
+            if (itProgram == td.programByChannel.end()
+                && itVolume == td.volumeByChannel.end())
+                continue;
+            auto& voice = setting.layers[static_cast<std::size_t>(m.layer)];
+            voice.present = true;
+            if (itProgram != td.programByChannel.end())
+                voice.program = itProgram->second;
+            if (itVolume != td.volumeByChannel.end())
+                voice.volume = itVolume->second;
+            setting.present = true;
+        }
+
+        // Channels carrying voice setup we don't map are the signal that the
+        // provisional kOtsChannel* table is wrong — surface them loudly.
+        for (const auto& [channel, program] : td.programByChannel) {
+            if (channel == kOtsChannelLeft || channel == kOtsChannelRight1
+                || channel == kOtsChannelRight2 || channel == kOtsChannelRight3)
+                continue;
+            addParseWarning(style, "OTS slot " + std::to_string(slot + 1)
+                                       + ": voice events on unexpected MIDI channel "
+                                       + std::to_string(channel)
+                                       + " (program " + std::to_string(program) + ")");
+        }
+
+        if (verbose) {
+            for (const auto& [channel, program] : td.programByChannel)
+                std::fprintf(stderr, "OTS %d: ch %d program %d\n",
+                             slot + 1, channel, program);
+            for (const auto& [channel, volume] : td.volumeByChannel)
+                std::fprintf(stderr, "OTS %d: ch %d volume %d\n",
+                             slot + 1, channel, volume);
+        }
+        ++slot;
+    }
+
+    // A real OTS chunk carries four setup tracks; fewer means the file is odd
+    // (only reachable when the loop ran out of body bytes, not on a break).
+    if (slot < static_cast<int>(style.ots.size()) && r.pos + 8 > bodyEnd)
+        addParseWarning(style, "OTS chunk defines only " + std::to_string(slot)
+                                   + " setup tracks");
+}
+
 StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
                              const StyParseOptions& options)
 {
@@ -1516,6 +1613,8 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
             }
         }
     }
+
+    parseOtsAfterSmf(bytes, r.pos, style, options.verbose);
 
     // Flatten all notes from all tracks for easier section splitting.
     struct FlatNote {

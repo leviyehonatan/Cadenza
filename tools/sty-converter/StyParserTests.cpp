@@ -86,6 +86,13 @@ void pushProgramChange(std::vector<uint8_t>& trk, uint32_t delta, uint8_t channe
     pushU8(trk, 0xC0 | (channel & 0x0F));
     pushU8(trk, program);
 }
+void pushCC(std::vector<uint8_t>& trk, uint32_t delta, uint8_t channel, uint8_t cc, uint8_t value)
+{
+    pushVLQ(trk, delta);
+    pushU8(trk, 0xB0 | (channel & 0x0F));
+    pushU8(trk, cc);
+    pushU8(trk, value);
+}
 void pushEndOfTrack(std::vector<uint8_t>& trk, uint32_t delta = 0)
 {
     pushVLQ(trk, delta);
@@ -1152,6 +1159,101 @@ void unmappedPolicyChannelDoesNotWarnForLegacyLowChannels()
     expect(!hasStyleWarning(r.style, "destination role unknown"),
            "legacy low-channel destination role stays quiet");
 }
+
+std::vector<uint8_t> makeStyWithOts()
+{
+    using namespace cadenza::arranger;
+    auto sty = makeSampleSmf();
+
+    std::vector<uint8_t> body;
+    {   // OTS 1: Right1 = Grand Piano (0) vol 110, Right2 = Strings (48) vol 80.
+        std::vector<uint8_t> t;
+        pushProgramChange(t, 0, static_cast<uint8_t>(kOtsChannelRight1), 0);
+        pushCC(t, 0, static_cast<uint8_t>(kOtsChannelRight1), 7, 110);
+        pushProgramChange(t, 0, static_cast<uint8_t>(kOtsChannelRight2), 48);
+        pushCC(t, 0, static_cast<uint8_t>(kOtsChannelRight2), 7, 80);
+        pushEndOfTrack(t);
+        appendTrack(body, t);
+    }
+    {   // OTS 2: Right1 program only (Nylon Guitar 24), no volume.
+        std::vector<uint8_t> t;
+        pushProgramChange(t, 0, static_cast<uint8_t>(kOtsChannelRight1), 24);
+        pushEndOfTrack(t);
+        appendTrack(body, t);
+    }
+    for (int i = 0; i < 2; ++i) {   // OTS 3 + 4: setup tracks with no voices.
+        std::vector<uint8_t> t;
+        pushEndOfTrack(t);
+        appendTrack(body, t);
+    }
+    appendChunk(sty, "OTS ", body);
+    return sty;
+}
+
+void otsChunkIsParsedIntoStyleSlots()
+{
+    auto r = cadenza::arranger::parseStyBytes(makeStyWithOts());
+    expect(r.ok, "OTS style parses OK");
+    if (!r.ok) return;
+
+    const auto& ots = r.style.ots;
+    expect(ots[0].present, "OTS 1 present");
+    expect(ots[0].layers[0].present && ots[0].layers[0].program == 0
+               && ots[0].layers[0].volume == 110,
+           "OTS 1 Right1 = piano vol 110");
+    expect(ots[0].layers[1].present && ots[0].layers[1].program == 48
+               && ots[0].layers[1].volume == 80,
+           "OTS 1 Right2 = strings vol 80");
+    expect(!ots[0].layers[2].present, "OTS 1 Right3 absent");
+    expect(ots[1].present && ots[1].layers[0].present
+               && ots[1].layers[0].program == 24 && ots[1].layers[0].volume == -1,
+           "OTS 2 Right1 program-only");
+    expect(!ots[2].present, "voice-less OTS 3 is absent");
+    expect(!ots[3].present, "voice-less OTS 4 is absent");
+    expect(!hasStyleWarning(r.style, "OTS"), "clean OTS chunk produces no OTS warnings");
+}
+
+void missingOtsChunkLeavesSlotsAbsent()
+{
+    auto r = cadenza::arranger::parseStyBytes(makeSampleSmf());
+    expect(r.ok, "style without OTS parses OK");
+    if (!r.ok) return;
+    for (const auto& slot : r.style.ots)
+        expect(!slot.present, "no OTS chunk -> all slots absent");
+    expect(!hasStyleWarning(r.style, "OTS"), "no OTS chunk -> no OTS warnings");
+}
+
+void truncatedOtsChunkWarnsButStillParses()
+{
+    auto sty = makeSampleSmf();
+    pushTag(sty, "OTS ");
+    pushU32(sty, 4096);          // declared size far beyond the file end
+    pushU8(sty, 0x00);           // a single garbage body byte
+    auto r = cadenza::arranger::parseStyBytes(sty);
+    expect(r.ok, "truncated OTS chunk does not fail the parse");
+    if (!r.ok) return;
+    expect(hasStyleWarning(r.style, "OTS"), "truncated OTS chunk reports a warning");
+}
+
+void unexpectedOtsChannelReportsWarning()
+{
+    using namespace cadenza::arranger;
+    auto sty = makeSampleSmf();
+    std::vector<uint8_t> body;
+    std::vector<uint8_t> t;
+    pushProgramChange(t, 0, 5, 40);   // channel 5 is not a mapped OTS panel channel
+    pushEndOfTrack(t);
+    appendTrack(body, t);
+    appendChunk(sty, "OTS ", body);
+
+    auto r = parseStyBytes(sty);
+    expect(r.ok, "unexpected OTS channel still parses");
+    if (!r.ok) return;
+    expect(hasStyleWarning(r.style, "unexpected MIDI channel"),
+           "unexpected OTS channel reports a warning");
+    expect(hasStyleWarning(r.style, "setup tracks"),
+           "fewer than four OTS tracks reports a warning");
+}
 }
 
 int main()
@@ -1186,6 +1288,10 @@ int main()
     missingCasmReportsParseWarning();
     completePolicyDoesNotReportParseWarnings();
     unmappedPolicyChannelDoesNotWarnForLegacyLowChannels();
+    otsChunkIsParsedIntoStyleSlots();
+    missingOtsChunkLeavesSlotsAbsent();
+    truncatedOtsChunkWarnsButStillParses();
+    unexpectedOtsChannelReportsWarning();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All StyParser tests passed\n";
