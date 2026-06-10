@@ -333,6 +333,22 @@ NativePanel::NativePanel()
         m_regUsed.push_back(false);
     }
 
+    // --- One Touch Settings (per-style right-hand voice presets) ---
+    styleCaption(m_otsCaption, "One Touch Settings");
+    addAndMakeVisible(m_otsCaption);
+    m_otsLink.setTooltip("Recall OTS 1-4 automatically when Main A-D starts");
+    m_otsLink.onClick = [this] { if (m_cb.setOtsLink) m_cb.setOtsLink(m_otsLink.getToggleState()); };
+    addAndMakeVisible(m_otsLink);
+    for (int i = 0; i < 4; ++i) {
+        auto b = std::make_unique<juce::TextButton>("OTS " + juce::String(i + 1));
+        b->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff333a47));
+        b->setEnabled(false);   // until a style with OTS data is loaded
+        const int slot = i;
+        b->onClick = [this, slot] { if (m_cb.onOts) m_cb.onOts(slot); };
+        addAndMakeVisible(*b);
+        m_otsButtons[static_cast<std::size_t>(i)] = std::move(b);
+    }
+
     // --- wire control callbacks (message thread) ---
     m_play.onClick          = [this] { if (m_cb.togglePlay)    m_cb.togglePlay(); };
     m_openStyle.onClick     = [this] { if (m_cb.openStyle)     m_cb.openStyle(); };
@@ -585,6 +601,18 @@ void NativePanel::setRegistrationUsed(int slot, bool used)
         used ? juce::Colour(0xff2f6b3a) : juce::Colour(0xff333a47));
 }
 
+void NativePanel::setOtsAvailable(const std::array<bool, 4>& available)
+{
+    for (std::size_t i = 0; i < m_otsButtons.size(); ++i)
+        if (m_otsButtons[i])
+            m_otsButtons[i]->setEnabled(available[i]);
+}
+
+void NativePanel::setOtsLinkEnabled(bool enabled)
+{
+    m_otsLink.setToggleState(enabled, juce::dontSendNotification);
+}
+
 void NativePanel::setSplitPoint(int midiNote)
 {
     m_splitNote = midiNote;
@@ -740,6 +768,20 @@ void NativePanel::resized()
         r.removeFromLeft(10);
         const int bw = 44, bgap = 6;
         for (auto& b : m_regButtons) { b->setBounds(r.removeFromLeft(bw)); r.removeFromLeft(bgap); }
+    }
+    area.removeFromTop(gap);
+
+    // One Touch Settings row: Link toggle + OTS 1..4 buttons.
+    {
+        m_otsCaption.setBounds(area.removeFromTop(18));
+        auto r = area.removeFromTop(28);
+        m_otsLink.setBounds(r.removeFromLeft(80));
+        r.removeFromLeft(10);
+        const int bw = 56, bgap = 6;
+        for (auto& b : m_otsButtons) {
+            if (b) b->setBounds(r.removeFromLeft(bw));
+            r.removeFromLeft(bgap);
+        }
     }
     area.removeFromTop(gap);
 

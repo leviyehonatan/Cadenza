@@ -149,6 +149,8 @@ public:
         std::function<void(int)>       onRightOpenEditor;     // layer -> show the VST3 editor
         std::function<void(int)> onRecallRegistration;        // slot -> recall
         std::function<void(int)> onStoreRegistration;         // slot -> store current setup
+        std::function<void(int)>  onOts;                      // OTS slot 0..3 -> recall
+        std::function<void(bool)> setOtsLink;                 // OTS Link toggle changed
     };
 
     NativePanel();
@@ -183,6 +185,10 @@ public:
     void setRightVoiceName(int layer, const juce::String& name, bool isPlugin);
     // Mark a registration slot as used (saved) so its button is highlighted.
     void setRegistrationUsed(int slot, bool used);
+    // Enable/dim the four OTS buttons to match the loaded style's OTS slots.
+    void setOtsAvailable(const std::array<bool, 4>& available);
+    // Init the OTS Link toggle (no callback).
+    void setOtsLinkEnabled(bool enabled);
 
     void resized() override;
     void paint(juce::Graphics&) override;
@@ -281,6 +287,11 @@ private:
     bool               m_regStoreArmed = false;
     std::vector<std::unique_ptr<juce::TextButton>> m_regButtons;
     std::vector<bool>  m_regUsed;
+
+    // One Touch Settings (per-style right-hand voice presets).
+    juce::Label        m_otsCaption;
+    juce::ToggleButton m_otsLink { "OTS Link" };
+    std::array<std::unique_ptr<juce::TextButton>, 4> m_otsButtons;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NativePanel)
 };
