@@ -158,6 +158,25 @@ LoadResult loadStyleFromJson(const std::string& json)
         style.sections.push_back(std::move(section));
     }
 
+    for (const auto& slotVal : root.get("ots").asArray()) {
+        const int s = slotVal.get("slot").asInt(-1);
+        if (s < 0 || s >= static_cast<int>(style.ots.size()))
+            continue;
+        auto& slot = style.ots[static_cast<std::size_t>(s)];
+        slot.present = true;
+        for (const auto& layerVal : slotVal.get("layers").asArray()) {
+            const int i = layerVal.get("layer").asInt(-1);
+            if (i < 0 || i >= static_cast<int>(slot.layers.size()))
+                continue;
+            auto& voice = slot.layers[static_cast<std::size_t>(i)];
+            voice.present = true;
+            if (layerVal.get("program").isNumber())
+                voice.program = layerVal.get("program").asInt();
+            if (layerVal.get("volume").isNumber())
+                voice.volume = layerVal.get("volume").asInt();
+        }
+    }
+
     result.style = std::move(style);
     return result;
 }
@@ -242,6 +261,36 @@ std::string saveStyleToJson(const Style& style, bool pretty)
         sections[sec.name] = J::Value::object(std::move(secObj));
     }
     root["sections"] = J::Value::object(std::move(sections));
+
+    bool anyOts = false;
+    for (const auto& slot : style.ots)
+        if (slot.present) anyOts = true;
+    if (anyOts) {
+        J::Array ots;
+        for (std::size_t s = 0; s < style.ots.size(); ++s) {
+            const auto& slot = style.ots[s];
+            if (!slot.present)
+                continue;
+            J::Object slotObj;
+            slotObj["slot"] = J::Value::number(static_cast<int>(s));
+            J::Array layers;
+            for (std::size_t i = 0; i < slot.layers.size(); ++i) {
+                const auto& voice = slot.layers[i];
+                if (!voice.present)
+                    continue;
+                J::Object layerObj;
+                layerObj["layer"] = J::Value::number(static_cast<int>(i));
+                if (voice.program >= 0)
+                    layerObj["program"] = J::Value::number(voice.program);
+                if (voice.volume >= 0)
+                    layerObj["volume"] = J::Value::number(voice.volume);
+                layers.push_back(J::Value::object(std::move(layerObj)));
+            }
+            slotObj["layers"] = J::Value::array(std::move(layers));
+            ots.push_back(J::Value::object(std::move(slotObj)));
+        }
+        root["ots"] = J::Value::array(std::move(ots));
+    }
 
     return J::serialize(J::Value::object(std::move(root)), pretty);
 }

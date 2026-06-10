@@ -640,6 +640,51 @@ void dominantPresetKeepsTheMostCommonBankAndProgramPair()
         expect(part->instrument == "Acoustic Bass", "dominant preset kept the GM bass preset");
     }
 }
+void otsRoundTripsThroughCstyleJson()
+{
+    Style style;
+    style.id = "ots-style";
+    style.name = "OTS Style";
+    // Slot 1: Right1 piano vol 110, Right2 strings (program only).
+    style.ots[0].present = true;
+    style.ots[0].layers[0] = { true, 0, 110 };
+    style.ots[0].layers[1] = { true, 48, -1 };
+    // Slot 3: Right3 volume only (program unspecified).
+    style.ots[2].present = true;
+    style.ots[2].layers[2] = { true, -1, 90 };
+
+    const auto json = saveStyleToJson(style, false);
+    const auto r = loadStyleFromJson(json);
+    expect(r.ok, "ots round trip load ok");
+    if (!r.ok) return;
+
+    const auto& ots = r.style.ots;
+    expect(ots[0].present, "ots slot 1 present after round trip");
+    expect(ots[0].layers[0].present && ots[0].layers[0].program == 0
+               && ots[0].layers[0].volume == 110,
+           "ots slot 1 right1 program+volume survive");
+    expect(ots[0].layers[1].present && ots[0].layers[1].program == 48
+               && ots[0].layers[1].volume == -1,
+           "ots slot 1 right2 program-only survives");
+    expect(!ots[0].layers[2].present, "ots slot 1 right3 stays absent");
+    expect(!ots[1].present, "ots slot 2 stays absent");
+    expect(ots[2].present && ots[2].layers[2].present
+               && ots[2].layers[2].program == -1 && ots[2].layers[2].volume == 90,
+           "ots slot 3 right3 volume-only survives");
+    expect(!ots[3].present, "ots slot 4 stays absent");
+}
+
+void missingOtsKeyLoadsAsAbsent()
+{
+    // A pre-OTS .cstyle document has no "ots" key at all.
+    const std::string json = R"({"$schema":"cadenza.style.v1","id":"old","name":"Old",)"
+                             R"("tempo":120,"ticksPerBeat":480,"sections":{}})";
+    const auto r = loadStyleFromJson(json);
+    expect(r.ok, "old cstyle without ots loads ok");
+    if (!r.ok) return;
+    for (const auto& slot : r.style.ots)
+        expect(!slot.present, "old cstyle ots slots are absent");
+}
 }  // anonymous namespace
 
 int main()
@@ -654,6 +699,8 @@ int main()
     panelVoiceBankRemapsToGmRole();
     dominantPresetKeepsMatchingBankAndProgram();
     dominantPresetKeepsTheMostCommonBankAndProgramPair();
+    otsRoundTripsThroughCstyleJson();
+    missingOtsKeyLoadsAsAbsent();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All StyleLoader tests passed\n";

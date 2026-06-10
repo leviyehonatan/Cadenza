@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -146,6 +147,23 @@ struct Section
     std::vector<Part> parts;
 };
 
+// One Touch Settings — per-style right-hand voice presets imported from the
+// Yamaha "OTS " chunk. Slot N is recalled by the OTS N+1 panel button (and by
+// OTS Link when Main A..D starts). Fields of -1 mean "this OTS does not
+// specify the value; keep the player's current one".
+struct OtsLayerVoice
+{
+    bool present = false;   // this OTS defines a voice for the layer
+    int  program = -1;      // GM program 0..127 when known
+    int  volume  = -1;      // CC7 0..127 when known
+};
+
+struct OtsSetting
+{
+    bool present = false;                  // the style defines this OTS slot
+    std::array<OtsLayerVoice, 3> layers;   // Right 1 / Right 2 / Right 3
+};
+
 struct Style
 {
     std::string schema = "cadenza.style.v1";
@@ -158,6 +176,7 @@ struct Style
     YamahaStyleFormat yamahaFormat = YamahaStyleFormat::Unknown;
     std::vector<std::string> parseWarnings;
     std::vector<Section> sections;
+    std::array<OtsSetting, 4> ots;   // One Touch Settings 1..4 (all-absent if none)
 
     const Section* findSection(const std::string& name) const noexcept;
 };
