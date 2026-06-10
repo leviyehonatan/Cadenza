@@ -79,6 +79,7 @@ struct Settings
     bool chordArrangerEnabled = true;
     bool chordMemoryEnabled = false;
     bool syncroStopOnRelease = true;
+    bool otsLinkEnabled = false;     // auto-recall OTS 1-4 when Main A-D starts
 
     // Master 3-band EQ gains in dB. Default adds low-end body + a little air so
     // the GM mix isn't flat/thin; the player can retune these.

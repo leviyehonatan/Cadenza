@@ -109,6 +109,23 @@ void corruptFileFailsCleanly()
 
     std::filesystem::remove(path);
 }
+
+void otsLinkRoundTrips()
+{
+    const auto path = tempPath("cadenza_settings_test_otslink.json");
+    {
+        cadenza::settings::SettingsStore store(path);
+        expect(!store.state().otsLinkEnabled, "ots link defaults to off");
+        store.state().otsLinkEnabled = true;
+        expect(store.save(), "otslink settings save");
+    }
+    {
+        cadenza::settings::SettingsStore store(path);
+        expect(store.load(), "otslink settings load");
+        expect(store.state().otsLinkEnabled, "otsLinkEnabled survives a round trip");
+    }
+    std::filesystem::remove(path);
+}
 }
 
 int main()
@@ -116,6 +133,7 @@ int main()
     defaultsWhenMissing();
     saveAndReload();
     corruptFileFailsCleanly();
+    otsLinkRoundTrips();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All SettingsStore tests passed\n";
