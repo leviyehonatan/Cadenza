@@ -1,6 +1,6 @@
 # Cadenza Workstation - Current Development Summary
 
-_Last updated: 2026-06-10_
+_Last updated: 2026-06-10 (One Touch Settings added)_
 
 Cadenza is a working native Windows arranger workstation. The primary UI is the
 native JUCE panel. It can load Yamaha `.sty` files, recognize left-hand chords,
@@ -8,6 +8,26 @@ transpose accompaniment in real time, play right-hand melody, switch style
 sections, use FluidSynth, and route individual parts to VST3 instruments.
 
 ## Recent Changes
+
+### One Touch Settings (feature/one-touch-settings branch)
+
+- The importer reads One Touch Settings from the Yamaha `OTSc` chunk (legacy
+  `OTS ` tag also accepted). The container's declared sizes are unreliable, so
+  the parser scans for the four embedded `MTrk` setup tracks and skips info
+  sub-blocks such as `OTSi`.
+- Setup tracks address panel voices by MIDI channel: 0/1/2 = Right 1/2/3,
+  3 = Left. Verified against 800 Genos2 preset styles with zero
+  unexpected-channel warnings.
+- Each OTS slot stores program + volume per right-hand layer on the `Style`
+  model and round-trips through `.cstyle` JSON (older `.cstyle` files load
+  unchanged).
+- Four OTS buttons on the native panel apply a slot's voices through the
+  normal Right 1/2/3 layer path (VoiceMap/VST resolution intact); buttons dim
+  when the loaded style has no OTS data.
+- An OTS Link toggle (persisted) auto-recalls OTS 1-4 when Main A-D starts;
+  fills returning to the same Main do not retrigger.
+- `style-probe` prints parsed OTS slots.
+- See `docs/superpowers/specs/2026-06-10-one-touch-settings-design.md`.
 
 ### Runtime and thread safety
 
@@ -88,14 +108,16 @@ playback behavior.
 
 ## Verification Status
 
-Current committed head:
+Current committed head (master):
 
 `717632e fix: route transport commands through audio thread`
+
+One Touch Settings work lives on `feature/one-touch-settings`.
 
 Latest verification:
 
 - Native Debug target builds successfully.
-- Full CTest suite passes: **30/30 tests**.
+- Full CTest suite passes: **31/31 tests** (includes the new OtsRecall test).
 - Focused tests cover transport commands, time signatures, Yamaha parser
   diagnostics, guitar transposition, drum routing, and preset tie handling.
 
