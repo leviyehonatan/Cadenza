@@ -145,8 +145,12 @@ public:
             // kit, synth ch 8 = RHY2 sub-rhythm.
             fluid_synth_bank_select(m_synth, channel, kDrumBank);
             fluid_synth_program_change(m_synth, channel, program);
-            if (fluid_synth_get_channel_preset(m_synth, channel) == nullptr)
+            bool kitFellBack = false;
+            if (fluid_synth_get_channel_preset(m_synth, channel) == nullptr) {
                 fluid_synth_program_change(m_synth, channel, 0);   // standard kit
+                kitFellBack = true;
+            }
+            logResolvedPreset(channel, program, kitFellBack);
             return;
         }
 
@@ -157,10 +161,14 @@ public:
         // loaded SoundFont, FluidSynth leaves the channel with no preset. So a
         // Yamaha/XG style voice plays correctly on an XG SoundFont (e.g. Timbres
         // of Heaven) but still gets a sensible GM voice on a plain GM SoundFont.
+        bool fellBack = false;
         if (fluid_synth_get_channel_preset(m_synth, channel) == nullptr) {
             fluid_synth_bank_select(m_synth, channel, 0);
             fluid_synth_program_change(m_synth, channel, program);
+            fellBack = true;
         }
+
+        logResolvedPreset(channel, program, fellBack);
     }
 
     void controlChange(int channel, int controller, int value) override {
@@ -214,6 +222,22 @@ private:
 
     static constexpr bool isDrumSynthChannel(int ch) noexcept {
         return ch == kDrumChannel || ch == kDrumChannel2;
+    }
+
+    // Log which SoundFont preset a channel actually resolved to after a program
+    // change. Caller holds m_mutex. Lets us confirm XG variation banks resolve to
+    // real voices (vs. collapsing to plain GM) without having to listen.
+    void logResolvedPreset(int channel, int requestedProgram, bool fellBack) {
+        fluid_preset_t* preset = fluid_synth_get_channel_preset(m_synth, channel);
+        const char* name = preset ? fluid_preset_get_name(preset) : "(none)";
+        const int bank = preset ? fluid_preset_get_banknum(preset) : -1;
+        const int prog = preset ? fluid_preset_get_num(preset) : -1;
+        juce::Logger::writeToLog(
+            "[Cadenza] Voice resolve ch=" + juce::String(channel)
+            + " reqProgram=" + juce::String(requestedProgram)
+            + " -> '" + juce::String(name) + "' bank=" + juce::String(bank)
+            + " program=" + juce::String(prog)
+            + (fellBack ? " (GM fallback)" : ""));
     }
 
     fluid_settings_t* m_settings = nullptr;

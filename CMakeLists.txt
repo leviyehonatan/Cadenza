@@ -216,7 +216,8 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
         JUCE_PLUGINHOST_VST3=1
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
-        JUCE_STANDALONE_APPLICATION=1)
+        JUCE_STANDALONE_APPLICATION=1
+        JUCE_MODAL_LOOPS_PERMITTED=1)   # runDispatchLoopUntil while samplers load
     target_link_libraries(plugin-probe PRIVATE
         juce::juce_audio_processors_headless
         juce::juce_recommended_config_flags)
