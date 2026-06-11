@@ -102,10 +102,32 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             // Master output volume + final soft limiter: lets the whole mix (drums
             // included) be pushed loud and stay clean instead of hard-clipping.
             const float gain = m_masterGain.load();
-            for (int c = 0; c < nc; ++c) {
-                float* d = chans[c];
-                for (int s = 0; s < ns; ++s)
-                    d[s] = softLimit(d[s] * gain);
+
+            // Fade-out: a per-sample multiplicative ramp on top of the master
+            // gain. When it reaches silence, stop the transport right here on
+            // the audio thread and hand completion back to the UI.
+            float fadeStep = 1.0f;
+            if (m_fadeActive.load()) {
+                const double samples = std::max(1.0, m_fadeSeconds.load() * m_currentSampleRate);
+                // Decay from 1.0 to -60 dB (0.001) over `samples` samples.
+                fadeStep = (float) std::pow(0.001, 1.0 / samples);
+            } else if (m_fadeGain < 1.0f) {
+                m_fadeGain = 1.0f;   // fade cancelled — back to full level
+            }
+
+            float fade = m_fadeGain;
+            for (int s = 0; s < ns; ++s) {
+                for (int c = 0; c < nc; ++c)
+                    chans[c][s] = softLimit(chans[c][s] * gain * fade);
+                fade *= fadeStep;
+            }
+            m_fadeGain = fade;
+
+            if (m_fadeActive.load() && m_fadeGain <= 0.001f) {
+                stopFromAudioThread();
+                m_fadeGain = 1.0f;
+                m_fadeActive.store(false);
+                m_fadeCompleted.store(true);
             }
         });
 }
@@ -174,6 +196,17 @@ void AudioEngine::stopFromAudioThread()
 {
     m_transport.stop();
     allNotesOff();
+}
+
+void AudioEngine::startFadeOut(double seconds)
+{
+    m_fadeSeconds.store((float) juce::jlimit(0.5, 30.0, seconds));
+    m_fadeActive.store(true);
+}
+
+void AudioEngine::cancelFadeOut()
+{
+    m_fadeActive.store(false);   // the audio thread snaps m_fadeGain back to 1
 }
 
 void AudioEngine::setBpm(double bpm)

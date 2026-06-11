@@ -160,7 +160,9 @@ NativePanel::NativePanel()
     addAndMakeVisible(m_arranger);
     addAndMakeVisible(m_chordMemory);
     addAndMakeVisible(m_syncroStop);
+    addAndMakeVisible(m_autoFill);
     addAndMakeVisible(m_fingeredOnBass);
+    m_autoFill.setTooltip("Pressing a Main button while playing inserts its fill-in first");
 
     styleCaption(m_sectionsCaption, "Sections");
     addAndMakeVisible(m_sectionsCaption);
@@ -351,6 +353,9 @@ NativePanel::NativePanel()
 
     // --- wire control callbacks (message thread) ---
     m_play.onClick          = [this] { if (m_cb.togglePlay)    m_cb.togglePlay(); };
+    m_fade.setTooltip("Fade the band out over a few seconds, then stop");
+    m_fade.onClick          = [this] { if (m_cb.fadeOut)       m_cb.fadeOut(); };
+    addAndMakeVisible(m_fade);
     m_openStyle.onClick     = [this] { if (m_cb.openStyle)     m_cb.openStyle(); };
     m_openSf.onClick        = [this] { if (m_cb.openSoundFont) m_cb.openSoundFont(); };
     m_openAudio.onClick     = [this] { if (m_cb.openAudioSettings) m_cb.openAudioSettings(); };
@@ -366,6 +371,7 @@ NativePanel::NativePanel()
     m_arranger.onClick       = [this] { if (m_cb.setArranger)       m_cb.setArranger(m_arranger.getToggleState()); };
     m_chordMemory.onClick    = [this] { if (m_cb.setChordMemory)    m_cb.setChordMemory(m_chordMemory.getToggleState()); };
     m_syncroStop.onClick     = [this] { if (m_cb.setSyncroStop)     m_cb.setSyncroStop(m_syncroStop.getToggleState()); };
+    m_autoFill.onClick       = [this] { if (m_cb.setAutoFill)       m_cb.setAutoFill(m_autoFill.getToggleState()); };
     m_fingeredOnBass.onClick = [this] { if (m_cb.setFingeredOnBass) m_cb.setFingeredOnBass(m_fingeredOnBass.getToggleState()); };
 }
 
@@ -534,12 +540,14 @@ void NativePanel::setPlaying(bool playing)
                      playing ? juce::Colours::firebrick : juce::Colours::darkgreen);
 }
 
-void NativePanel::setToggleStates(bool arranger, bool chordMemory, bool syncroStop, bool fingeredOnBass)
+void NativePanel::setToggleStates(bool arranger, bool chordMemory, bool syncroStop, bool fingeredOnBass,
+                                  bool autoFill)
 {
     m_arranger.setToggleState(arranger, juce::dontSendNotification);
     m_chordMemory.setToggleState(chordMemory, juce::dontSendNotification);
     m_syncroStop.setToggleState(syncroStop, juce::dontSendNotification);
     m_fingeredOnBass.setToggleState(fingeredOnBass, juce::dontSendNotification);
+    m_autoFill.setToggleState(autoFill, juce::dontSendNotification);
 }
 
 void NativePanel::setEqGains(int lowDb, int midDb, int highDb)
@@ -667,6 +675,7 @@ void NativePanel::resized()
     {
         auto r = area.removeFromTop(row);
         m_play.setBounds(r.removeFromLeft(80));        r.removeFromLeft(gap);
+        m_fade.setBounds(r.removeFromLeft(56));        r.removeFromLeft(gap);
         m_openStyle.setBounds(r.removeFromLeft(100));  r.removeFromLeft(gap);
         m_openSf.setBounds(r.removeFromLeft(120));     r.removeFromLeft(gap);
         m_openAudio.setBounds(r.removeFromLeft(64));   r.removeFromLeft(gap);
@@ -709,6 +718,7 @@ void NativePanel::resized()
         m_arranger.setBounds(r.removeFromLeft(tw));
         m_chordMemory.setBounds(r.removeFromLeft(tw));
         m_syncroStop.setBounds(r.removeFromLeft(tw));
+        m_autoFill.setBounds(r.removeFromLeft(110));
         m_fingeredOnBass.setBounds(r.removeFromLeft(tw));
     }
     area.removeFromTop(gap);

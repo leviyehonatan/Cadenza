@@ -49,6 +49,7 @@ struct Registration
     bool chordMemoryEnabled = false;
     bool chordBassEnabled = false;
     bool syncroStopOnRelease = true;
+    bool autoFillEnabled = true;
     RightLayer rightLayers[3];
 };
 
@@ -79,6 +80,7 @@ struct Settings
     bool chordArrangerEnabled = true;
     bool chordMemoryEnabled = false;
     bool syncroStopOnRelease = true;
+    bool autoFillEnabled = true;     // pressing a Main while playing fills into it
     bool otsLinkEnabled = false;     // auto-recall OTS 1-4 when Main A-D starts
 
     // Master 3-band EQ gains in dB. Default adds low-end body + a little air so

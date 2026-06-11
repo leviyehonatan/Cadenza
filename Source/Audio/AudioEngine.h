@@ -41,6 +41,14 @@ public:
     void play();
     void stop();
     void stopFromAudioThread();
+
+    // Fade-out: ramp the master down over `seconds`, then stop the transport
+    // (audio thread) and restore the gain. The UI polls consumeFadeCompleted()
+    // to sync the Play button when the fade finishes.
+    void startFadeOut(double seconds);
+    void cancelFadeOut();
+    bool fadeActive() const noexcept { return m_fadeActive.load(); }
+    bool consumeFadeCompleted() noexcept { return m_fadeCompleted.exchange(false); }
     void setBpm(double bpm);
     void setMetronomeEnabled(bool enabled) { m_metronome.setEnabled(enabled); }
     bool isMetronomeEnabled() const        { return m_metronome.isEnabled(); }
@@ -107,6 +115,14 @@ private:
     MasterCompressor m_masterComp;
     MasterGlue       m_masterGlue;
     std::atomic<float> m_masterGain { 1.0f };   // master output volume (100% = unity)
+
+    // Fade-out state. m_fadeActive / m_fadeSeconds are written by the message
+    // thread; m_fadeGain is audio-thread-only; m_fadeCompleted is the handshake
+    // back to the message thread.
+    std::atomic<bool>  m_fadeActive { false };
+    std::atomic<float> m_fadeSeconds { 8.0f };
+    std::atomic<bool>  m_fadeCompleted { false };
+    float m_fadeGain = 1.0f;                    // audio thread only
 
     // Per-part instrument hosting (channels 1..16; index 0 unused).
     static constexpr int kNumChannels = 17;

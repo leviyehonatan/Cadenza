@@ -111,6 +111,7 @@ public:
     struct Callbacks
     {
         std::function<void()> togglePlay;
+        std::function<void()> fadeOut;                // fade the master out, then stop
         std::function<void()> openStyle;
         std::function<void()> openSoundFont;
         std::function<void()> openAudioSettings;
@@ -123,6 +124,7 @@ public:
         std::function<void(bool)> setArranger;
         std::function<void(bool)> setChordMemory;
         std::function<void(bool)> setSyncroStop;
+        std::function<void(bool)> setAutoFill;
         std::function<void(bool)> setFingeredOnBass;
         std::function<void(const std::string&)> selectSection;
         std::function<void(int, int, bool)> onKeyboardNote;  // note, velocity, isOn
@@ -172,7 +174,8 @@ public:
     void setMixerChannels(const std::vector<std::pair<int, std::string>>& channelLabels);
     void updateMixerStrip(int channel, int volume, bool mute, bool solo);
     void setMixerInstrumentName(int channel, const juce::String& instrumentName);
-    void setToggleStates(bool arranger, bool chordMemory, bool syncroStop, bool fingeredOnBass);
+    void setToggleStates(bool arranger, bool chordMemory, bool syncroStop, bool fingeredOnBass,
+                         bool autoFill);
     void setEqGains(int lowDb, int midDb, int highDb);   // init the EQ knobs (no callback)
     void setCompAmount(int percent);                     // init the Comp knob (no callback)
     void setMasterVolume(int percent);                   // init the Master knob (no callback)
@@ -203,6 +206,7 @@ private:
     Callbacks m_cb;
 
     juce::TextButton m_play       { "Play" };
+    juce::TextButton m_fade       { "Fade" };
     juce::TextButton m_openStyle  { "Open Style" };
     juce::TextButton m_openSf     { "Open SoundFont" };
     juce::TextButton m_openAudio  { "Audio" };
@@ -232,6 +236,7 @@ private:
     juce::ToggleButton m_arranger       { "Arranger" };
     juce::ToggleButton m_chordMemory    { "Chord Memory" };
     juce::ToggleButton m_syncroStop     { "Syncro Stop" };
+    juce::ToggleButton m_autoFill       { "Auto Fill" };
     juce::ToggleButton m_fingeredOnBass { "Chord on Bass" };
 
     juce::Label m_sectionsCaption;

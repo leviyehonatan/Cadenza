@@ -39,6 +39,7 @@ public:
     int crossfade() const noexcept { return m_crossfade; }
     int styleMemory() const noexcept { return m_styleMemory; }
     bool syncroStopOnRelease() const noexcept { return m_syncroStopOnRelease; }
+    bool autoFillEnabled() const noexcept { return m_autoFillEnabled; }
     const std::string& key() const noexcept { return m_key; }
     const std::string& chord() const noexcept { return m_chord; }
     const std::string& bankMemory() const noexcept { return m_bankMemory; }
@@ -49,6 +50,7 @@ public:
     int setCrossfade(int value) noexcept;
     int setStyleMemory(int slot) noexcept;
     void setSyncroStopOnRelease(bool value) noexcept { m_syncroStopOnRelease = value; }
+    void setAutoFillEnabled(bool value) noexcept { m_autoFillEnabled = value; }
     void setPlaying(bool value) noexcept { m_playing = value; }
     void setRecording(bool value) noexcept { m_recording = value; }
     void setKey(std::string value);
@@ -81,6 +83,7 @@ private:
     bool m_playing = false;
     bool m_recording = false;
     bool m_syncroStopOnRelease = true;
+    bool m_autoFillEnabled = true;   // pressing a Main while playing fills into it
     std::string m_key = "C";
     std::string m_chord = "F";
     std::string m_bankMemory = "Piano";

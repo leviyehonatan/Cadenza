@@ -75,6 +75,7 @@ private:
     void exportPlaybackDiagnostics();
     void triggerSection(const std::string& id);   // select a section, with one-shot intro/fill/ending handling
     void togglePlayback();                         // start/stop (shared by the Play button + MIDI map)
+    void startFadeOut();                           // fade the master out, then stop
     void executeControlCommand(const std::string& command);  // run a MIDI-mapped command
     bool loadAndApplyStyleFile(const juce::File& file);
     bool loadAndApplySongFile(const juce::File& file);

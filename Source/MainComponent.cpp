@@ -500,6 +500,7 @@ void MainComponent::loadSettings()
     m_state.setStyleMemory(s.styleMemory);
     m_state.setCrossfade(s.crossfade);
     m_state.setSyncroStopOnRelease(s.syncroStopOnRelease);
+    m_state.setAutoFillEnabled(s.autoFillEnabled);
     m_state.setChordSourceEnabled("bass", s.chordBassEnabled);
     m_state.setChordSourceEnabled("arranger", s.chordArrangerEnabled);
     m_state.setChordSourceEnabled("memory", s.chordMemoryEnabled);
@@ -520,6 +521,7 @@ void MainComponent::saveSettings()
     s.styleMemory = m_state.styleMemory();
     s.crossfade   = m_state.crossfade();
     s.syncroStopOnRelease = m_state.syncroStopOnRelease();
+    s.autoFillEnabled = m_state.autoFillEnabled();
     s.chordBassEnabled = m_state.chordSourceEnabled("bass");
     s.chordArrangerEnabled = m_state.chordSourceEnabled("arranger");
     s.chordMemoryEnabled = m_state.chordSourceEnabled("memory");
@@ -1305,10 +1307,19 @@ std::string sectionType(const std::string& id)
 }
 }
 
+void MainComponent::startFadeOut()
+{
+    if (!m_state.playing())
+        return;
+    m_audio.startFadeOut(8.0);
+    juce::Logger::writeToLog("[Cadenza] Fade out started");
+}
+
 void MainComponent::togglePlayback()
 {
     const bool play = !m_state.playing();
     m_state.setPlaying(play);
+    m_audio.cancelFadeOut();   // a manual start/stop overrides a running fade
     if (play) {
         if (m_songModeActive) {
             m_songPlayer.reset();
@@ -1341,6 +1352,23 @@ void MainComponent::triggerSection(const std::string& id)
     if (type == "main")
         m_currentMain = id;   // remember as the return target for fills/intros
 
+    // Auto Fill-In (Yamaha behavior): pressing a Main button while the band is
+    // playing inserts that main's own fill for one pattern, then lands on the
+    // main. Pressing the active main again just plays its fill.
+    if (type == "main" && m_state.autoFillEnabled() && m_audio.transport().playing()) {
+        // "mainB" -> "fillBB"; skip when the style has no such fill.
+        if (id.size() == 5 && id.rfind("main", 0) == 0) {
+            const char v = id[4];
+            const std::string fillId = std::string("fill") + v + v;
+            const auto style = m_styleEngine.currentStyle();
+            if (style && style->findSection(fillId) != nullptr) {
+                m_styleEngine.requestSection(fillId, true, id);
+                if (m_panel) m_panel->setActiveSection(juce::String(fillId));
+                return;
+            }
+        }
+    }
+
     const bool once = (type != "main");   // intro / fill / ending are one-shots
     const std::string returnTo = (type == "ending")
         ? std::string()
@@ -1369,6 +1397,15 @@ void MainComponent::timerCallback()
 
     // Section one-shot returns / ending stops are now handled sample-tight in the
     // StyleEngine (audio thread) via its section-changed / stop callbacks.
+
+    // A fade-out that reached silence stopped the transport on the audio thread;
+    // sync the UI play state here.
+    if (m_audio.consumeFadeCompleted() && m_state.playing()) {
+        m_state.setPlaying(false);
+        if (m_panel) m_panel->setPlaying(false);
+        pushToWeb("window.JuceBridge && window.JuceBridge.onPlayStateChanged(false);");
+        juce::Logger::writeToLog("[Cadenza] Fade out complete; stopped");
+    }
 
     if (!m_songModeActive)
         return;
@@ -1691,6 +1728,11 @@ void MainComponent::buildNativePanel()
         m_state.setSyncroStopOnRelease(on);
         saveSettings();
     };
+    cb.setAutoFill = [this](bool on) {
+        m_state.setAutoFillEnabled(on);
+        saveSettings();
+    };
+    cb.fadeOut = [this] { startFadeOut(); };
     cb.setFingeredOnBass = [this](bool on) {
         m_midi.setChordDetectionMode(on ? arranger::ChordDetectionMode::FingeredOnBass
                                         : arranger::ChordDetectionMode::Fingered);
@@ -1713,7 +1755,8 @@ void MainComponent::buildNativePanel()
     m_panel->setToggleStates(m_state.chordSourceEnabled("arranger"),
                              m_state.chordSourceEnabled("memory"),
                              m_state.syncroStopOnRelease(),
-                             m_state.chordSourceEnabled("bass"));
+                             m_state.chordSourceEnabled("bass"),
+                             m_state.autoFillEnabled());
     if (m_settings) {
         const auto& st = m_settings->state();
         m_panel->setEqGains(st.eqLowDb, st.eqMidDb, st.eqHighDb);
@@ -1959,6 +2002,7 @@ void MainComponent::captureRegistration(int slot)
     r.chordMemoryEnabled   = m_state.chordSourceEnabled("memory");
     r.chordBassEnabled     = m_state.chordSourceEnabled("bass");
     r.syncroStopOnRelease  = m_state.syncroStopOnRelease();
+    r.autoFillEnabled      = m_state.autoFillEnabled();
     for (int i = 0; i < 3; ++i) r.rightLayers[i] = st.rightLayers[i];
     saveSettings();
     if (m_panel) m_panel->setRegistrationUsed(slot, true);
@@ -1995,6 +2039,7 @@ void MainComponent::recallRegistration(int slot)
     m_state.setChordSourceEnabled("memory",   r.chordMemoryEnabled);
     m_state.setChordSourceEnabled("bass",     r.chordBassEnabled);
     m_state.setSyncroStopOnRelease(r.syncroStopOnRelease);
+    m_state.setAutoFillEnabled(r.autoFillEnabled);
     // 5) Right-hand layers + bank.
     st.bankMemory = r.bankMemory;
     for (int i = 0; i < 3; ++i) st.rightLayers[i] = r.rightLayers[i];
@@ -2011,7 +2056,8 @@ void MainComponent::recallRegistration(int slot)
         m_panel->setEqGains(r.eqLowDb, r.eqMidDb, r.eqHighDb);
         m_panel->setCompAmount(r.compAmount);
         m_panel->setToggleStates(r.chordArrangerEnabled, r.chordMemoryEnabled,
-                                 r.syncroStopOnRelease, r.chordBassEnabled);
+                                 r.syncroStopOnRelease, r.chordBassEnabled,
+                                 r.autoFillEnabled);
         for (int i = 0; i < 3; ++i)
             m_panel->setRightVoice(i, r.rightLayers[i].enabled, r.rightLayers[i].program,
                                    r.rightLayers[i].volume, r.rightLayers[i].octave);
