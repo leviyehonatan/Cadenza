@@ -4,7 +4,7 @@
 > roadmap framing in `README.md` (which was written before the C++ engine
 > existed). For the chronological list of changes see `CHANGELOG.md`.
 
-_Last updated: 2026-06-01._
+_Last updated: 2026-06-11 (v1.0.0)._
 
 ---
 
@@ -58,7 +58,20 @@ There are two UIs:
 - **Held notes re-voice instantly on chord change** (pads/strings shift with you,
   no waiting for the loop).
 - **Live melody voice** on its own channel with octave control.
-- Section switching (intro / main A–D / fill / break / ending).
+- Section switching (intro / main A–D / fill / break / ending), sample-tight at
+  bar boundaries. Intros/fills are one-shots returning to the main; an Ending
+  stops playback when it finishes.
+- **Auto Fill-In** (toggle, on by default): pressing a Main while playing
+  inserts that main's fill first, then lands on the main — Yamaha AUTO FILL IN
+  behavior. Pressing the active main plays its fill.
+- **Syncro Start / Syncro Stop**: play a chord in the chord zone to start the
+  band; with Syncro Stop on, releasing all chord keys pauses it.
+- **Tap Tempo** button.
+- **Fade Out** button: the master fades to silence over ~8 s, then the
+  transport stops cleanly and the level is restored.
+- **One Touch Settings** (OTS 1–4) parsed from Yamaha styles, with OTS Link
+  auto-recall on Main A–D.
+- **Registrations** (4 slots): one-button snapshots of the whole live setup.
 - Per-channel **mixer**: volume, mute, solo, and instrument (program) pick.
   Bass/drums/etc. get sensible role-based default instruments.
 - **Per-part VST3 instruments**: each mixer strip's instrument menu offers
@@ -194,24 +207,36 @@ because **most arbitrary `.sty` files will not sound perfect yet**:
 - **Shared percussion setup is still simple.** Multiple percussion parts can now
   share GM channel 10 with the main drums setup preferred, but future drum-kit
   and keymap merging may still need more style-specific handling.
-- **No style editor / no save of edited styles.** Style editing UI is a placeholder.
-- **VST3 hosting is master-effect only** — no per-part VST instruments with MIDI
-  routing yet.
-- **Song mode** doesn't auto-stop at an ending; chord/section hold past chart end.
-- Build artifacts are Debug; no installer.
+- **No style editor / no save of edited styles.** Style editing UI is a placeholder
+  (`.cstyle` JSON can be edited by hand and the converter regenerates it).
+- No installer (.msi/.exe setup) — distribution is a self-contained folder/zip
+  produced by `scripts/package.ps1`.
+
+(Older limitations now fixed: song mode auto-stops at chart end; per-part VST3
+instruments work; Release build + package exist.)
 
 ---
 
 ## 5. Suggested next steps (priority order)
 
-1. **Style robustness**: a parse-time validator + log of unsupported features,
-   and a fallback when CASM policy is missing/garbled.
-2. **Fuller NTT**: implement Yamaha NTT scale-table chord fitting for natural
-   voicings across all chord qualities.
-3. **Drum polish**: improve style-specific drum-kit/keymap merging when multiple
+1. **Fuller NTT**: implement Yamaha NTT scale-table chord fitting for natural
+   voicings across all chord qualities (slash chords, altered tensions).
+2. **Drum polish**: improve style-specific drum-kit/keymap merging when multiple
    percussion parts share GM channel 10.
-5. **Song mode**: honor ending sections and stop.
-6. **Per-part VST instruments**; then installer + Release build.
+3. **Style editor**: edit/save `.cstyle` from the UI.
+4. **Installer** (Inno Setup / NSIS) on top of the package folder.
+
+---
+
+## 6. Release & distribution
+
+- `build-release/` — Ninja Release tree (same vcpkg toolchain as build-msvc).
+  Configure once, then `cmake --build build-release --target Cadenza` from a
+  vcvars shell.
+- `scripts/package.ps1 [-Zip]` — produces `dist/Cadenza-<version>/`: the exe,
+  runtime DLLs, both SoundFonts, factory content, web UI, CLI tools, and a
+  user quick-start (`docs/QUICK_START.md` → package `README.md`).
+  Self-contained; verified to launch from the package folder.
 
 ---
 

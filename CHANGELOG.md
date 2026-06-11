@@ -21,6 +21,33 @@ converter.
 
 ## Timeline of what got built
 
+### v1.0.0 — Auto Fill-In, Fade Out, Release build + distributable package
+
+The "finished product" pass. Three things landed:
+
+- **Auto Fill-In** (new "Auto Fill" toggle, on by default, persisted +
+  captured in registrations): pressing a Main button while the band plays
+  inserts that main's own fill (`mainB` → `fillBB`) for one pattern and then
+  lands on the main — the classic Yamaha AUTO FILL IN behavior. Pressing the
+  active main again just plays its fill. Falls back to a plain quantized
+  switch when the style has no matching fill. Song mode is unaffected (it
+  drives the engine directly).
+- **Fade Out** (new "Fade" button next to Play): ramps the master to silence
+  over ~8 s on the audio thread (per-sample multiplicative ramp to −60 dB),
+  then stops the transport sample-tight and restores the gain; the UI play
+  state syncs via the existing 20 Hz timer. Pressing Play during a fade
+  cancels it. A clean way to end songs that have no Ending section.
+- **Release build + package**: `build-release/` is a Ninja Release tree
+  (same vcpkg toolchain); `scripts/package.ps1` collects the exe, runtime
+  DLLs, resources (both SoundFonts), the CLI tools, and a user quick-start
+  (`docs/QUICK_START.md`) into `dist/Cadenza-<version>/` (~450 MB,
+  self-contained — verified to launch from the package folder), with `-Zip`
+  for a shippable archive. Project version bumped to **1.0.0**.
+
+Also: settings round-trip test covers the new `autoFillEnabled` flag.
+31/31 test suites pass. (Syncro Start/Stop and Tap Tempo, listed as missing
+in older docs, were already implemented — docs corrected.)
+
 ### Chord voicing fix — nearest-tone placement (no octave scatter)
 
 Chord parts followed the chord but their voicings scattered: each note's pitch
