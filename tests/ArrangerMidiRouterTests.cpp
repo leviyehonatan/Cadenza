@@ -427,7 +427,9 @@ void invalid_notes_do_not_erase_remembered_chord()
     release_notes(router, {48, 52, 55});
     require_chord_display(router.detectChord(), "C", "Remembered chord starts as C");
 
-    play_notes(router, {49, 50, 54});
+    // A chromatic cluster matches no chord type. (The previous notes C#-D-F#
+    // now legitimately read as Dmaj7 with omitted 5th under Yamaha fingering.)
+    play_notes(router, {49, 50, 51});
 
     require_chord(router.detectChord(), 0, "major", std::nullopt, false, "Invalid notes keep remembered C");
     require_chord_display(router.detectChord(), "C", "Invalid notes keep remembered C display");
@@ -533,6 +535,37 @@ void releasing_a_held_triad_finger_by_finger_keeps_the_chord()
 
 } // namespace
 
+// Extended Yamaha chord types in the live router: voicings that previously
+// matched nothing (full 9ths with the 5th, 6ths, m7b5) now detect, and the
+// C6/Am7 ambiguity resolves by the bass note.
+void detects_extended_yamaha_types()
+{
+    {
+        ArrangerMidiRouter router({72, ChordDetectionMode::Fingered, false});
+        play_notes(router, {48, 50, 52, 55, 58});   // full C9 with the 5th
+        require_chord(router.detectChord(), 0, "7(9)", std::nullopt, false,
+                      "full C9 voicing is detected");
+    }
+    {
+        ArrangerMidiRouter router({72, ChordDetectionMode::Fingered, false});
+        play_notes(router, {48, 52, 55, 57});       // C E G A, C in bass
+        require_chord(router.detectChord(), 0, "6", std::nullopt, false,
+                      "C6 with C bass is C6");
+    }
+    {
+        ArrangerMidiRouter router({72, ChordDetectionMode::Fingered, false});
+        play_notes(router, {45, 48, 52, 55});       // A C E G, A in bass
+        require_chord(router.detectChord(), 9, "m7", std::nullopt, false,
+                      "same notes with A bass are Am7");
+    }
+    {
+        ArrangerMidiRouter router({72, ChordDetectionMode::Fingered, false});
+        play_notes(router, {48, 51, 54, 58});       // C Eb Gb Bb
+        require_chord(router.detectChord(), 0, "m7b5", std::nullopt, false,
+                      "Cm7b5 is detected");
+    }
+}
+
 int main()
 {
     below_split_note_routes_to_chord_side_and_starts_syncro();
@@ -574,7 +607,8 @@ int main()
     syncro_stop_disabled_does_not_stop_on_release();
     syncro_stop_can_be_toggled_at_runtime();
     releasing_a_held_triad_finger_by_finger_keeps_the_chord();
+    detects_extended_yamaha_types();
 
-    std::cout << "ArrangerMidiRouter tests passed (38 cases)\n";
+    std::cout << "ArrangerMidiRouter tests passed (39 cases)\n";
     return 0;
 }

@@ -423,12 +423,35 @@ void importsSixEightTimeSignature()
 
 void malformedSectionDurationReportsWarning()
 {
-    auto r = cadenza::arranger::parseStyBytes(makeTimeSignatureSmf(3, 2, 1500));
+    // Genuinely misaligned (1440-tick bars; 2100 is ~1.46 bars): warns and
+    // rounds to the nearest bar.
+    auto r = cadenza::arranger::parseStyBytes(makeTimeSignatureSmf(3, 2, 2100));
     expect(r.ok, "misaligned 3/4 SMF parses OK");
     if (!r.ok) return;
 
     expect(hasStyleWarning(r.style, "section timing mainA"),
-           "section duration not divisible by bar length reports warning");
+           "section duration far from a bar boundary reports warning");
+
+    // Slightly off (last note ends 60 ticks past the bar line — normal for the
+    // final section of a real .sty): no warning, length rounds to 1 bar.
+    auto near = cadenza::arranger::parseStyBytes(makeTimeSignatureSmf(3, 2, 1500));
+    expect(near.ok, "nearly-aligned 3/4 SMF parses OK");
+    if (!near.ok) return;
+
+    expect(!hasStyleWarning(near.style, "section timing mainA"),
+           "length within 1/8 bar of a bar boundary does not warn");
+    const auto* mainA = near.style.findSection("mainA");
+    expect(mainA && mainA->barCount == 1, "nearly-aligned length rounds to 1 bar");
+
+    // Ring-over past a 2-bar boundary rounds UP to 2 bars (the old floor
+    // behavior truncated the section).
+    auto over = cadenza::arranger::parseStyBytes(makeTimeSignatureSmf(3, 2, 2980));
+    expect(over.ok, "ring-over 3/4 SMF parses OK");
+    if (!over.ok) return;
+    const auto* overMainA = over.style.findSection("mainA");
+    expect(overMainA && overMainA->barCount == 2, "ring-over length rounds to 2 bars");
+    expect(!hasStyleWarning(over.style, "section timing mainA"),
+           "ring-over within tolerance does not warn");
 }
 
 void sectionsAreSplitByMarkers()
@@ -1087,14 +1110,15 @@ void unsupportedRtrModesReportDeduplicatedWarnings()
     struct Case {
         uint8_t raw;
         const char* name;
+        bool supported;   // implemented by StyleEngine::revoiceActiveNotes
     };
     const Case cases[] = {
-        { 0, "Stop" },
-        { 2, "PitchShiftToRoot" },
-        { 3, "Retrigger" },
-        { 4, "RetriggerToRoot" },
-        { 5, "NoteGenerator" },
-        { 99, "Unknown" },
+        { 0, "Stop",             true },
+        { 2, "PitchShiftToRoot", true },
+        { 3, "Retrigger",        true },
+        { 4, "RetriggerToRoot",  true },
+        { 5, "NoteGenerator",    false },
+        { 99, "Unknown",         false },
     };
 
     for (const auto& c : cases) {
@@ -1105,8 +1129,13 @@ void unsupportedRtrModesReportDeduplicatedWarnings()
         if (!r.ok) continue;
 
         const std::string warning = std::string("unsupported Yamaha RTR ") + c.name + " behavior";
-        expect(countStyleWarnings(r.style, warning) == 1,
-               std::string("RTR ") + c.name + " warning is deduplicated by mode");
+        if (c.supported) {
+            expect(countStyleWarnings(r.style, warning) == 0,
+                   std::string("RTR ") + c.name + " is supported and does not warn");
+        } else {
+            expect(countStyleWarnings(r.style, warning) == 1,
+                   std::string("RTR ") + c.name + " warning is deduplicated by mode");
+        }
     }
 }
 

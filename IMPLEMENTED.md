@@ -51,12 +51,23 @@ There are two UIs:
 - Loads Yamaha **`.sty`** (SFF) directly, and our `.cstyle` JSON format.
 - Parses CASM/Ctab/Ctb2 policy, channels 9–16 mapped to the standard SFF
   accompaniment parts (sub-rhythm, drums, bass, chord1/2, pad, phrase1/2).
-- **Chord recognition** from held left-hand notes (18 templates; multiple modes).
-  Stable on finger-by-finger release (won't downgrade a held chord).
+- **Chord recognition** across the full Yamaha chord-type table (34 types in
+  `ChordTypes`: 6/6-9/add9, maj9/maj7#11, m6/m9/m11/mMaj9, 9/13, 7sus4, and the
+  altered dominants 7b5/7#11/7b9/7#9/7b13/7aug) with Yamaha fingering rules —
+  optional 5ths, reduced voicings, and bass-note priority for ambiguous sets
+  (C-E-G-A is C6 with C in bass, Am7 with A in bass; D-F-A is Dm before
+  F6-no-5th). Stable on finger-by-finger release (won't downgrade a held chord).
 - **Chord following / transposition** per part by baked note roles
-  (root / 3rd / 5th / 7th / color / scale / absolute).
-- **Held notes re-voice instantly on chord change** (pads/strings shift with you,
-  no waiting for the loop).
+  (root / 3rd / 5th / 7th / color / scale / absolute), voiced through the
+  per-type NTT tables: chord-role notes take the type's own intervals (a 6th
+  chord maps 7th-role notes to its 6th, 7b5 bends the 5th), and color/phrase
+  tones snap to the type's chord scale (7b9 phrases take the b9, Lydian types
+  the #11). FingeredOnBass slash chords drive bass-enabled parts to the named
+  bass note (C/E plays E in the bass).
+- **Held notes re-voice instantly on chord change** following each part's
+  Yamaha RTR retrigger rule (Stop / PitchShift / PitchShiftToRoot / Retrigger /
+  RetriggerToRoot), so pads shift, basses land on the new root, and "stop"
+  parts cut cleanly.
 - **Live melody voice** on its own channel with octave control.
 - Section switching (intro / main A–D / fill / break / ending), sample-tight at
   bar boundaries. Intros/fills are one-shots returning to the main; an Ending
@@ -197,13 +208,11 @@ build-msvc\style-probe.exe "YOUR-STYLE.STY" Am mainA      # prints + renders pro
 This is an honest list of what will still feel rough — especially relevant
 because **most arbitrary `.sty` files will not sound perfect yet**:
 
-- **Style coverage is partial.** The engine handles common SFF layouts, but with
-  thousands of community styles many will mis-parse, play wrong instruments, or
-  voice oddly. There is no per-style validation/repair pass.
-- **NTT chord-fitting is approximate.** Chord tones and color/phrase tones fit the
-  played chord's quality (all qualities the recognizer produces, including
-  dim/aug/m7b5), but this is a clean-room approximation, not the full Yamaha NTT
-  tables. Slash chords and some altered tensions still won't always voice ideally.
+- **Some exotic styles still warn.** On the user's combined 891-file library
+  (Genos2 presets + Balkan + Dance packs) every file is playable and 880 scan
+  fully clean; the remaining 11 have genuinely odd fill lengths (intentional
+  short breaks) that play but are flagged. The Yamaha RTR "NoteGenerator" rule
+  falls back to generic re-voicing.
 - **Shared percussion setup is still simple.** Multiple percussion parts can now
   share GM channel 10 with the main drums setup preferred, but future drum-kit
   and keymap merging may still need more style-specific handling.

@@ -808,12 +808,15 @@ YamahaRetriggerRule yamahaRetriggerRuleFromRaw(uint8_t value) noexcept
 
 const char* unsupportedYamahaRetriggerRuleName(YamahaRetriggerRule rule) noexcept
 {
+    // Stop / PitchShift(ToRoot) / Retrigger(ToRoot) are implemented by
+    // StyleEngine::revoiceActiveNotes; only NoteGenerator (and an unparsable
+    // byte) still fall back to the generic re-voicing.
     switch (rule) {
-        case YamahaRetriggerRule::Stop: return "Stop";
+        case YamahaRetriggerRule::Stop: return nullptr;
         case YamahaRetriggerRule::PitchShift: return nullptr;
-        case YamahaRetriggerRule::PitchShiftToRoot: return "PitchShiftToRoot";
-        case YamahaRetriggerRule::Retrigger: return "Retrigger";
-        case YamahaRetriggerRule::RetriggerToRoot: return "RetriggerToRoot";
+        case YamahaRetriggerRule::PitchShiftToRoot: return nullptr;
+        case YamahaRetriggerRule::Retrigger: return nullptr;
+        case YamahaRetriggerRule::RetriggerToRoot: return nullptr;
         case YamahaRetriggerRule::NoteGenerator: return "NoteGenerator";
         case YamahaRetriggerRule::Unknown: return "Unknown";
     }
@@ -1689,13 +1692,21 @@ StyParseResult parseStyBytes(const std::vector<uint8_t>& bytes,
         uint64_t lenTicks = stopT - startT;
         const uint64_t barTicks = static_cast<uint64_t>(std::max(
             1, cadenza::ticksPerBar(style.ticksPerBeat, style.beatsPerBar, style.beatUnit)));
-        if ((lenTicks % barTicks) != 0) {
+        // Round to the NEAREST whole bar: the last section's end is the last
+        // note's end tick, which legitimately stops short of (or rings past)
+        // the final bar line. Only a length far from any bar line (> 1/8 bar)
+        // is a real oddity worth a warning.
+        section.barCount = std::max<int>(1,
+            static_cast<int>((lenTicks + barTicks / 2) / barTicks));
+        const uint64_t roundedTicks = static_cast<uint64_t>(section.barCount) * barTicks;
+        const uint64_t offBy = lenTicks > roundedTicks ? lenTicks - roundedTicks
+                                                       : roundedTicks - lenTicks;
+        if (offBy > barTicks / 8) {
             addParseWarning(style,
                 "section timing " + section.name + " length " + std::to_string(lenTicks)
                 + " ticks is not a whole number of " + std::to_string(barTicks)
                 + "-tick bars");
         }
-        section.barCount = std::max<int>(1, static_cast<int>(lenTicks / barTicks));
 
         // Group this section's notes by MIDI channel into Parts.
         std::map<int, std::vector<FlatNote>> byChannel;

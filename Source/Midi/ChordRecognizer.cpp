@@ -1,4 +1,5 @@
 #include "ChordRecognizer.h"
+#include "ChordTypes.h"
 
 #include <algorithm>
 #include <array>
@@ -9,40 +10,6 @@ namespace cadenza::midi
 {
 namespace
 {
-struct Template
-{
-    ChordQuality quality;
-    std::vector<int> intervals;   // relative to root, pitch classes 0..11
-    int requiredMatches;          // how many of these notes must be present to match
-    int priority;                 // higher = preferred when scores tie
-};
-
-// Ordered so that more-specific qualities (7ths) win over less-specific (triads)
-// when both are present in the held notes.
-const std::vector<Template>& chordTemplates()
-{
-    static const std::vector<Template> t = {
-        // 7th chords first (more specific)
-        { ChordQuality::Major7,         { 0, 4, 7, 11 }, 4, 100 },
-        { ChordQuality::Dominant7,      { 0, 4, 7, 10 }, 4, 100 },
-        { ChordQuality::Minor7,         { 0, 3, 7, 10 }, 4, 100 },
-        { ChordQuality::MinorMajor7,    { 0, 3, 7, 11 }, 4, 100 },
-        { ChordQuality::Diminished7,    { 0, 3, 6, 9  }, 4, 100 },
-        { ChordQuality::HalfDiminished7,{ 0, 3, 6, 10 }, 4, 100 },
-        // Triads
-        { ChordQuality::Major,          { 0, 4, 7 }, 3, 90 },
-        { ChordQuality::Minor,          { 0, 3, 7 }, 3, 90 },
-        { ChordQuality::Diminished,     { 0, 3, 6 }, 3, 90 },
-        { ChordQuality::Augmented,      { 0, 4, 8 }, 3, 90 },
-        { ChordQuality::Sus2,           { 0, 2, 7 }, 3, 85 },
-        { ChordQuality::Sus4,           { 0, 5, 7 }, 3, 85 },
-        // Dyads / single notes
-        { ChordQuality::Power,          { 0, 7 }, 2, 50 },
-        { ChordQuality::SingleNote,     { 0 },    1, 10 },
-    };
-    return t;
-}
-
 int normPC(int n)
 {
     int pc = n % 12;
@@ -63,23 +30,7 @@ std::string Chord::rootName() const { return pitchClassName(rootPitchClass); }
 
 std::string Chord::qualitySuffix() const
 {
-    switch (quality) {
-        case ChordQuality::Major:           return "";
-        case ChordQuality::Minor:           return "m";
-        case ChordQuality::Dominant7:       return "7";
-        case ChordQuality::Major7:          return "maj7";
-        case ChordQuality::Minor7:          return "m7";
-        case ChordQuality::MinorMajor7:     return "mMaj7";
-        case ChordQuality::Diminished:      return "dim";
-        case ChordQuality::HalfDiminished7: return "m7b5";
-        case ChordQuality::Diminished7:     return "dim7";
-        case ChordQuality::Augmented:       return "aug";
-        case ChordQuality::Sus2:            return "sus2";
-        case ChordQuality::Sus4:            return "sus4";
-        case ChordQuality::Power:           return "5";
-        case ChordQuality::SingleNote:      return "(note)";
-    }
-    return "";
+    return chordTypeInfo(quality).suffix;
 }
 
 std::string Chord::toString() const
@@ -113,32 +64,58 @@ std::optional<int> letterPitchClass(char c)
 }
 
 // Map a chord-symbol suffix (already lower-cased, accidentals/root stripped)
-// to a ChordQuality. Ordered longest/most-specific first.
+// to a ChordQuality. Ordered longest/most-specific first. Covers the full
+// Yamaha chord-type set plus common alternate spellings.
 ChordQuality qualityFromSuffix(const std::string& s)
 {
     struct Entry { const char* token; ChordQuality quality; };
     static const Entry table[] = {
-        // half-diminished / diminished sevenths (specific spellings first)
+        // minor-major sevenths / ninths (specific spellings first)
+        { "mmaj7(9)", ChordQuality::MinorMajor9 }, { "mmaj9", ChordQuality::MinorMajor9 },
+        { "minmaj9", ChordQuality::MinorMajor9 },
+        { "mmaj7", ChordQuality::MinorMajor7 }, { "minmaj7", ChordQuality::MinorMajor7 },
+        { "m(maj7)", ChordQuality::MinorMajor7 },
+        // half-diminished / diminished sevenths
         { "m7b5", ChordQuality::HalfDiminished7 }, { "min7b5", ChordQuality::HalfDiminished7 },
         { "m7-5", ChordQuality::HalfDiminished7 }, { "o7", ChordQuality::Diminished7 },
         { "dim7", ChordQuality::Diminished7 },
-        // minor-major sevenths
-        { "mmaj7", ChordQuality::MinorMajor7 }, { "minmaj7", ChordQuality::MinorMajor7 },
-        { "m(maj7)", ChordQuality::MinorMajor7 }, { "mmaj9", ChordQuality::MinorMajor7 },
-        // major sevenths / sixths / extensions
+        // major sevenths / extensions
+        { "maj7#11", ChordQuality::Major7s11 }, { "maj7(#11)", ChordQuality::Major7s11 },
+        { "maj7aug", ChordQuality::AugmentedMajor7 }, { "maj7#5", ChordQuality::AugmentedMajor7 },
+        { "augmaj7", ChordQuality::AugmentedMajor7 },
+        { "maj7(9)", ChordQuality::Major9 }, { "maj9", ChordQuality::Major9 },
+        { "maj13", ChordQuality::Major9 },
         { "maj7", ChordQuality::Major7 }, { "major7", ChordQuality::Major7 },
-        { "maj9", ChordQuality::Major7 }, { "maj13", ChordQuality::Major7 },
-        { "ma7", ChordQuality::Major7 }, { "m7", ChordQuality::Minor7 },
-        { "min7", ChordQuality::Minor7 }, { "m9", ChordQuality::Minor7 },
-        { "m11", ChordQuality::Minor7 }, { "m13", ChordQuality::Minor7 },
-        { "m6", ChordQuality::Minor }, { "min", ChordQuality::Minor },
-        // dominant sevenths / extensions
-        { "7", ChordQuality::Dominant7 }, { "9", ChordQuality::Dominant7 },
-        { "11", ChordQuality::Dominant7 }, { "13", ChordQuality::Dominant7 },
+        { "ma7", ChordQuality::Major7 },
+        // major sixths / add9
+        { "6(9)", ChordQuality::Major69 }, { "69", ChordQuality::Major69 },
+        { "6/9", ChordQuality::Major69 },
+        { "add9", ChordQuality::MajorAdd9 }, { "(9)", ChordQuality::MajorAdd9 },
+        { "6", ChordQuality::Major6 },
+        // minor sevenths / extensions
+        { "m7(9)", ChordQuality::Minor9 }, { "m9", ChordQuality::Minor9 },
+        { "m7(11)", ChordQuality::Minor11 }, { "m11", ChordQuality::Minor11 },
+        { "m13", ChordQuality::Minor9 },
+        { "m7", ChordQuality::Minor7 }, { "min7", ChordQuality::Minor7 },
+        { "m(9)", ChordQuality::MinorAdd9 }, { "madd9", ChordQuality::MinorAdd9 },
+        { "m6", ChordQuality::Minor6 }, { "min", ChordQuality::Minor },
+        // dominant sevenths / extensions / alterations
+        { "7sus4", ChordQuality::Dominant7sus4 }, { "7sus", ChordQuality::Dominant7sus4 },
+        { "7(9)", ChordQuality::Dominant9 }, { "9", ChordQuality::Dominant9 },
+        { "7(13)", ChordQuality::Dominant13 }, { "13", ChordQuality::Dominant13 },
+        { "11", ChordQuality::Dominant9 },
+        { "7(b9)", ChordQuality::Dominant7b9 }, { "7b9", ChordQuality::Dominant7b9 },
+        { "7(#9)", ChordQuality::Dominant7s9 }, { "7#9", ChordQuality::Dominant7s9 },
+        { "7(b13)", ChordQuality::Dominant7b13 }, { "7b13", ChordQuality::Dominant7b13 },
+        { "7(#11)", ChordQuality::Dominant7s11 }, { "7#11", ChordQuality::Dominant7s11 },
+        { "7b5", ChordQuality::Dominant7b5 }, { "7-5", ChordQuality::Dominant7b5 },
+        { "7aug", ChordQuality::Augmented7 }, { "aug7", ChordQuality::Augmented7 },
+        { "7#5", ChordQuality::Augmented7 }, { "7+5", ChordQuality::Augmented7 },
+        { "7", ChordQuality::Dominant7 },
         // triads / dyads
         { "dim", ChordQuality::Diminished }, { "aug", ChordQuality::Augmented },
         { "sus2", ChordQuality::Sus2 }, { "sus4", ChordQuality::Sus4 },
-        { "sus", ChordQuality::Sus4 }, { "6", ChordQuality::Major },
+        { "sus", ChordQuality::Sus4 },
         { "5", ChordQuality::Power }, { "m", ChordQuality::Minor },
         { "-", ChordQuality::Minor }, { "+", ChordQuality::Augmented },
     };
@@ -210,71 +187,20 @@ std::optional<Chord> recognise(const std::vector<int>& notes)
 {
     if (notes.empty()) return std::nullopt;
 
-    // Build the set of pitch classes present.
-    std::set<int> pcs;
+    // Build the pitch-class mask and find the bass (lowest) note.
+    std::uint16_t played = 0;
     int bass = notes.front();
     for (int n : notes) {
-        pcs.insert(normPC(n));
+        played = static_cast<std::uint16_t>(played | pcBit(normPC(n)));
         if (n < bass) bass = n;
     }
 
-    if (pcs.size() == 1) {
-        Chord c;
-        c.rootPitchClass = *pcs.begin();
-        c.quality = ChordQuality::SingleNote;
-        c.bassMidi = bass;
-        return c;
-    }
-
-    // Try each possible root pitch class. The "root" is preferably the bass
-    // note's pitch class, but we search all 12 and score them.
-    const auto& templates = chordTemplates();
-
-    int bestRoot = -1;
-    int bestScore = -1;
-    int bestPriority = -1;
-    ChordQuality bestQuality = ChordQuality::Major;
-
-    for (int root = 0; root < 12; ++root) {
-        // Build intervals present relative to this root.
-        std::set<int> intervals;
-        for (int pc : pcs) {
-            intervals.insert((pc - root + 12) % 12);
-        }
-
-        for (const auto& tpl : templates) {
-            // Count matches: how many of the template's required intervals are present.
-            int matches = 0;
-            for (int iv : tpl.intervals) {
-                if (intervals.count(iv)) ++matches;
-            }
-            if (matches < tpl.requiredMatches) continue;
-
-            // Score: match count + bonus for not including "extra" notes outside template.
-            int extras = static_cast<int>(intervals.size()) - matches;
-            int score = matches * 10 - extras * 2;
-
-            // Strong preference: root coincides with the bass note pitch class.
-            if (root == normPC(bass)) score += 5;
-
-            bool better = false;
-            if (score > bestScore) better = true;
-            else if (score == bestScore && tpl.priority > bestPriority) better = true;
-
-            if (better) {
-                bestScore = score;
-                bestPriority = tpl.priority;
-                bestRoot = root;
-                bestQuality = tpl.quality;
-            }
-        }
-    }
-
-    if (bestRoot < 0) return std::nullopt;
+    const auto match = matchChordMask(played, normPC(bass), 1);
+    if (!match.has_value()) return std::nullopt;
 
     Chord c;
-    c.rootPitchClass = bestRoot;
-    c.quality = bestQuality;
+    c.rootPitchClass = match->root;
+    c.quality = match->info->quality;
     c.bassMidi = bass;
     return c;
 }

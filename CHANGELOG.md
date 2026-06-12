@@ -21,6 +21,43 @@ converter.
 
 ## Timeline of what got built
 
+### Full Yamaha chord vocabulary + NTT voicing tables + RTR retrigger rules
+
+The "play any chord, voice it like a Yamaha" pass. One shared table
+(`Source/Midi/ChordTypes`) now defines all 34 Yamaha chord types — chord
+tones, required fingering tones, per-type chord scale, and 3rd/5th/7th role
+intervals — and drives everything:
+
+- **Recognition** (live router + symbol parser): subset matching with Yamaha
+  fingering rules replaces the old exact-match 18-template list. Optional
+  5ths, reduced voicings, full 9th/13th voicings, m7b5, 6ths, add9s and the
+  altered dominants all detect. Ambiguities resolve like a real arranger:
+  exact-coverage readings beat omitted-tone readings (D-F-A is Dm, not
+  F6-no-5th), then the bass note decides (C-E-G-A = C6 with C bass, Am7 with
+  A bass). Extended qualities now reach the engine instead of collapsing to
+  plain triads/7ths (`MidiRouter::toCadenzaQuality`).
+- **Voicing** (`PatternTransposer`): chord-role notes take the type's own
+  intervals (6th chords map 7th-role notes to the 6th, 7b5 bends the 5th,
+  7sus4 moves the 3rd to the 4th); color/phrase tones snap to the type's
+  chord scale (7(b9) phrases take the b9, half-whole diminished; maj7#11
+  takes Lydian; 7(b13) Mixolydian b13; 7aug whole-tone). FingeredOnBass
+  slash chords (C/E) drive bass-enabled (`bassOn`) parts to the named bass
+  note; other modes keep inversions on the root.
+- **RTR retrigger rules** (`StyleEngine::revoiceActiveNotes`): sustaining
+  notes across a chord change now follow each part's CASM rule — Stop cuts,
+  PitchShiftToRoot/RetriggerToRoot land on the new root, the rest
+  re-articulate at the recomputed pitch. This was flagged "unsupported" on
+  ~790 of 800 Genos2 styles; only NoteGenerator still falls back.
+- **Section length rounding** (`StyParser`): the last section's length (which
+  legitimately ends at the final note, not a bar line) rounds to the NEAREST
+  bar instead of truncating, and only a genuinely odd length (> 1/8 bar off)
+  warns. An ending whose last note stops at 3.7 bars is now 4 bars, not 3.
+
+Verified on the full user library (891 files: Genos2 presets, PSR-S950
+Balkan, two Dance packs): 100% playable, 880 fully clean, 0 parse failures,
+0 heuristic fallbacks. 31 test suites pass, with new coverage for extended
+recognition, altered-dominant scales, slash bass, and RTR warnings.
+
 ### v1.0.0 — Auto Fill-In, Fade Out, Release build + distributable package
 
 The "finished product" pass. Three things landed:

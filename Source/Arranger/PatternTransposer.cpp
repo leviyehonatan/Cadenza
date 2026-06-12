@@ -1,4 +1,5 @@
 #include "PatternTransposer.h"
+#include "../Midi/ChordTypes.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -83,26 +84,11 @@ std::optional<int> scaleModeForNtt(YamahaNtt ntt) noexcept
     }
 }
 
-// Scale to fit non-chord (color/phrase) tones to, chosen from the QUALITY of the
-// chord the player is holding. This is what makes a major-key source phrase sound
-// right over minor / dominant / etc. chords instead of keeping a clashing 3rd/7th.
-// Returns nullopt for qualities without a clean 7-note fit (dim/aug/power) so those
-// keep simple root transposition.
-std::optional<int> scaleModeForChordQuality(cadenza::midi::ChordQuality quality) noexcept
+// True when the chord type fits color tones to a chord scale (the full NTT
+// behavior); symmetric (dim/aug) and empty (power/single) types do not.
+bool hasChordScale(cadenza::midi::ChordQuality quality) noexcept
 {
-    using Q = cadenza::midi::ChordQuality;
-    switch (quality) {
-        case Q::Major:
-        case Q::Major7:
-        case Q::Sus2:
-        case Q::Sus4:        return 0;   // Ionian (major)
-        case Q::Dominant7:      return 5;   // Mixolydian (major with b7)
-        case Q::Minor:
-        case Q::Minor7:         return 4;   // Dorian (neutral minor for phrases)
-        case Q::MinorMajor7:    return 3;   // Melodic minor
-        case Q::HalfDiminished7:return 6;   // Locrian
-        default:                return std::nullopt;  // dim/aug/power/single
-    }
+    return cadenza::midi::chordTypeInfo(quality).colorFit == cadenza::midi::ColorFit::Scale;
 }
 
 int rootDeltaForPolicy(const TransposeContext& ctx, const YamahaChannelPolicy& policy) noexcept
@@ -178,6 +164,23 @@ int snapToScale(int pitch, int rootPc, int scaleMode) noexcept
     return snapToAllowed(pitch, allowed);
 }
 
+// Nearest pitch whose pitch class is in `mask` (pc bits relative to rootPc).
+int snapToMask(int pitch, int rootPc, std::uint16_t mask) noexcept
+{
+    bool allowed[12] = {};
+    for (int pc = 0; pc < 12; ++pc)
+        if (mask & cadenza::midi::pcBit(pc))
+            allowed[((rootPc + pc) % 12 + 12) % 12] = true;
+    return snapToAllowed(pitch, allowed);
+}
+
+// Snap a color tone to the chord scale of the played chord type (the NTT
+// chord-scale tables: e.g. 7(b9) offers phrases the b9, Lydian types the #11).
+int snapToChordScale(int pitch, int rootPc, cadenza::midi::ChordQuality quality) noexcept
+{
+    return snapToMask(pitch, rootPc, cadenza::midi::chordTypeInfo(quality).scaleTones);
+}
+
 std::optional<int> nearestPitchInScale(int pitch,
                                        int rootPc,
                                        int scaleMode,
@@ -187,63 +190,37 @@ std::optional<int> nearestPitchInScale(int pitch,
 }
 
 // Fit a (already root-shifted) color/phrase pitch to the chord the player holds:
-// a 7-note scale for tonal qualities, the actual chord tones for symmetric ones
-// (dim/aug), or unchanged for qualities with no harmonic info (power/single).
+// the chord scale of the played type (full NTT tables), the actual chord tones
+// for symmetric types (dim7/aug), or unchanged when there is no harmonic info
+// (power/single note).
 int fitColorToneToChord(int pitch, int rootPc, cadenza::midi::ChordQuality quality) noexcept
 {
-    using Q = cadenza::midi::ChordQuality;
-
-    if (auto mode = scaleModeForChordQuality(quality))
-        return snapToScale(pitch, rootPc, *mode);
-
-    bool allowed[12] = {};
-    auto add = [&](int interval) { allowed[((rootPc + interval) % 12 + 12) % 12] = true; };
-    switch (quality) {
-        case Q::Diminished:  add(0); add(3); add(6); add(9); break;  // dim7 tones
-        case Q::Diminished7: add(0); add(3); add(6); add(9); break;
-        case Q::Augmented:   add(0); add(4); add(8);          break;
-        default:             return std::clamp(pitch, 0, 127);       // power/single
+    const auto& info = cadenza::midi::chordTypeInfo(quality);
+    switch (info.colorFit) {
+        case cadenza::midi::ColorFit::Scale:      return snapToMask(pitch, rootPc, info.scaleTones);
+        case cadenza::midi::ColorFit::ChordTones: return snapToMask(pitch, rootPc, info.chordTones);
+        case cadenza::midi::ColorFit::Passthrough: break;
     }
-    return snapToAllowed(pitch, allowed);
+    return std::clamp(pitch, 0, 127);
 }
 }
 
 int chordIntervalForRole(cadenza::midi::ChordQuality quality, NoteRole role) noexcept
 {
-    using Q = cadenza::midi::ChordQuality;
-
-    // Default 3rds / 5ths / 7ths per quality
-    int third  = 4;  // major 3rd
-    int fifth  = 7;  // perfect 5th
-    int seventh = 10; // dominant 7th
-    bool hasSeventh = false;  // does THIS quality actually contain a 7th?
-
-    switch (quality) {
-        case Q::Major:           third = 4; fifth = 7; seventh = 11; hasSeventh = false; break;
-        case Q::Minor:           third = 3; fifth = 7; seventh = 10; hasSeventh = false; break;
-        case Q::Dominant7:       third = 4; fifth = 7; seventh = 10; hasSeventh = true;  break;
-        case Q::Major7:          third = 4; fifth = 7; seventh = 11; hasSeventh = true;  break;
-        case Q::Minor7:          third = 3; fifth = 7; seventh = 10; hasSeventh = true;  break;
-        case Q::MinorMajor7:     third = 3; fifth = 7; seventh = 11; hasSeventh = true;  break;
-        case Q::Diminished:      third = 3; fifth = 6; seventh = 9;  hasSeventh = false; break;
-        case Q::HalfDiminished7: third = 3; fifth = 6; seventh = 10; hasSeventh = true;  break;
-        case Q::Diminished7:     third = 3; fifth = 6; seventh = 9;  hasSeventh = true;  break;
-        case Q::Augmented:       third = 4; fifth = 8; seventh = 11; hasSeventh = false; break;
-        case Q::Sus2:            third = 2; fifth = 7; seventh = 10; hasSeventh = false; break;
-        case Q::Sus4:            third = 5; fifth = 7; seventh = 10; hasSeventh = false; break;
-        case Q::Power:           third = 0; fifth = 7; seventh = 0;  hasSeventh = false; break;
-        case Q::SingleNote:      third = 0; fifth = 0; seventh = 0;  hasSeventh = false; break;
-    }
+    // The per-type 3rd/5th/7th intervals come from the chord-type table
+    // (ChordTypes), which covers the full Yamaha set: a 6th chord maps the
+    // 7th-role note to its 6th, a 7b5 chord bends the 5th-role note to b5, etc.
+    const auto& info = cadenza::midi::chordTypeInfo(quality);
 
     switch (role) {
         case NoteRole::ChordRoot: return 0;
-        case NoteRole::Chord3:    return third;
-        case NoteRole::Chord5:    return fifth;
+        case NoteRole::Chord3:    return info.third;
+        case NoteRole::Chord5:    return info.fifth;
         // A 7th-role note over a plain triad would add a wrong extension (e.g. the
         // pad's recorded maj7 turning Am into an Am7-sounding C chord). When the
         // current chord has no 7th, fold that note back onto the root so the part
         // reinforces the triad instead of colouring it.
-        case NoteRole::Chord7:    return hasSeventh ? seventh : 0;
+        case NoteRole::Chord7:    return info.hasSeventh ? info.seventh : 0;
         default:                  return 0;
     }
 }
@@ -321,28 +298,18 @@ std::optional<int> transposeNote(const PatternNote& note, const TransposeContext
 
 int fitToChordTones(int pitch, int rootPc, cadenza::midi::ChordQuality quality) noexcept
 {
-    bool allowed[12] = {};
-    auto add = [&](int interval) { allowed[((rootPc + interval) % 12 + 12) % 12] = true; };
+    const auto& info = cadenza::midi::chordTypeInfo(quality);
 
-    using Q = cadenza::midi::ChordQuality;
-    switch (quality) {
-        case Q::Major:           add(0); add(4); add(7); add(11); break;
-        case Q::Minor:           add(0); add(3); add(7); add(10); break;
-        case Q::Dominant7:       add(0); add(4); add(7); add(10); break;
-        case Q::Major7:          add(0); add(4); add(7); add(11); break;
-        case Q::Minor7:          add(0); add(3); add(7); add(10); break;
-        case Q::MinorMajor7:     add(0); add(3); add(7); add(11); break;
-        case Q::Diminished:      add(0); add(3); add(6); add(9);  break;
-        case Q::HalfDiminished7: add(0); add(3); add(6); add(10); break;
-        case Q::Diminished7:     add(0); add(3); add(6); add(9);  break;
-        case Q::Augmented:       add(0); add(4); add(8);          break;
-        case Q::Sus2:            add(0); add(2); add(7);          break;
-        case Q::Sus4:            add(0); add(5); add(7);          break;
-        case Q::Power:
-        case Q::SingleNote:      add(0); add(7);                  break;
-    }
+    // Guitar-stroke shapes always include the type's 7th (a stroked C major
+    // shape keeps its recorded maj7 colour), and chords with no harmonic body
+    // (power/single) snap to root+5th.
+    std::uint16_t mask = info.chordTones;
+    if (info.seventh > 0)
+        mask = static_cast<std::uint16_t>(mask | cadenza::midi::pcBit(info.seventh));
+    if (mask == cadenza::midi::pcBit(0))
+        mask = static_cast<std::uint16_t>(mask | cadenza::midi::pcBit(7));
 
-    return snapToAllowed(pitch, allowed);
+    return snapToMask(pitch, rootPc, mask);
 }
 
 std::optional<int> transposeNote(const PatternNote& note,
@@ -383,8 +350,8 @@ std::optional<int> transposeNote(const PatternNote& note,
                 return applyPolicyNoteLimits(fitToChordTones(shifted, ctx.chord.rootPitchClass, ctx.chord.quality), *policy);
 
             if (policy->ntt == YamahaNtt::Arpeggio) {
-                if (auto nttMode = scaleModeForChordQuality(ctx.chord.quality))
-                    return applyPolicyNoteLimits(snapToScale(shifted, ctx.chord.rootPitchClass, *nttMode), *policy);
+                if (hasChordScale(ctx.chord.quality))
+                    return applyPolicyNoteLimits(snapToChordScale(shifted, ctx.chord.rootPitchClass, ctx.chord.quality), *policy);
                 return applyPolicyNoteLimits(fitColorToneToChord(shifted, ctx.chord.rootPitchClass, ctx.chord.quality), *policy);
             }
 
@@ -416,8 +383,19 @@ std::optional<int> transposeNote(const PatternNote& note,
         return pitchWithPolicyLimits(anchor + chordToneDelta, ctx, *policy);
     }
 
-    if (policy->bassOn && note.role == NoteRole::ChordRoot)
+    if (policy->bassOn && note.role == NoteRole::ChordRoot) {
+        // Slash chords: when the player names a bass note (FingeredOnBass,
+        // e.g. C/E), the bass-enabled part plays that note instead of the
+        // chord root — the Yamaha "on bass" behavior.
+        const int bassPc = ctx.chord.bassMidi >= 0 ? ((ctx.chord.bassMidi % 12) + 12) % 12 : -1;
+        if (bassPc >= 0 && bassPc != ctx.chord.rootPitchClass) {
+            const int sourcePc = ((note.pitch % 12) + 12) % 12;
+            int delta = ((bassPc - sourcePc) % 12 + 12) % 12;
+            if (delta > 6) delta -= 12;
+            return pitchWithPolicyLimits(note.pitch + delta, ctx, *policy);
+        }
         return transposeWithPolicyLimits(note, ctx, *policy);
+    }
 
     if (policy->ntr == YamahaNtr::RootFixed && policy->ntt == YamahaNtt::Chord)
         return transposeWithPolicyLimits(note, ctx, *policy);
@@ -439,8 +417,8 @@ std::optional<int> transposeNote(const PatternNote& note,
         if (policy->ntt == YamahaNtt::Arpeggio) {
             if (isChordRole(note.role))
                 return transposeWithPolicyLimits(note, ctx, *policy);
-            if (auto nttMode = scaleModeForChordQuality(ctx.chord.quality))
-                return applyPolicyNoteLimits(snapToScale(shifted, ctx.chord.rootPitchClass, *nttMode), *policy);
+            if (hasChordScale(ctx.chord.quality))
+                return applyPolicyNoteLimits(snapToChordScale(shifted, ctx.chord.rootPitchClass, ctx.chord.quality), *policy);
             return transposeWithPolicyLimits(note, ctx, *policy);
         }
 

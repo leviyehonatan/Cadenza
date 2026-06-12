@@ -7,8 +7,9 @@
 //   * Split incoming notes between "chord zone" (below split point) and
 //     "melody zone" (above), with Full-Keyboard modes routing everything
 //     as chord input.
-//   * Recognise chords across 18 templates including jazz extensions and
-//     reduced 2-note voicings (single-finger arranger chords).
+//   * Recognise chords across the full Yamaha chord-type table (ChordTypes,
+//     34 types) with Yamaha fingering rules: optional 5ths, reduced 2-note
+//     voicings, and bass-note priority for ambiguous sets (C6 vs Am7).
 //   * Slash-chord detection (FingeredOnBass mode -> "C/E", "G7/B", etc.).
 //   * Syncro Start/Stop events fired when the first chord note arrives
 //     and when the last one is released.

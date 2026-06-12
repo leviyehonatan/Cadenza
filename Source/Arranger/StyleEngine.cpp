@@ -560,18 +560,48 @@ void StyleEngine::revoiceActiveNotes(const Style& style)
     // shift held pads/strings without machine-gunning short percussive hits.
     const int sustainThreshold = std::max(1, style.ticksPerBeat);
 
+    // The pitch class the chord root actually sounds at (global transpose applied),
+    // for the Yamaha "...ToRoot" retrigger rules.
+    const int soundingRootPc = ((ctx.chord.rootPitchClass + ctx.globalTranspose) % 12 + 12) % 12;
+
     for (auto& a : m_active) {
         if (a.part == nullptr || a.src == nullptr) continue;
         if (a.part->percussion || playbackChannelForPart(*a.part) == 10) continue;  // never re-pitch drums
         if (a.src->role == NoteRole::Absolute) continue;                // fixed parts don't follow
         if (a.ticksRemaining < sustainThreshold) continue;              // leave short notes alone
 
-        const auto maybe = playbackNoteForPart(*a.part, *a.src, ctx);
-        if (!maybe || *maybe == a.note) continue;
+        // Yamaha RTR: what this part does with notes sustaining across a chord
+        // change. Stop cuts them; the ToRoot rules land on the new root; the
+        // others re-articulate at the recomputed pitch. (PitchShift/Retrigger
+        // both retrigger here: MIDI synths can't glide a sounding note.)
+        const auto rule = a.part->yamahaPolicy
+            ? a.part->yamahaPolicy->retriggerRule
+            : YamahaRetriggerRule::Unknown;
+
+        if (rule == YamahaRetriggerRule::Stop) {
+            m_engine.noteOff(a.channel, a.note);
+            a.ticksRemaining = 0;   // pruned by the next advanceActiveNotes
+            continue;
+        }
+
+        std::optional<int> target;
+        if (rule == YamahaRetriggerRule::PitchShiftToRoot
+            || rule == YamahaRetriggerRule::RetriggerToRoot) {
+            // Nearest pitch to the sounding note whose pitch class is the root.
+            int delta = ((soundingRootPc - (a.note % 12)) % 12 + 12) % 12;
+            if (delta > 6) delta -= 12;
+            const int candidate = a.note + delta;
+            if (candidate >= 0 && candidate <= 127)
+                target = candidate;
+        } else {
+            target = playbackNoteForPart(*a.part, *a.src, ctx);
+        }
+
+        if (!target || *target == a.note) continue;
 
         m_engine.noteOff(a.channel, a.note);
-        m_engine.noteOn(a.channel, *maybe, a.velocity);
-        a.note = *maybe;
+        m_engine.noteOn(a.channel, *target, a.velocity);
+        a.note = *target;
     }
 }
 

@@ -136,8 +136,9 @@ public:
 
 private:
     // Translate arranger::ChordRecognitionResult into the cadenza::midi::Chord
-    // struct already consumed by StyleEngine.
-    static std::optional<Chord> toCadenzaChord(const std::optional<arranger::ChordRecognitionResult>& result);
+    // struct already consumed by StyleEngine. Non-static: the slash-chord bass
+    // is only published in FingeredOnBass mode (needs the router's mode).
+    std::optional<Chord> toCadenzaChord(const std::optional<arranger::ChordRecognitionResult>& result) const;
     static ChordQuality toCadenzaQuality(const std::string& s);
 
     juce::OwnedArray<juce::MidiInput> m_inputs;

@@ -1,4 +1,5 @@
 #include "MidiRouter.h"
+#include "ChordTypes.h"
 
 namespace cadenza::midi
 {
@@ -300,7 +301,7 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
     }
 }
 
-std::optional<Chord> MidiRouter::toCadenzaChord(const std::optional<arranger::ChordRecognitionResult>& result)
+std::optional<Chord> MidiRouter::toCadenzaChord(const std::optional<arranger::ChordRecognitionResult>& result) const
 {
     if (!result.has_value()) return std::nullopt;
 
@@ -309,9 +310,11 @@ std::optional<Chord> MidiRouter::toCadenzaChord(const std::optional<arranger::Ch
     c.quality = toCadenzaQuality(result->quality);
 
     // Approximate bassMidi from the bass pitch class, parked in the middle octave.
-    // StyleEngine + PatternTransposer only care about the pitch class for chord
-    // roles, but Chord::bassMidi != -1 lets toString() print slash chords correctly.
-    if (result->bass.has_value()) {
+    // Only FingeredOnBass mode names a bass note (slash chords): there the
+    // arranger's bass part plays it. In the other fingered modes an inversion is
+    // just a voicing — the bass stays on the root, so no bass note is published.
+    if (result->bass.has_value()
+        && m_router.state().chordMode == arranger::ChordDetectionMode::FingeredOnBass) {
         c.bassMidi = static_cast<int>(*result->bass) + 36; // octave 1 in MIDI numbering
     } else {
         c.bassMidi = -1;
@@ -321,18 +324,16 @@ std::optional<Chord> MidiRouter::toCadenzaChord(const std::optional<arranger::Ch
 
 ChordQuality MidiRouter::toCadenzaQuality(const std::string& s)
 {
-    // Map ArrangerMidiRouter's string qualities into the existing enum used by
-    // StyleEngine. Extensions (7(9), 7(b9), etc.) collapse to Dominant7 for now.
-    if (s == "major")  return ChordQuality::Major;
-    if (s == "m")      return ChordQuality::Minor;
-    if (s == "maj7")   return ChordQuality::Major7;
-    if (s == "m7")     return ChordQuality::Minor7;
-    if (s == "dim")    return ChordQuality::Diminished;
-    if (s == "aug")    return ChordQuality::Augmented;
-    if (s == "sus2")   return ChordQuality::Sus2;
-    if (s == "sus4")   return ChordQuality::Sus4;
-    // Anything starting with "7" (incl. 7(9), 7(#11), 7(13), 7(b9), 7(#9)).
+    // ArrangerMidiRouter's quality strings are the chord-type table suffixes
+    // (with "major" for the empty suffix), so the table is the single mapping.
+    if (s == "major") return ChordQuality::Major;
+    const auto* table = chordTypeTable();
+    for (int i = 0; i < chordTypeCount(); ++i)
+        if (s == table[i].suffix)
+            return table[i].quality;
+    // Unknown string: best-effort fallbacks.
     if (!s.empty() && s.front() == '7') return ChordQuality::Dominant7;
+    if (!s.empty() && s.front() == 'm') return ChordQuality::Minor;
     return ChordQuality::Major;
 }
 }

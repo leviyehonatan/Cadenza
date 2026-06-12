@@ -101,6 +101,83 @@ void slashChords()
                std::string("slash chord, got: ") + s);
     }
 }
+// The full Yamaha chord-type set: extended voicings recognise as themselves
+// instead of collapsing or failing, and the classic ambiguities (C6 vs Am7)
+// resolve by the bass note like a real arranger.
+void extendedChordTypes()
+{
+    auto c = recognise({ 60, 64, 67, 69 });        // C E G A, C in bass
+    expect(c && c->rootPitchClass == 0 && c->quality == ChordQuality::Major6,
+           "C6 with C bass is C6");
+
+    c = recognise({ 57, 60, 64, 67 });             // A C E G, A in bass
+    expect(c && c->rootPitchClass == 9 && c->quality == ChordQuality::Minor7,
+           "same notes with A bass are Am7");
+
+    c = recognise({ 60, 63, 67, 69 });             // C Eb G A
+    expect(c && c->rootPitchClass == 0 && c->quality == ChordQuality::Minor6,
+           "Cm6 with C bass is Cm6");
+
+    c = recognise({ 60, 62, 64, 67, 70 });         // full C9 with the 5th
+    expect(c && c->rootPitchClass == 0 && c->quality == ChordQuality::Dominant9,
+           "full C9 voicing recognised");
+
+    c = recognise({ 60, 62, 64, 67, 71 });         // C D E G B
+    expect(c && c->rootPitchClass == 0 && c->quality == ChordQuality::Major9,
+           "Cmaj9 recognised");
+
+    c = recognise({ 60, 61, 64, 70 });             // C Db E Bb (no 5th)
+    expect(c && c->rootPitchClass == 0 && c->quality == ChordQuality::Dominant7b9,
+           "C7(b9) without 5th recognised");
+
+    c = recognise({ 60, 64, 69, 70 });             // C E A Bb
+    expect(c && c->rootPitchClass == 0 && c->quality == ChordQuality::Dominant13,
+           "C7(13) without 5th recognised");
+
+    c = recognise({ 60, 65, 67, 70 });             // C F G Bb
+    expect(c && c->rootPitchClass == 0 && c->quality == ChordQuality::Dominant7sus4,
+           "C7sus4 recognised");
+
+    c = recognise({ 60, 64, 67, 71, 66 });         // C E F# G B
+    expect(c && c->rootPitchClass == 0 && c->quality == ChordQuality::Major7s11,
+           "Cmaj7#11 recognised");
+
+    c = recognise({ 60, 62, 64 });                 // C D E (no 5th)
+    expect(c && c->rootPitchClass == 0 && c->quality == ChordQuality::MajorAdd9,
+           "Cadd9 without 5th recognised");
+
+    c = recognise({ 60, 63, 66, 70 });             // C Eb Gb Bb
+    expect(c && c->rootPitchClass == 0 && c->quality == ChordQuality::HalfDiminished7,
+           "Cm7b5 recognised");
+
+    // A maj7 may omit its 5th (Yamaha fingering: 1+3+7).
+    c = recognise({ 60, 64, 71 });
+    expect(c && c->rootPitchClass == 0 && c->quality == ChordQuality::Major7,
+           "Cmaj7 without 5th recognised");
+}
+
+void extendedSuffixRoundTrips()
+{
+    // toString -> parseChordSymbol is stable for every new chord type.
+    const ChordQuality qualities[] = {
+        ChordQuality::Major6, ChordQuality::Major69, ChordQuality::MajorAdd9,
+        ChordQuality::Major9, ChordQuality::Major7s11, ChordQuality::AugmentedMajor7,
+        ChordQuality::Augmented7, ChordQuality::Minor6, ChordQuality::Minor9,
+        ChordQuality::Minor11, ChordQuality::MinorAdd9, ChordQuality::MinorMajor9,
+        ChordQuality::Dominant9, ChordQuality::Dominant13, ChordQuality::Dominant7sus4,
+        ChordQuality::Dominant7b5, ChordQuality::Dominant7s11, ChordQuality::Dominant7b9,
+        ChordQuality::Dominant7s9, ChordQuality::Dominant7b13,
+    };
+    for (auto q : qualities) {
+        cadenza::midi::Chord chord;
+        chord.rootPitchClass = 0;
+        chord.quality = q;
+        const auto parsed = parseChordSymbol(chord.toString());
+        expect(parsed && parsed->quality == q && parsed->rootPitchClass == 0,
+               "suffix round-trip: " + chord.toString());
+    }
+}
+
 void parseSymbols()
 {
     auto c = parseChordSymbol("C");
@@ -127,8 +204,8 @@ void parseSymbols()
     c = parseChordSymbol("Dsus4");
     expect(c && c->rootPitchClass == 2 && c->quality == ChordQuality::Sus4, "parse Dsus4");
 
-    c = parseChordSymbol("C9");   // extended dominant collapses to Dominant7
-    expect(c && c->quality == ChordQuality::Dominant7, "parse C9 -> Dominant7");
+    c = parseChordSymbol("C9");   // extended dominant keeps its 9th
+    expect(c && c->quality == ChordQuality::Dominant9, "parse C9 -> Dominant9");
 
     // slash bass preserved for display
     c = parseChordSymbol("C/E");
@@ -154,6 +231,8 @@ int main()
     diminishedAndAugmented();
     chordToString();
     slashChords();
+    extendedChordTypes();
+    extendedSuffixRoundTrips();
     parseSymbols();
 
     if (failures != 0) return EXIT_FAILURE;

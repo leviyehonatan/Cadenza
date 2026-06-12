@@ -456,6 +456,76 @@ void drumsStayAbsoluteWithPolicy()
 
     expect(transposeNote(n, ctxFor(5, ChordQuality::Major), &policy).value() == 36, "drum absolute stays unchanged with policy");
 }
+
+// --- full Yamaha chord-type (NTT table) behaviors ---
+
+void extendedQualitiesVoiceChordRoles()
+{
+    // 6th chords map the 7th-role note to the 6th (A over C6), not to the root.
+    auto seventh = noteOf(NoteRole::Chord7, 71);   // B in the source Cmaj7 shape
+    expect(transposeNote(seventh, ctxFor(0, ChordQuality::Major6)).value() == 69,
+           "Chord7 over C6 plays the 6th (A)");
+    expect(transposeNote(seventh, ctxFor(0, ChordQuality::Minor6)).value() == 69,
+           "Chord7 over Cm6 plays the 6th (A)");
+
+    // 7b5 bends the 5th-role note to the b5.
+    auto fifth = noteOf(NoteRole::Chord5, 67);     // G in the source shape
+    expect(transposeNote(fifth, ctxFor(0, ChordQuality::Dominant7b5)).value() == 66,
+           "Chord5 over C7b5 plays the b5 (Gb)");
+
+    // Augmented dominant raises the 5th.
+    expect(transposeNote(fifth, ctxFor(0, ChordQuality::Augmented7)).value() == 68,
+           "Chord5 over C7aug plays the #5 (G#)");
+
+    // 7sus4 moves the 3rd-role note to the 4th.
+    auto third = noteOf(NoteRole::Chord3, 64);     // E in the source shape
+    expect(transposeNote(third, ctxFor(0, ChordQuality::Dominant7sus4)).value() == 65,
+           "Chord3 over C7sus4 plays the 4th (F)");
+}
+
+void alteredDominantScalesColorTones()
+{
+    // The 9th (D) as a color tone over C7(b9) must take the b9 (Db), not the
+    // natural 9 — the point of the per-type NTT chord scales.
+    auto nine = noteOf(NoteRole::ChordColor, 62);
+    expect(transposeNote(nine, ctxFor(0, ChordQuality::Dominant7b9)).value() == 61,
+           "color D over C7(b9) fits the b9 (Db)");
+
+    // Over C7(b13) the 13th (A) folds to the b13 (Ab).
+    auto thirteen = noteOf(NoteRole::ChordColor, 69);
+    expect(transposeNote(thirteen, ctxFor(0, ChordQuality::Dominant7b13)).value() == 68,
+           "color A over C7(b13) fits the b13 (Ab)");
+
+    // Lydian types exclude the natural 4: F color over Cmaj7#11 must move off
+    // F (E and F# are equidistant; ties resolve down, to E).
+    auto eleven = noteOf(NoteRole::ChordColor, 65);
+    expect(transposeNote(eleven, ctxFor(0, ChordQuality::Major7s11)).value() == 64,
+           "color F over Cmaj7#11 leaves the natural 4 (resolves to E)");
+}
+
+void slashBassFollowsNamedBassNote()
+{
+    // FingeredOnBass slash chords: a bass-enabled part's root note plays the
+    // named bass (C/E -> E), other parts keep the chord root.
+    auto bassRoot = noteOf(NoteRole::ChordRoot, 36);   // C1 in the source shape
+    auto bass = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Melody);
+    bass.bassOn = true;
+
+    auto ctx = ctxFor(0, ChordQuality::Major);
+    ctx.chord.bassMidi = 40;   // E named as the bass note (C/E)
+    expect(transposeNote(bassRoot, ctx, &bass).value() == 40,
+           "bassOn root over C/E plays E");
+
+    // Without a named bass the root behavior is unchanged.
+    auto plain = ctxFor(0, ChordQuality::Major);
+    expect(transposeNote(bassRoot, plain, &bass).value() == 36,
+           "bassOn root over plain C stays C");
+
+    // Non-bass parts ignore the slash bass.
+    auto chordRoot = noteOf(NoteRole::ChordRoot, 60);
+    expect(transposeNote(chordRoot, ctx).value() == 60,
+           "non-bass root over C/E keeps the chord root C");
+}
 }
 
 int main()
@@ -491,6 +561,9 @@ int main()
     rootShiftedGuitarAnchorDoesNotChangeOtherPolicies();
     fallbackPolicyWithRolesIsHonoured();
     drumsStayAbsoluteWithPolicy();
+    extendedQualitiesVoiceChordRoles();
+    alteredDominantScalesColorTones();
+    slashBassFollowsNamedBassNote();
 
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "All PatternTransposer tests passed\n";

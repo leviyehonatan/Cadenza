@@ -1,4 +1,5 @@
 #include "ArrangerMidiRouter.h"
+#include "ChordTypes.h"
 
 #include <algorithm>
 #include <array>
@@ -9,40 +10,17 @@ namespace arranger {
 
 namespace {
 
-struct ChordTemplate {
-    std::string_view quality;
-    std::vector<std::uint8_t> intervals;
-};
-
 struct TemplateMatch {
     std::uint8_t root = 0;
     std::string_view quality;
 };
 
-const std::array<ChordTemplate, 18>& chordTemplates()
+// Display string for a chord type row. The legacy router strings are kept so
+// existing display/tests stay stable ("major" instead of an empty suffix).
+std::string_view qualityNameForRow(const cadenza::midi::ChordTypeInfo& row) noexcept
 {
-    static const std::array<ChordTemplate, 18> templates{{
-        {"major", {0, 4, 7}},
-        {"m", {0, 3, 7}},
-        {"7", {0, 4, 7, 10}},
-        {"maj7", {0, 4, 7, 11}},
-        {"dim", {0, 3, 6}},
-        {"aug", {0, 4, 8}},
-        {"sus4", {0, 5, 7}},
-        {"sus2", {0, 2, 7}},
-        {"m7", {0, 3, 7, 10}},
-        {"7", {0, 4, 10}},
-        {"7(9)", {0, 2, 4, 10}},
-        {"7(#11)", {0, 4, 6, 10}},
-        {"7(13)", {0, 4, 9, 10}},
-        {"7(b9)", {0, 1, 4, 10}},
-        {"7(#9)", {0, 3, 4, 10}},
-        {"sus4", {0, 5}},
-        {"sus2", {0, 2}},
-        {"m7", {0, 3, 10}},
-    }};
-
-    return templates;
+    return row.quality == cadenza::midi::ChordQuality::Major ? std::string_view{"major"}
+                                                             : std::string_view{row.suffix};
 }
 
 std::string_view pitchClassName(std::uint8_t pitchClass) noexcept
@@ -59,66 +37,30 @@ std::uint8_t pitchClass(std::uint8_t note) noexcept
     return static_cast<std::uint8_t>(note % 12);
 }
 
-std::vector<std::uint8_t> normalizedIntervals(
-    const std::vector<std::uint8_t>& pitchClasses,
-    std::uint8_t root)
-{
-    std::vector<std::uint8_t> intervals;
-    intervals.reserve(pitchClasses.size());
-
-    for (const auto pitchClassValue : pitchClasses) {
-        intervals.push_back(static_cast<std::uint8_t>((pitchClassValue + 12u - root) % 12u));
-    }
-
-    std::sort(intervals.begin(), intervals.end());
-    intervals.erase(std::unique(intervals.begin(), intervals.end()), intervals.end());
-    return intervals;
-}
-
-std::optional<std::string_view> findTemplateQuality(const std::vector<std::uint8_t>& intervals)
-{
-    const auto& templates = chordTemplates();
-    const auto match = std::find_if(
-        templates.begin(),
-        templates.end(),
-        [&](const ChordTemplate& chordTemplate) {
-            return chordTemplate.intervals == intervals;
-        });
-
-    if (match == templates.end()) {
-        return std::nullopt;
-    }
-
-    return match->quality;
-}
-
-std::optional<TemplateMatch> matchChordTemplate(const std::vector<std::uint8_t>& notes)
+// Yamaha-style chord matching over the full chord-type table (see ChordTypes).
+// `minChordTones` filters out dyad/single templates in modes that demand full
+// fingering (Fingered needs 3+ distinct pitch classes, so Power/SingleNote
+// never fire there — matching the previous router's behavior).
+std::optional<TemplateMatch> matchChordTemplate(const std::vector<std::uint8_t>& notes,
+                                                std::uint8_t bassPc,
+                                                int minChordTones)
 {
     if (notes.empty()) {
         return std::nullopt;
     }
 
-    std::vector<std::uint8_t> activePitchClasses;
-    activePitchClasses.reserve(notes.size());
-
+    std::uint16_t played = 0;
     for (const auto note : notes) {
-        activePitchClasses.push_back(pitchClass(note));
+        played = static_cast<std::uint16_t>(played | cadenza::midi::pcBit(pitchClass(note)));
     }
 
-    std::sort(activePitchClasses.begin(), activePitchClasses.end());
-    activePitchClasses.erase(
-        std::unique(activePitchClasses.begin(), activePitchClasses.end()),
-        activePitchClasses.end());
-
-    for (std::uint8_t root = 0; root < 12; ++root) {
-        const auto intervals = normalizedIntervals(activePitchClasses, root);
-        const auto quality = findTemplateQuality(intervals);
-        if (quality.has_value()) {
-            return TemplateMatch{root, *quality};
-        }
+    const auto match = cadenza::midi::matchChordMask(played, bassPc, minChordTones);
+    if (!match.has_value()) {
+        return std::nullopt;
     }
 
-    return std::nullopt;
+    return TemplateMatch{static_cast<std::uint8_t>(match->root),
+                         qualityNameForRow(*match->info)};
 }
 
 std::size_t uniquePitchClassCount(const std::vector<std::uint8_t>& notes)
@@ -319,12 +261,14 @@ std::optional<ChordRecognitionResult> ArrangerMidiRouter::detectChord() const
     }
 
     const auto bassPitchClass = pitchClass(activeNotes.front());
-    auto match = matchChordTemplate(activeNotes);
+    const int minTones = static_cast<int>(minPitchClassesForMode(state_.chordMode));
+    auto match = matchChordTemplate(activeNotes, bassPitchClass, minTones);
 
     if (state_.chordMode == ChordDetectionMode::FingeredOnBass && activeNotes.size() > 1) {
         auto chordOnlyNotes = activeNotes;
         chordOnlyNotes.erase(chordOnlyNotes.begin());
-        const auto chordOnlyMatch = matchChordTemplate(chordOnlyNotes);
+        const auto chordOnlyMatch = matchChordTemplate(
+            chordOnlyNotes, pitchClass(chordOnlyNotes.front()), minTones);
 
         if (uniquePitchClassCount(chordOnlyNotes) >= 3 &&
             chordOnlyMatch.has_value() &&

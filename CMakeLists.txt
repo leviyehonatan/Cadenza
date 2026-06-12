@@ -36,6 +36,7 @@ add_library(cadenza_core STATIC
     Source/BridgeRouter.cpp
     Source/Json/Json.cpp
     Source/Midi/ChordRecognizer.cpp
+    Source/Midi/ChordTypes.cpp
     Source/Midi/ArrangerMidiRouter.cpp
     Source/Midi/LiveMelodyVoice.cpp
     Source/Midi/RightHand.cpp
