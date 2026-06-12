@@ -89,8 +89,15 @@ public:
                 // Highest-quality sample interpolation on every channel: smoother,
                 // less "digital"/aliased tone than the 4th-order default.
                 fluid_synth_set_interp_method(m_synth, -1, FLUID_INTERP_HIGHEST);
+
+                // RHY2 (synth ch 8) must be a DRUM-type channel like ch 9.
+                // synth.drums-channel.active only covers channel 9; on a melodic
+                // channel the bank-128 kit select fails and FluidSynth silently
+                // falls back to a bank-0 melodic voice — sub-rhythm hits played
+                // an English Horn instead of a kit.
+                fluid_synth_set_channel_type(m_synth, kDrumChannel2, CHANNEL_TYPE_DRUM);
             }
-            juce::Logger::writeToLog("[Cadenza] FluidSynth GM drum channel active: synth channel 9; reverb+chorus on; interp=highest; poly=512");
+            juce::Logger::writeToLog("[Cadenza] FluidSynth drum channels active: synth channels 9 (RHY1) + 8 (RHY2); reverb+chorus on; interp=highest; poly=512");
         }
     }
 
@@ -204,6 +211,10 @@ public:
             m_soundFontId = -1;
         }
         m_soundFontId = fluid_synth_sfload(m_synth, path.c_str(), 1);
+        if (m_soundFontId >= 0) {
+            // sfload(reset=1) reprograms every channel; keep RHY2 a drum channel.
+            fluid_synth_set_channel_type(m_synth, kDrumChannel2, CHANNEL_TYPE_DRUM);
+        }
         return m_soundFontId >= 0;
     }
 

@@ -560,10 +560,6 @@ void StyleEngine::revoiceActiveNotes(const Style& style)
     // shift held pads/strings without machine-gunning short percussive hits.
     const int sustainThreshold = std::max(1, style.ticksPerBeat);
 
-    // The pitch class the chord root actually sounds at (global transpose applied),
-    // for the Yamaha "...ToRoot" retrigger rules.
-    const int soundingRootPc = ((ctx.chord.rootPitchClass + ctx.globalTranspose) % 12 + 12) % 12;
-
     for (auto& a : m_active) {
         if (a.part == nullptr || a.src == nullptr) continue;
         if (a.part->percussion || playbackChannelForPart(*a.part) == 10) continue;  // never re-pitch drums
@@ -587,12 +583,13 @@ void StyleEngine::revoiceActiveNotes(const Style& style)
         std::optional<int> target;
         if (rule == YamahaRetriggerRule::PitchShiftToRoot
             || rule == YamahaRetriggerRule::RetriggerToRoot) {
-            // Nearest pitch to the sounding note whose pitch class is the root.
-            int delta = ((soundingRootPc - (a.note % 12)) % 12 + 12) % 12;
-            if (delta > 6) delta -= 12;
-            const int candidate = a.note + delta;
-            if (candidate >= 0 && candidate <= 127)
-                target = candidate;
+            // Re-voice as if the source note had been a root-role note, through
+            // the normal playback path — so the bass keeps its low-octave
+            // anchor, policy note limits and per-part octave offsets apply, and
+            // the part doesn't drift register across chord changes.
+            PatternNote asRoot = *a.src;
+            asRoot.role = NoteRole::ChordRoot;
+            target = playbackNoteForPart(*a.part, asRoot, ctx);
         } else {
             target = playbackNoteForPart(*a.part, *a.src, ctx);
         }
