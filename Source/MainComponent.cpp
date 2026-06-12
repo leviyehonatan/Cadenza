@@ -191,6 +191,20 @@ MainComponent::MainComponent()
         });
     });
 
+    // Style Recorder capture (MIDI thread): audition the played note on the
+    // target part's channel, and write it into the take while armed.
+    m_midi.setCaptureCallback([this](int note, int velocity, bool isOn) {
+        const auto& info = cadenza::arranger::recorderPartInfo(m_recorder.targetPart());
+        if (isOn) m_audio.noteOn(info.midiChannel, note, velocity);
+        else      m_audio.noteOff(info.midiChannel, note);
+
+        if (m_recordArmed.load() && m_audio.transport().playing()) {
+            const int tick = m_audio.transport().positionTickInt();
+            if (isOn) m_recorder.noteOn(note, velocity, tick);
+            else      m_recorder.noteOff(note, tick);
+        }
+    });
+
     // Syncro Start / Stop: when the first chord-zone note arrives, start playback;
     // when the last one is released, stop. This is what makes the "S.Start" UI pill
     // meaningful — playing a chord left-hand triggers the backing band automatically.
@@ -1295,6 +1309,177 @@ void MainComponent::queueSongSectionForBar(int bar)
         m_styleEngine.requestSection(step.section, false, {});
 }
 
+// ---- Style Recorder ----------------------------------------------------
+
+juce::String MainComponent::recorderStatusText() const
+{
+    const auto& info = cadenza::arranger::recorderPartInfo(m_recorder.targetPart());
+    const auto cfg = m_recorder.config();
+    return juce::String(cfg.bars) + " bars at " + juce::String(cfg.tempo)
+         + " BPM, part: " + info.label;
+}
+
+void MainComponent::recorderNewSession(int bars)
+{
+    if (m_songModeActive) setSongMode(false);
+    if (m_state.playing()) togglePlayback();   // stop cleanly first
+
+    cadenza::arranger::RecorderConfig cfg;
+    cfg.name = "My Style";
+    cfg.tempo = m_state.bpm();
+    cfg.beatsPerBar = m_audio.transport().beatsPerBar();
+    cfg.beatUnit = m_audio.transport().beatUnit();
+    cfg.ticksPerBeat = m_audio.transport().ticksPerBeat();
+    cfg.bars = std::max(1, bars);
+    m_recorder.startSession(cfg);
+    m_recordArmed.store(false);
+
+    m_styleEngine.setStyle(m_recorder.snapshotStyle());
+    m_styleEngine.setSection("mainA");
+    m_currentMain = "mainA";
+    m_audio.setMetronomeEnabled(true);
+    m_midi.setCaptureMode(true);   // whole keyboard plays/records the target part
+    updateNativePanelStyle();
+    if (m_panel)
+        m_panel->setRecorderState(true, false,
+            recorderStatusText() + " - press Record, then play");
+    juce::Logger::writeToLog("[Cadenza] Style Recorder: new session, "
+                             + juce::String(cfg.bars) + " bars at "
+                             + juce::String(cfg.tempo) + " BPM");
+}
+
+void MainComponent::recorderSetPart(int partIndex)
+{
+    m_recorder.setTargetPart(cadenza::arranger::recorderPartInfo(partIndex).part);
+    if (m_recorder.sessionActive() && m_panel)
+        m_panel->setRecorderState(true, m_recordArmed.load(),
+            recorderStatusText() + " - press Record, then play");
+}
+
+void MainComponent::recorderArm(bool on)
+{
+    if (!m_recorder.sessionActive()) {
+        if (m_panel) m_panel->setRecorderState(false, false, "Press New to record your own style");
+        return;
+    }
+
+    if (on) {
+        m_recorder.discardTake();
+        m_recordArmed.store(true);
+        if (!m_state.playing()) togglePlayback();   // loop the section + metronome
+        if (m_panel)
+            m_panel->setRecorderState(true, true,
+                "RECORDING " + juce::String(cadenza::arranger::recorderPartInfo(
+                                   m_recorder.targetPart()).label)
+                + " - the loop overdubs; click Record again to keep the take");
+    } else {
+        m_recordArmed.store(false);
+        const bool added = m_recorder.commitTake();
+        recorderRefreshStyle();
+        if (m_panel)
+            m_panel->setRecorderState(true, false,
+                added ? juce::String("Take kept - pick another part, Record again, or Save")
+                      : juce::String("No notes captured - press Record and play"));
+        juce::Logger::writeToLog(juce::String("[Cadenza] Style Recorder: take ")
+                                 + (added ? "committed" : "empty"));
+    }
+}
+
+void MainComponent::recorderRefreshStyle()
+{
+    if (!m_recorder.sessionActive()) return;
+
+    m_styleEngine.setStyle(m_recorder.snapshotStyle());
+    updateNativePanelStyle();
+    applyMixerState();
+
+    // While playing, the style swap lands on the next audio block; refresh the
+    // panel once more shortly after so new mixer strips appear.
+    juce::Component::SafePointer<MainComponent> safe(this);
+    juce::Timer::callAfterDelay(150, [safe] {
+        if (auto* self = safe.getComponent(); self && self->m_recorder.sessionActive()) {
+            self->updateNativePanelStyle();
+            self->applyMixerState();
+        }
+    });
+}
+
+void MainComponent::recorderClearPart()
+{
+    if (!m_recorder.sessionActive()) return;
+    const bool removed = m_recorder.clearTargetPart();
+    if (removed) recorderRefreshStyle();
+    if (m_panel)
+        m_panel->setRecorderState(true, false,
+            removed ? juce::String("Cleared ")
+                          + cadenza::arranger::recorderPartInfo(m_recorder.targetPart()).label
+                    : juce::String("Nothing recorded on this part yet"));
+}
+
+void MainComponent::recorderSave()
+{
+    if (!m_recorder.sessionActive()) return;
+
+    const auto defaultDir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+    m_recSaveChooser = std::make_unique<juce::FileChooser>(
+        "Save your style (.cstyle)",
+        defaultDir.getChildFile("My Style.cstyle"), "*.cstyle");
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    m_recSaveChooser->launchAsync(
+        juce::FileBrowserComponent::saveMode
+            | juce::FileBrowserComponent::canSelectFiles
+            | juce::FileBrowserComponent::warnAboutOverwriting,
+        [safe](const juce::FileChooser& chooser) {
+            auto* self = safe.getComponent();
+            if (self == nullptr) return;
+
+            auto file = chooser.getResult();
+            if (file == juce::File{}) { self->m_recSaveChooser.reset(); return; }
+            if (!file.hasFileExtension("cstyle"))
+                file = file.withFileExtension("cstyle");
+
+            self->m_recorder.setStyleName(
+                file.getFileNameWithoutExtension().toStdString());
+            const bool ok = self->m_recorder.save(file.getFullPathName().toStdString());
+
+            if (ok) {
+                self->recorderRefreshStyle();   // pick up the new name
+                if (self->m_settings) {         // come back to this style next launch
+                    auto& st = self->m_settings->state();
+                    st.lastStyleId = self->m_recorder.snapshotStyle()->id;
+                    st.lastStylePath = file.getFullPathName().toStdString();
+                    self->saveSettings();
+                }
+                juce::Logger::writeToLog("[Cadenza] Style Recorder: saved "
+                                         + file.getFullPathName());
+            }
+            if (self->m_panel)
+                self->m_panel->setRecorderState(true, false,
+                    ok ? "Saved " + file.getFileName() + " - keep recording or Exit"
+                       : "SAVE FAILED: " + file.getFullPathName());
+            self->m_recSaveChooser.reset();
+        });
+}
+
+void MainComponent::recorderExit()
+{
+    m_recordArmed.store(false);
+    m_midi.setCaptureMode(false);
+    m_audio.setMetronomeEnabled(false);
+    if (m_state.playing()) togglePlayback();
+    m_recorder.endSession();
+
+    if (m_panel)
+        m_panel->setRecorderState(false, false, "Press New to record your own style");
+
+    // Back to the regular arranger: reload the previous style.
+    if (!tryLoadLastStyle())
+        tryLoadFactoryStyle();
+    updateNativePanelStyle();
+    juce::Logger::writeToLog("[Cadenza] Style Recorder: session closed");
+}
+
 namespace {
 // Classify a section id by its name prefix.
 std::string sectionType(const std::string& id)
@@ -1687,6 +1872,13 @@ void MainComponent::buildNativePanel()
 
     cb.onStoreRegistration  = [this](int slot) { captureRegistration(slot); };
     cb.onRecallRegistration = [this](int slot) { recallRegistration(slot); };
+
+    cb.onRecNew   = [this](int bars) { recorderNewSession(bars); };
+    cb.onRecPart  = [this](int idx)  { recorderSetPart(idx); };
+    cb.onRecArm   = [this](bool on)  { recorderArm(on); };
+    cb.onRecClear = [this] { recorderClearPart(); };
+    cb.onRecSave  = [this] { recorderSave(); };
+    cb.onRecExit  = [this] { recorderExit(); };
 
     cb.onOts = [this](int slot) { applyOts(slot); };
     cb.setOtsLink = [this](bool on) {

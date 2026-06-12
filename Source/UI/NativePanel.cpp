@@ -351,6 +351,57 @@ NativePanel::NativePanel()
         m_otsButtons[static_cast<std::size_t>(i)] = std::move(b);
     }
 
+    // --- Style Recorder (record your own style patterns) ---
+    styleCaption(m_recCaption, "Style Recorder");
+    addAndMakeVisible(m_recCaption);
+    m_recBars.addItem("1 bar", 1);
+    m_recBars.addItem("2 bars", 2);
+    m_recBars.addItem("4 bars", 4);
+    m_recBars.addItem("8 bars", 8);
+    m_recBars.setSelectedId(4, juce::dontSendNotification);
+    addAndMakeVisible(m_recBars);
+    const char* recPartNames[] = { "Drums", "Bass", "Chord 1", "Chord 2",
+                                   "Pad", "Phrase 1", "Phrase 2" };
+    for (int i = 0; i < 7; ++i)
+        m_recPart.addItem(recPartNames[i], i + 1);
+    m_recPart.setSelectedId(1, juce::dontSendNotification);
+    m_recPart.onChange = [this] {
+        if (m_cb.onRecPart) m_cb.onRecPart(m_recPart.getSelectedId() - 1);
+    };
+    addAndMakeVisible(m_recPart);
+
+    m_recNew.setTooltip("Start a new style: an empty looping section at the current tempo");
+    m_recNew.onClick = [this] {
+        if (m_cb.onRecNew) m_cb.onRecNew(m_recBars.getSelectedId());
+    };
+    addAndMakeVisible(m_recNew);
+
+    m_recArm.setTooltip("Record the selected part while the section loops; "
+                        "click again to keep the take (it overdubs onto the part)");
+    m_recArm.setClickingTogglesState(true);
+    m_recArm.setColour(juce::TextButton::buttonOnColourId, juce::Colours::firebrick);
+    m_recArm.onClick = [this] {
+        if (m_cb.onRecArm) m_cb.onRecArm(m_recArm.getToggleState());
+    };
+    addAndMakeVisible(m_recArm);
+
+    m_recClear.setTooltip("Delete everything recorded on the selected part");
+    m_recClear.onClick = [this] { if (m_cb.onRecClear) m_cb.onRecClear(); };
+    addAndMakeVisible(m_recClear);
+
+    m_recSave.setTooltip("Save the recorded style as a .cstyle file and load it");
+    m_recSave.onClick = [this] { if (m_cb.onRecSave) m_cb.onRecSave(); };
+    addAndMakeVisible(m_recSave);
+
+    m_recExit.setTooltip("Leave the recorder without saving");
+    m_recExit.onClick = [this] { if (m_cb.onRecExit) m_cb.onRecExit(); };
+    addAndMakeVisible(m_recExit);
+
+    m_recStatus.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+    m_recStatus.setFont(juce::Font(juce::FontOptions(12.0f)));
+    addAndMakeVisible(m_recStatus);
+    setRecorderState(false, false, "Press New to record your own style");
+
     // --- wire control callbacks (message thread) ---
     m_play.onClick          = [this] { if (m_cb.togglePlay)    m_cb.togglePlay(); };
     m_fade.setTooltip("Fade the band out over a few seconds, then stop");
@@ -548,6 +599,19 @@ void NativePanel::setToggleStates(bool arranger, bool chordMemory, bool syncroSt
     m_syncroStop.setToggleState(syncroStop, juce::dontSendNotification);
     m_fingeredOnBass.setToggleState(fingeredOnBass, juce::dontSendNotification);
     m_autoFill.setToggleState(autoFill, juce::dontSendNotification);
+}
+
+void NativePanel::setRecorderState(bool sessionActive, bool armed, const juce::String& status)
+{
+    m_recArmed = armed;
+    m_recArm.setToggleState(armed, juce::dontSendNotification);
+    m_recArm.setEnabled(sessionActive);
+    m_recClear.setEnabled(sessionActive && !armed);
+    m_recSave.setEnabled(sessionActive && !armed);
+    m_recExit.setEnabled(sessionActive);
+    m_recPart.setEnabled(sessionActive && !armed);
+    m_recBars.setEnabled(!armed);
+    m_recStatus.setText(status, juce::dontSendNotification);
 }
 
 void NativePanel::setEqGains(int lowDb, int midDb, int highDb)
@@ -792,6 +856,21 @@ void NativePanel::resized()
             if (b) b->setBounds(r.removeFromLeft(bw));
             r.removeFromLeft(bgap);
         }
+    }
+    area.removeFromTop(gap);
+
+    // Style Recorder row: bars + part pickers, transport-style buttons, status.
+    {
+        m_recCaption.setBounds(area.removeFromTop(18));
+        auto r = area.removeFromTop(28);
+        m_recNew.setBounds(r.removeFromLeft(54));    r.removeFromLeft(6);
+        m_recBars.setBounds(r.removeFromLeft(76));   r.removeFromLeft(6);
+        m_recPart.setBounds(r.removeFromLeft(92));   r.removeFromLeft(6);
+        m_recArm.setBounds(r.removeFromLeft(76));    r.removeFromLeft(6);
+        m_recClear.setBounds(r.removeFromLeft(82));  r.removeFromLeft(6);
+        m_recSave.setBounds(r.removeFromLeft(64));   r.removeFromLeft(6);
+        m_recExit.setBounds(r.removeFromLeft(50));   r.removeFromLeft(10);
+        m_recStatus.setBounds(r);
     }
     area.removeFromTop(gap);
 

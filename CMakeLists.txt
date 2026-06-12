@@ -46,6 +46,7 @@ add_library(cadenza_core STATIC
     Source/Arranger/StyleLoader.cpp
     Source/Arranger/StyParser.cpp
     Source/Arranger/PatternTransposer.cpp
+    Source/Arranger/StyleRecorder.cpp
     Source/Arranger/RuntimePlayback.cpp
     Source/Arranger/PlaybackDiagnostics.cpp
     Source/Arranger/Song.cpp
@@ -105,6 +106,7 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_songplayer_tests  tests/SongPlayerTests.cpp)
     cadenza_add_test(cadenza_arranger_router_tests tests/ArrangerMidiRouterTests.cpp)
     cadenza_add_test(cadenza_ots_tests         tests/OtsRecallTests.cpp)
+    cadenza_add_test(cadenza_recorder_tests    tests/StyleRecorderTests.cpp)
 endif()
 
 # ============================================================

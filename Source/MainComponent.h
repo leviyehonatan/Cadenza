@@ -8,6 +8,9 @@
 #include "Arranger/StyleEngine.h"
 #include "Arranger/Style.h"
 #include "Arranger/SongPlayer.h"
+#include "Arranger/StyleRecorder.h"
+
+#include <atomic>
 #include "Settings/SettingsStore.h"
 
 #include <juce_gui_extra/juce_gui_extra.h>
@@ -81,6 +84,16 @@ private:
     bool loadAndApplySongFile(const juce::File& file);
     bool selectStyleById(const std::string& styleId);
     void setSongMode(bool enabled);
+
+    // Style Recorder (record your own style patterns into a .cstyle).
+    void recorderNewSession(int bars);
+    void recorderSetPart(int partIndex);
+    void recorderArm(bool on);            // off commits the take into the style
+    void recorderClearPart();
+    void recorderSave();
+    void recorderExit();
+    void recorderRefreshStyle();          // republish the in-progress style + UI
+    juce::String recorderStatusText() const;
     void applySongStepForBar(int bar, bool applySection = true);
     void queueSongSectionForBar(int bar);
     bool loadAndApplySoundFontFile(const juce::File& file, bool persist);
@@ -107,6 +120,11 @@ private:
     cadenza::arranger::SongPlayer m_songPlayer;
     bool m_songModeActive = false;
     int  m_lastSongBar = -1;
+
+    // Style Recorder. m_recordArmed is read on the MIDI thread (capture callback).
+    cadenza::arranger::StyleRecorder m_recorder;
+    std::atomic<bool> m_recordArmed { false };
+    std::unique_ptr<juce::FileChooser> m_recSaveChooser;
 
     // Live sections: one-shot returns / ending stops are sequenced inside the
     // StyleEngine (sample-tight); we only track the last Main as the return target.

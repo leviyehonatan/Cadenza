@@ -120,6 +120,13 @@ std::vector<LiveMelodyEvent> MidiRouter::handleVirtualMelodyNote(int note, int v
 
 void MidiRouter::injectNote(int note, int velocity, bool isOn)
 {
+    // Style Recorder capture: the whole keyboard records/auditions the target
+    // part — skip split routing, chord detection and the melody voice.
+    if (m_captureMode.load()) {
+        if (m_onCapture) m_onCapture(note, velocity, isOn);
+        return;
+    }
+
     std::optional<arranger::ChordRecognitionResult> currentChord;
     std::vector<LiveMelodyEvent> events;
     std::string chordName;
@@ -223,6 +230,13 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
 
         debugNote = note;
         debugVelocity = isOn ? velocity : 0;
+
+        // Style Recorder capture: the whole keyboard records/auditions the
+        // target part — skip split routing, chord detection, melody voice.
+        if (m_captureMode.load()) {
+            if (m_onCapture) m_onCapture(note, velocity, isOn);
+            return;
+        }
 
         // 1. Forward to the arranger router FIRST so we know whether this note is
         //    in the melody (right-hand) zone before deciding how it should sound.

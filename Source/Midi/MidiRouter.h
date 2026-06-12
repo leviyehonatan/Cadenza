@@ -108,6 +108,16 @@ public:
     void setChordMemory(bool enabled) noexcept;
     void setSyncroStopOnRelease(bool enabled) noexcept;
 
+    // --- Style Recorder capture mode ---
+    // While enabled, every incoming note (hardware or on-screen) bypasses the
+    // split/chord/melody routing and goes to the capture callback instead, so
+    // the whole keyboard plays/records the part being recorded. The callback
+    // fires on the MIDI thread.
+    using CaptureCallback = std::function<void(int note, int velocity, bool isNoteOn)>;
+    void setCaptureCallback(CaptureCallback cb) { m_onCapture = std::move(cb); }
+    void setCaptureMode(bool on) noexcept { m_captureMode.store(on); }
+    bool captureMode() const noexcept { return m_captureMode.load(); }
+
     // Returns the display name of the currently-detected chord, or "" if none.
     // Thread-safe; acquires the internal publish mutex.
     std::string currentChordDisplayName() const;
@@ -157,6 +167,8 @@ private:
 
     MidiControlMap m_controlMap;            // guarded by m_publishMutex
     std::atomic<bool> m_learnArmed { false };
+    std::atomic<bool> m_captureMode { false };
+    CaptureCallback m_onCapture;
     ControlCallback m_onControl;
     ControlLearnCallback m_onControlLearn;
 };

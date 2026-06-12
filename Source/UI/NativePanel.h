@@ -153,6 +153,13 @@ public:
         std::function<void(int)> onStoreRegistration;         // slot -> store current setup
         std::function<void(int)>  onOts;                      // OTS slot 0..3 -> recall
         std::function<void(bool)> setOtsLink;                 // OTS Link toggle changed
+        // Style Recorder (record your own style patterns).
+        std::function<void(int)>  onRecNew;                   // bars -> start a new session
+        std::function<void(int)>  onRecPart;                  // target part index 0..6
+        std::function<void(bool)> onRecArm;                   // record on/off (off commits the take)
+        std::function<void()>     onRecClear;                 // clear the target part
+        std::function<void()>     onRecSave;                  // save the style (.cstyle)
+        std::function<void()>     onRecExit;                  // abandon the session
     };
 
     NativePanel();
@@ -192,6 +199,8 @@ public:
     void setOtsAvailable(const std::array<bool, 4>& available);
     // Init the OTS Link toggle (no callback).
     void setOtsLinkEnabled(bool enabled);
+    // Reflect the Style Recorder session state (enables/dims its buttons).
+    void setRecorderState(bool sessionActive, bool armed, const juce::String& status);
 
     void resized() override;
     void paint(juce::Graphics&) override;
@@ -297,6 +306,18 @@ private:
     juce::Label        m_otsCaption;
     juce::ToggleButton m_otsLink { "OTS Link" };
     std::array<std::unique_ptr<juce::TextButton>, 4> m_otsButtons;
+
+    // Style Recorder (record your own style patterns).
+    juce::Label      m_recCaption;
+    juce::ComboBox   m_recBars;            // section length in bars
+    juce::ComboBox   m_recPart;            // target part
+    juce::TextButton m_recNew   { "New" };
+    juce::TextButton m_recArm   { "Record" };
+    juce::TextButton m_recClear { "Clear Part" };
+    juce::TextButton m_recSave  { "Save..." };
+    juce::TextButton m_recExit  { "Exit" };
+    juce::Label      m_recStatus;
+    bool m_recArmed = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NativePanel)
 };

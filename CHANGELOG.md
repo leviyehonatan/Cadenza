@@ -21,6 +21,35 @@ converter.
 
 ## Timeline of what got built
 
+### Style Recorder — record your own styles (no Yamaha file needed)
+
+The first step away from .sty dependence: styles can now be CREATED inside
+Cadenza. New "Style Recorder" row on the panel:
+
+- **New** starts a session: an empty looping section (1/2/4/8 bars) at the
+  current tempo/time signature, metronome on. The whole keyboard switches to
+  the selected part (no split) so you can play it naturally.
+- **Part picker** chooses what you're recording — Drums, Bass, Chord 1/2,
+  Pad, Phrase 1/2 — each on its standard SFF channel with the same playback
+  policy a Yamaha part would have (bass root-shifts and answers slash
+  chords; chords fit the chord quality; phrases follow the root).
+- **Record** loops the section and captures what you play, looper-style
+  (each pass overdubs). Clicking Record again commits the take: note starts
+  quantize to a 1/16 grid, durations are kept, and roles are baked against
+  the C-major source convention (root/3rd/5th/7th/color; drums absolute) —
+  so the recorded style follows live chords exactly like an imported one.
+- **Clear Part** wipes a part; **Save…** writes a `.cstyle` (named after the
+  file) and makes it the current style; **Exit** returns to the previous
+  style.
+
+Engine plumbing: `StyleRecorder` (pure C++, cadenza_core, 8 new test cases
+covering role baking, quantize, loop-wrap durations, overdub merge and save
+round-trip) + a MIDI "capture mode" in MidiRouter that bypasses
+split/chord/melody routing while recording. 32 test suites pass.
+
+For a future piano-roll editing view, candidate: Sjhunt93/Piano-Roll-Editor
+on GitHub (MIT, JUCE-based).
+
 ### Full Yamaha chord vocabulary + NTT voicing tables + RTR retrigger rules
 
 The "play any chord, voice it like a Yamaha" pass. One shared table
