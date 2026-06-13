@@ -20,6 +20,8 @@ public:
     {
         std::function<void(std::vector<cadenza::arranger::PatternNote>)> onNotesEdited;
         std::function<void(int note, int velocity)> onAudition;
+        std::function<void()> onTogglePlayback;
+        std::function<void()> onToggleRecord;
         std::function<void()> onClosed;
     };
 
@@ -36,6 +38,7 @@ public:
     void setTransportState(int tickInSection, bool playing, bool recordArmed);
 
     void closeButtonPressed() override;
+    bool keyPressed(const juce::KeyPress&) override;
 
 private:
     class Content;

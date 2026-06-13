@@ -1496,6 +1496,12 @@ void MainComponent::recorderOpenEditor()
                 m_audio.noteOff(channel, note);
             }
         };
+        cb.onTogglePlayback = [this] {
+            togglePlayback();
+        };
+        cb.onToggleRecord = [this] {
+            recorderArm(!m_recordArmed.load());
+        };
         cb.onClosed = [this] {
             juce::Component::SafePointer<MainComponent> safe(this);
             juce::MessageManager::callAsync([safe] {
@@ -1509,6 +1515,7 @@ void MainComponent::recorderOpenEditor()
     recorderReloadEditor();
     m_partEditor->setVisible(true);
     m_partEditor->toFront(true);
+    m_partEditor->grabKeyboardFocus();
 }
 
 void MainComponent::recorderReloadEditor()

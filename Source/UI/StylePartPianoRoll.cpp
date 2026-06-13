@@ -40,6 +40,8 @@ void StylePartPianoRoll::setPart(const std::vector<PatternNote>& notes,
     m_ticksPerBeat = std::max(24, ticksPerBeat);
     m_beatsPerBar = std::max(1, beatsPerBar);
     m_percussion = percussion;
+    bar_workflow::clearSelection(m_barSelection);
+    m_noteSelection.clear();
     m_lastDrawDuration = gridTicks();
     // Sensible default register: GM drums vs. the playing range.
     m_topNote = percussion ? 60 : 84;
@@ -79,6 +81,10 @@ int StylePartPianoRoll::snapTick(int tick) const noexcept
 
 int StylePartPianoRoll::barTicks() const noexcept { return m_ticksPerBeat * m_beatsPerBar; }
 int StylePartPianoRoll::beatTicks() const noexcept { return m_ticksPerBeat; }
+int StylePartPianoRoll::totalBars() const noexcept
+{
+    return std::max(1, (m_sectionTicks + barTicks() - 1) / barTicks());
+}
 int StylePartPianoRoll::rowHeight() const noexcept
 {
     return m_percussion ? kDrumRowH : kPianoRowH;
@@ -181,6 +187,20 @@ void StylePartPianoRoll::paint(juce::Graphics& g)
         }
     }
 
+    if (m_barSelection.valid()) {
+        const float x0 = tickToX(m_barSelection.first * barT);
+        const float x1 = tickToX(std::min(m_sectionTicks,
+                                         (m_barSelection.last + 1) * barT));
+        g.setColour(juce::Colour(0xff3f86df).withAlpha(0.30f));
+        g.fillRect(x0, (float) kRulerH, x1 - x0,
+                   (float) (getHeight() - kRulerH));
+        g.setColour(juce::Colour(0xff7db7ff));
+        g.fillRect(x0, (float) kRulerH, 3.0f,
+                   (float) (getHeight() - kRulerH));
+        g.fillRect(x1 - 3.0f, (float) kRulerH, 3.0f,
+                   (float) (getHeight() - kRulerH));
+    }
+
     // Vertical grid: snap subdivisions (faint), beats (medium), bars (bright).
     const int bT = beatTicks();
     const int gT = m_snap > 0 ? gridTicks() : bT;
@@ -205,20 +225,31 @@ void StylePartPianoRoll::paint(juce::Graphics& g)
     // Ruler with bar numbers.
     g.setColour(juce::Colour(0xff181b21));
     g.fillRect(0, 0, getWidth(), kRulerH);
+    if (m_barSelection.valid()) {
+        const float x0 = tickToX(m_barSelection.first * barT);
+        const float x1 = tickToX(std::min(m_sectionTicks,
+                                         (m_barSelection.last + 1) * barT));
+        g.setColour(juce::Colour(0xff2f6db5));
+        g.fillRect(x0, 0.0f, x1 - x0, (float) kRulerH);
+        g.setColour(juce::Colour(0xff8bc3ff));
+        g.fillRect(x0, (float) kRulerH - 3.0f, x1 - x0, 3.0f);
+    }
     g.setColour(juce::Colour(0xffedf1f7));
     g.setFont(juce::Font(juce::FontOptions(12.5f)).boldened());
     if (barT > 0) {
         for (int t = 0; t < m_sectionTicks; t += barT) {
             const float x = tickToX(t);
+            const float nextX = tickToX(std::min(m_sectionTicks, t + barT));
             g.drawText(juce::String(piano_roll::measureNumberAtTick(
                            t, m_ticksPerBeat, m_beatsPerBar)),
-                       (int) x + 5, 2, 40, kRulerH - 4,
-                       juce::Justification::centredLeft, false);
+                       (int) x, 2, std::max(1, (int) (nextX - x)), kRulerH - 4,
+                       juce::Justification::centred, false);
         }
     }
 
     // Notes.
-    for (const auto& n : m_notes) {
+    for (int i = 0; i < (int) m_notes.size(); ++i) {
+        const auto& n = m_notes[i];
         const float x0 = tickToX(n.tick);
         const float x1 = tickToX(std::min(m_sectionTicks, n.tick + n.duration));
         const float y = pitchToY(n.pitch);
@@ -227,10 +258,21 @@ void StylePartPianoRoll::paint(juce::Graphics& g)
                                  std::max(3.0f, x1 - x0 - 2.0f),
                                  (float) (rowH - 4));
         const float vel = std::clamp(n.velocity / 127.0f, 0.2f, 1.0f);
-        g.setColour(juce::Colour(0xff3da5ff).withBrightness(0.55f + 0.45f * vel));
+        const bool selected = m_noteSelection.contains(i);
+        g.setColour(selected
+            ? juce::Colour(0xffffa43a)
+            : juce::Colour(0xff3da5ff).withBrightness(0.55f + 0.45f * vel));
         g.fillRoundedRectangle(r, 3.0f);
-        g.setColour(juce::Colours::black.withAlpha(0.5f));
-        g.drawRoundedRectangle(r, 3.0f, 1.0f);
+        g.setColour(selected ? juce::Colour(0xffffe0ad)
+                             : juce::Colours::black.withAlpha(0.5f));
+        g.drawRoundedRectangle(r, 3.0f, selected ? 2.0f : 1.0f);
+    }
+
+    if (m_drag == Drag::BoxSelect && !m_selectionRectangle.isEmpty()) {
+        g.setColour(juce::Colour(0xff6eb4ff).withAlpha(0.18f));
+        g.fillRect(m_selectionRectangle);
+        g.setColour(juce::Colour(0xff8bc7ff));
+        g.drawRect(m_selectionRectangle, 1.5f);
     }
 
     // Playback marker.
@@ -300,7 +342,40 @@ void StylePartPianoRoll::mouseDown(const juce::MouseEvent& e)
         }
         return;
     }
-    if (p.y < kRulerH) return;   // ruler
+    if (p.y < kRulerH) {
+        if (p.x < gridLeft())
+            return;
+        const int bar = barAtX(p.x);
+        if (e.mods.isRightButtonDown() || e.mods.isPopupMenu()) {
+            if (!m_barSelection.contains(bar))
+                bar_workflow::selectBar(m_barSelection, bar, totalBars());
+            m_noteSelection.clear();
+            notifyNoteSelection();
+            notifyBarSelection();
+            repaint();
+            if (onBarContextMenuRequested)
+                onBarContextMenuRequested(e.getPosition());
+            return;
+        }
+        m_noteSelection.clear();
+        notifyNoteSelection();
+        m_rulerStartBar = bar;
+        m_rulerMoveDelta = 0;
+        if (e.mods.isShiftDown()) {
+            bar_workflow::extendSelection(m_barSelection, bar, totalBars());
+            m_rulerGesture = RulerGesture::Select;
+        } else if (m_barSelection.contains(bar)) {
+            m_rulerGesture = RulerGesture::Move;
+            m_rulerStartSelection = m_barSelection;
+            m_rulerStartNotes = m_notes;
+        } else {
+            bar_workflow::selectBar(m_barSelection, bar, totalBars());
+            m_rulerGesture = RulerGesture::Select;
+        }
+        notifyBarSelection();
+        repaint();
+        return;
+    }
 
     bool onRightEdge = false;
     const int idx = noteIndexAt(p, onRightEdge);
@@ -308,76 +383,188 @@ void StylePartPianoRoll::mouseDown(const juce::MouseEvent& e)
     // Right-click (or popup modifier) deletes the note under the cursor.
     if (e.mods.isRightButtonDown() || e.mods.isPopupMenu()) {
         if (idx >= 0) {
-            m_notes.erase(m_notes.begin() + idx);
+            if (m_noteSelection.contains(idx) && m_noteSelection.size() > 1)
+                m_notes = note_workflow::deleteSelected(m_notes, m_noteSelection);
+            else
+                m_notes.erase(m_notes.begin() + idx);
+            m_noteSelection.clear();
+            notifyNoteSelection();
             commit();
             repaint();
+        } else if (m_barSelection.contains(barAtX(p.x))
+                   && onBarContextMenuRequested) {
+            onBarContextMenuRequested(e.getPosition());
         }
         return;
     }
 
     m_lastAuditioned = -1;
     if (idx >= 0) {
-        m_dragIndex = idx;
+        const bool wasSelected = m_noteSelection.contains(idx);
+        if (e.mods.isCtrlDown()) {
+            note_workflow::toggle(m_noteSelection, idx);
+            notifyNoteSelection();
+            repaint();
+            return;
+        }
+        if (!wasSelected)
+            note_workflow::selectOnly(m_noteSelection, idx);
+        notifyNoteSelection();
+
+        if (e.mods.isShiftDown() && wasSelected && !onRightEdge) {
+            const int originalSize = (int) m_notes.size();
+            const int selectionOffset = (int) std::distance(
+                m_noteSelection.begin(), m_noteSelection.find(idx));
+            auto duplicated = note_workflow::duplicateSelected(m_notes, m_noteSelection);
+            m_notes = std::move(duplicated.notes);
+            m_noteSelection = std::move(duplicated.selection);
+            m_dragIndex = originalSize + selectionOffset;
+        } else {
+            m_dragIndex = idx;
+        }
+        m_noteDragStartNotes = m_notes;
+        m_dragStartTick = m_notes[m_dragIndex].tick;
+        m_dragStartPitch = m_notes[m_dragIndex].pitch;
+        m_resizeStartDuration = m_notes[m_dragIndex].duration;
         if (onRightEdge) {
             m_drag = Drag::ResizeR;
         } else {
             m_drag = Drag::Move;
-            m_grabTickOffset = xToTick(p.x) - m_notes[idx].tick;
+            m_grabTickOffset = xToTick(p.x) - m_notes[m_dragIndex].tick;
         }
-        auditionPitch(m_notes[idx].pitch);
+        auditionPitch(m_notes[m_dragIndex].pitch);
+        clearBarSelection();
+        repaint();
         return;
     }
 
-    // Empty grid -> create a note (drag extends its length).
-    PatternNote n;
-    n.tick = snapTick(xToTick(p.x));
-    n.pitch = yToPitch(p.y);
-    n.velocity = 100;
-    n.duration = std::max(gridTicks(), m_lastDrawDuration);
-    if (n.tick + n.duration > m_sectionTicks)
-        n.duration = std::max(gridTicks(), m_sectionTicks - n.tick);
-    m_notes.push_back(n);
-    m_dragIndex = (int) m_notes.size() - 1;
-    m_drag = Drag::Create;
-    auditionPitch(n.pitch);
-    repaint();
+    clearBarSelection();
+    m_emptyDragStart = p;
+    m_selectionRectangle = {};
+    m_drag = Drag::PendingEmpty;
 }
 
 void StylePartPianoRoll::mouseDrag(const juce::MouseEvent& e)
 {
+    if (m_rulerGesture != RulerGesture::None) {
+        const int bar = barAtX(e.position.x);
+        if (m_rulerGesture == RulerGesture::Select) {
+            bar_workflow::dragSelection(m_barSelection, bar, totalBars());
+        } else {
+            const int delta = bar - m_rulerStartBar;
+            const auto moved = bar_workflow::moveBars(
+                m_rulerStartNotes, m_rulerStartSelection,
+                delta, totalBars(), barTicks());
+            m_notes = moved.notes;
+            m_barSelection = moved.selection;
+            m_rulerMoveDelta = m_barSelection.first - m_rulerStartSelection.first;
+        }
+        notifyBarSelection();
+        repaint();
+        return;
+    }
+
+    if (m_drag == Drag::PendingEmpty || m_drag == Drag::BoxSelect) {
+        if (m_drag == Drag::PendingEmpty
+            && e.position.getDistanceFrom(m_emptyDragStart) >= 4.0f) {
+            m_drag = Drag::BoxSelect;
+            m_noteSelection.clear();
+        }
+        if (m_drag == Drag::BoxSelect) {
+            const float left = std::min(m_emptyDragStart.x, e.position.x);
+            const float top = std::min(m_emptyDragStart.y, e.position.y);
+            m_selectionRectangle = {
+                left, top,
+                std::abs(e.position.x - m_emptyDragStart.x),
+                std::abs(e.position.y - m_emptyDragStart.y)
+            };
+            note_workflow::Rectangle rectangle {
+                m_selectionRectangle.getX(), m_selectionRectangle.getY(),
+                m_selectionRectangle.getWidth(), m_selectionRectangle.getHeight()
+            };
+            m_noteSelection = note_workflow::selectIntersecting(
+                visibleNoteBounds(), rectangle);
+            notifyNoteSelection();
+            repaint();
+        }
+        return;
+    }
+
     if (m_drag == Drag::None || m_dragIndex < 0 || m_dragIndex >= (int) m_notes.size())
         return;
-    auto& n = m_notes[m_dragIndex];
     const juce::Point<float> p = e.position;
 
     if (m_drag == Drag::Move) {
         const int newTick = snapTick(xToTick(p.x) - m_grabTickOffset);
-        n.tick = std::clamp(newTick, 0, std::max(0, m_sectionTicks - gridTicks()));
-        if (n.tick + n.duration > m_sectionTicks)
-            n.duration = std::max(gridTicks(), m_sectionTicks - n.tick);
         const int newPitch = yToPitch(p.y);
-        if (newPitch != n.pitch) { n.pitch = newPitch; auditionPitch(newPitch); }
-    } else {   // Create or ResizeR
+        m_notes = note_workflow::moveSelected(
+            m_noteDragStartNotes, m_noteSelection,
+            newTick - m_dragStartTick, newPitch - m_dragStartPitch,
+            m_sectionTicks);
+        auditionPitch(m_notes[m_dragIndex].pitch);
+    } else {
         const int end = snapTick(xToTick(p.x));
-        n.duration = std::clamp(end - n.tick, gridTicks(), m_sectionTicks - n.tick);
+        m_notes = note_workflow::resizeSelected(
+            m_noteDragStartNotes, m_noteSelection,
+            (end - m_notes[m_dragIndex].tick) - m_resizeStartDuration,
+            gridTicks(), m_sectionTicks);
     }
     repaint();
 }
 
 void StylePartPianoRoll::mouseUp(const juce::MouseEvent&)
 {
-    if (m_drag != Drag::None && m_dragIndex >= 0 && m_dragIndex < (int) m_notes.size()) {
-        if (m_drag == Drag::Create || m_drag == Drag::ResizeR)
+    if (m_rulerGesture != RulerGesture::None) {
+        if (m_rulerGesture == RulerGesture::Move) {
+            if (m_rulerMoveDelta != 0) {
+                commit();
+            } else {
+                bar_workflow::selectBar(
+                    m_barSelection, m_rulerStartBar, totalBars());
+                notifyBarSelection();
+                repaint();
+            }
+        }
+        m_rulerGesture = RulerGesture::None;
+        m_rulerStartBar = -1;
+        m_rulerStartNotes.clear();
+        return;
+    }
+
+    if (m_drag == Drag::PendingEmpty) {
+        PatternNote note;
+        note.tick = snapTick(xToTick(m_emptyDragStart.x));
+        note.pitch = yToPitch(m_emptyDragStart.y);
+        note.velocity = 100;
+        note.duration = std::max(gridTicks(), m_lastDrawDuration);
+        if (note.tick + note.duration > m_sectionTicks)
+            note.duration = std::max(gridTicks(), m_sectionTicks - note.tick);
+        m_notes.push_back(note);
+        note_workflow::selectOnly(m_noteSelection, (int) m_notes.size() - 1);
+        notifyNoteSelection();
+        auditionPitch(note.pitch);
+        commit();
+        repaint();
+    } else if (m_drag == Drag::BoxSelect) {
+        m_selectionRectangle = {};
+        repaint();
+    } else if (m_drag != Drag::None && m_dragIndex >= 0
+               && m_dragIndex < (int) m_notes.size()) {
+        if (m_drag == Drag::ResizeR)
             m_lastDrawDuration = m_notes[m_dragIndex].duration;
         commit();
     }
     m_drag = Drag::None;
     m_dragIndex = -1;
     m_lastAuditioned = -1;
+    m_noteDragStartNotes.clear();
 }
 
 void StylePartPianoRoll::mouseMove(const juce::MouseEvent& e)
 {
+    if (e.position.x >= gridLeft() && e.position.y >= kRulerH
+        && onGridMousePositionChanged)
+        onGridMousePositionChanged(xToTick(e.position.x), yToPitch(e.position.y));
     bool edge = false;
     const int idx = noteIndexAt(e.position, edge);
     if (idx != m_hoverIndex) m_hoverIndex = idx;
@@ -422,5 +609,106 @@ void StylePartPianoRoll::setNoteVelocity(int index, int velocity)
     m_notes[index].velocity = clamped;
     commit();
     repaint();
+}
+
+int StylePartPianoRoll::barAtX(float x) const noexcept
+{
+    return std::clamp(xToTick(x) / std::max(1, barTicks()), 0, totalBars() - 1);
+}
+
+void StylePartPianoRoll::notifyBarSelection()
+{
+    if (onBarSelectionChanged)
+        onBarSelectionChanged(m_barSelection);
+}
+
+void StylePartPianoRoll::setBarSelection(bar_workflow::BarSelection selection)
+{
+    m_barSelection = selection;
+    notifyBarSelection();
+    repaint();
+}
+
+void StylePartPianoRoll::clearBarSelection()
+{
+    bar_workflow::clearSelection(m_barSelection);
+    notifyBarSelection();
+    repaint();
+}
+
+void StylePartPianoRoll::clearNoteSelection()
+{
+    m_noteSelection.clear();
+    notifyNoteSelection();
+    repaint();
+}
+
+note_workflow::NoteClipboard StylePartPianoRoll::copySelectedNotes() const
+{
+    return note_workflow::copySelected(m_notes, m_noteSelection);
+}
+
+void StylePartPianoRoll::pasteNotes(
+    const note_workflow::NoteClipboard& clipboard, int tick, int pitch)
+{
+    auto pasted = note_workflow::pasteNotes(
+        m_notes, clipboard, tick, pitch, m_sectionTicks);
+    m_notes = std::move(pasted.notes);
+    m_noteSelection = std::move(pasted.selection);
+    notifyNoteSelection();
+    commit();
+    repaint();
+}
+
+void StylePartPianoRoll::duplicateSelectedNotes()
+{
+    auto duplicated = note_workflow::duplicateToRight(
+        m_notes, m_noteSelection, m_sectionTicks);
+    m_notes = std::move(duplicated.notes);
+    m_noteSelection = std::move(duplicated.selection);
+    notifyNoteSelection();
+    commit();
+    repaint();
+}
+
+void StylePartPianoRoll::deleteSelectedNotes()
+{
+    if (m_noteSelection.empty())
+        return;
+    m_notes = note_workflow::deleteSelected(m_notes, m_noteSelection);
+    m_noteSelection.clear();
+    notifyNoteSelection();
+    commit();
+    repaint();
+}
+
+void StylePartPianoRoll::replaceNotes(std::vector<PatternNote> notes)
+{
+    m_noteSelection.clear();
+    notifyNoteSelection();
+    m_notes = std::move(notes);
+    commit();
+    repaint();
+}
+
+void StylePartPianoRoll::notifyNoteSelection()
+{
+    if (onNoteSelectionChanged)
+        onNoteSelectionChanged(m_noteSelection);
+}
+
+std::vector<note_workflow::NoteBounds> StylePartPianoRoll::visibleNoteBounds() const
+{
+    std::vector<note_workflow::NoteBounds> bounds;
+    bounds.reserve(m_notes.size());
+    for (int i = 0; i < (int) m_notes.size(); ++i) {
+        const auto& note = m_notes[i];
+        const float x0 = tickToX(note.tick);
+        const float x1 = tickToX(std::min(m_sectionTicks, note.tick + note.duration));
+        const float y = pitchToY(note.pitch);
+        bounds.push_back({ i, x0, y, std::max(3.0f, x1 - x0),
+                           (float) rowHeight() });
+    }
+    return bounds;
 }
 }

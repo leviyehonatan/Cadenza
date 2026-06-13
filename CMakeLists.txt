@@ -62,6 +62,8 @@ add_library(cadenza_core STATIC
     Source/Audio/Transport.cpp
     Source/Audio/TransportCommandMailbox.cpp
     Source/Settings/SettingsStore.cpp
+    Source/UI/StylePartBarWorkflow.cpp
+    Source/UI/StylePartNoteWorkflow.cpp
     Source/UI/StylePartPianoRollGeometry.cpp
 )
 
@@ -109,6 +111,8 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_ots_tests         tests/OtsRecallTests.cpp)
     cadenza_add_test(cadenza_recorder_tests    tests/StyleRecorderTests.cpp)
     cadenza_add_test(cadenza_part_editor_tests tests/StylePartPianoRollTests.cpp)
+    cadenza_add_test(cadenza_part_workflow_tests tests/StylePartBarWorkflowTests.cpp)
+    cadenza_add_test(cadenza_note_workflow_tests tests/StylePartNoteWorkflowTests.cpp)
 endif()
 
 # ============================================================
