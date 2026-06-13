@@ -1522,6 +1522,12 @@ void MainComponent::recorderReloadEditor()
                           cfg.ticksPerBeat,
                           cfg.beatsPerBar,
                           info.percussion);
+    const int len = m_recorder.sectionLengthTicks();
+    const bool playing = m_audio.transport().playing();
+    const int tick = (playing && len > 0)
+        ? m_audio.transport().positionTickInt() % len
+        : 0;
+    m_partEditor->setTransportState(tick, playing, m_recordArmed.load());
 }
 
 void MainComponent::recorderPrepareTargetChannel()
@@ -1678,7 +1684,7 @@ void MainComponent::timerCallback()
         const int tick = (playing && len > 0)
             ? m_audio.transport().positionTickInt() % len
             : 0;
-        m_partEditor->setPlaybackTick(tick, playing);
+        m_partEditor->setTransportState(tick, playing, m_recordArmed.load());
     }
 
     // A fade-out that reached silence stopped the transport on the audio thread;

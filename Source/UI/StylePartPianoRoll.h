@@ -14,6 +14,7 @@
 #pragma once
 
 #include "../Arranger/Style.h"
+#include "StylePartPianoRollGeometry.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -40,6 +41,15 @@ public:
 
     void setPlaybackTick(int tickInSection, bool visible);
 
+    const std::vector<cadenza::arranger::PatternNote>& notes() const noexcept { return m_notes; }
+    int sectionTicks() const noexcept { return m_sectionTicks; }
+    int ticksPerBeat() const noexcept { return m_ticksPerBeat; }
+    int beatsPerBar() const noexcept { return m_beatsPerBar; }
+    int gridLeft() const noexcept;
+    float xForTick(int tick) const noexcept;
+    int tickForX(float x) const noexcept;
+    void setNoteVelocity(int index, int velocity);
+
     void paint(juce::Graphics&) override;
     void resized() override;
     void mouseDown(const juce::MouseEvent&) override;
@@ -55,6 +65,7 @@ private:
     int   snapTick(int tick) const noexcept;
     int   barTicks() const noexcept;
     int   beatTicks() const noexcept;
+    int   rowHeight() const noexcept;
     int   rowsVisible() const noexcept;
     float tickToX(int tick) const noexcept;
     int   xToTick(float x) const noexcept;
@@ -66,9 +77,11 @@ private:
     void  auditionPitch(int pitch);
 
     // geometry
-    static constexpr int kKeyboardW = 56;
     static constexpr int kRulerH = 24;
-    static constexpr int kNoteH = 13;
+    static constexpr int kPianoGutterW = 56;
+    static constexpr int kDrumGutterW = 112;
+    static constexpr int kPianoRowH = 13;
+    static constexpr int kDrumRowH = 22;
     static constexpr int kEdgeGrab = 6;
     int m_topNote = 84;   // highest pitch shown (top grid row)
 

@@ -62,6 +62,7 @@ add_library(cadenza_core STATIC
     Source/Audio/Transport.cpp
     Source/Audio/TransportCommandMailbox.cpp
     Source/Settings/SettingsStore.cpp
+    Source/UI/StylePartPianoRollGeometry.cpp
 )
 
 target_include_directories(cadenza_core
@@ -107,6 +108,7 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_arranger_router_tests tests/ArrangerMidiRouterTests.cpp)
     cadenza_add_test(cadenza_ots_tests         tests/OtsRecallTests.cpp)
     cadenza_add_test(cadenza_recorder_tests    tests/StyleRecorderTests.cpp)
+    cadenza_add_test(cadenza_part_editor_tests tests/StylePartPianoRollTests.cpp)
 endif()
 
 # ============================================================

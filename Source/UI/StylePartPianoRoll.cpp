@@ -79,33 +79,44 @@ int StylePartPianoRoll::snapTick(int tick) const noexcept
 
 int StylePartPianoRoll::barTicks() const noexcept { return m_ticksPerBeat * m_beatsPerBar; }
 int StylePartPianoRoll::beatTicks() const noexcept { return m_ticksPerBeat; }
+int StylePartPianoRoll::rowHeight() const noexcept
+{
+    return m_percussion ? kDrumRowH : kPianoRowH;
+}
 
 int StylePartPianoRoll::rowsVisible() const noexcept
 {
-    return std::max(1, (getHeight() - kRulerH) / kNoteH);
+    return std::max(1, (getHeight() - kRulerH) / rowHeight());
+}
+
+int StylePartPianoRoll::gridLeft() const noexcept
+{
+    return m_percussion ? kDrumGutterW : kPianoGutterW;
 }
 
 float StylePartPianoRoll::tickToX(int tick) const noexcept
 {
-    const float gridW = (float) std::max(1, getWidth() - kKeyboardW);
-    return kKeyboardW + (tick / (float) m_sectionTicks) * gridW;
+    return piano_roll::tickToX(tick, m_sectionTicks,
+                               static_cast<float>(gridLeft()),
+                               static_cast<float>(getWidth()));
 }
 
 int StylePartPianoRoll::xToTick(float x) const noexcept
 {
-    const float gridW = (float) std::max(1, getWidth() - kKeyboardW);
-    return (int) std::lround(((x - kKeyboardW) / gridW) * m_sectionTicks);
+    return piano_roll::xToTick(x, m_sectionTicks,
+                               static_cast<float>(gridLeft()),
+                               static_cast<float>(getWidth()));
 }
 
 int StylePartPianoRoll::yToPitch(float y) const noexcept
 {
-    const int row = (int) std::floor((y - kRulerH) / kNoteH);
-    return std::clamp(m_topNote - row, 0, 127);
+    const int row = (int) std::floor((y - kRulerH) / rowHeight());
+    return piano_roll::pitchForRow(row, m_topNote);
 }
 
 float StylePartPianoRoll::pitchToY(int pitch) const noexcept
 {
-    return (float) (kRulerH + (m_topNote - pitch) * kNoteH);
+    return (float) (kRulerH + (m_topNote - pitch) * rowHeight());
 }
 
 void StylePartPianoRoll::clampScroll() noexcept
@@ -122,7 +133,8 @@ int StylePartPianoRoll::noteIndexAt(juce::Point<float> p, bool& onRightEdge) con
         const float x0 = tickToX(n.tick);
         const float x1 = tickToX(std::min(m_sectionTicks, n.tick + n.duration));
         const float y0 = pitchToY(n.pitch);
-        const juce::Rectangle<float> r(x0, y0, std::max(3.0f, x1 - x0), (float) kNoteH);
+        const juce::Rectangle<float> r(x0, y0, std::max(3.0f, x1 - x0),
+                                       (float) rowHeight());
         if (r.contains(p)) {
             onRightEdge = (p.x >= r.getRight() - kEdgeGrab);
             return i;
@@ -138,43 +150,69 @@ void StylePartPianoRoll::paint(juce::Graphics& g)
     g.fillAll(juce::Colour(0xff20242c));
 
     const int rows = rowsVisible();
-    const int gridLeft = kKeyboardW;
+    const int gutterRight = gridLeft();
     const int gridRight = getWidth();
+    const int rowH = rowHeight();
+    const int barT = barTicks();
+
+    // Alternating measures make long patterns easier to scan.
+    if (barT > 0) {
+        for (int t = 0, bar = 0; t < m_sectionTicks; t += barT, ++bar) {
+            if ((bar & 1) == 0)
+                continue;
+            const float x0 = tickToX(t);
+            const float x1 = tickToX(std::min(m_sectionTicks, t + barT));
+            g.setColour(juce::Colour(0xff151a21).withAlpha(0.18f));
+            g.fillRect(x0, (float) kRulerH, x1 - x0,
+                       (float) (getHeight() - kRulerH));
+        }
+    }
 
     // Row backgrounds (black-key rows a touch darker) + horizontal separators.
     for (int row = 0; row < rows; ++row) {
-        const int pitch = m_topNote - row;
-        const float y = (float) (kRulerH + row * kNoteH);
+        const int pitch = piano_roll::pitchForRow(row, m_topNote);
+        const float y = (float) (kRulerH + row * rowH);
         g.setColour(isBlackKey(pitch) ? juce::Colour(0xff262b34) : juce::Colour(0xff2c323c));
-        g.fillRect((float) gridLeft, y, (float) (gridRight - gridLeft), (float) kNoteH);
+        g.fillRect((float) gutterRight, y, (float) (gridRight - gutterRight), (float) rowH);
         if (((pitch % 12) + 12) % 12 == 0) {   // brighter line under each C
             g.setColour(juce::Colour(0xff3a4150));
-            g.fillRect((float) gridLeft, y + kNoteH - 1, (float) (gridRight - gridLeft), 1.0f);
+            g.fillRect((float) gutterRight, y + rowH - 1,
+                       (float) (gridRight - gutterRight), 1.0f);
         }
     }
 
     // Vertical grid: snap subdivisions (faint), beats (medium), bars (bright).
-    const int gT = gridTicks(), bT = beatTicks(), barT = barTicks();
+    const int bT = beatTicks();
+    const int gT = m_snap > 0 ? gridTicks() : bT;
     for (int t = 0; t <= m_sectionTicks; t += std::max(1, gT)) {
         const float x = tickToX(t);
-        const bool onBar = (barT > 0 && t % barT == 0);
-        const bool onBeat = (bT > 0 && t % bT == 0);
-        if (onBar)       g.setColour(juce::Colour(0xff5a6577));
-        else if (onBeat) g.setColour(juce::Colour(0xff3d4452));
-        else             g.setColour(juce::Colour(0xff313742));
-        g.fillRect(x, (float) kRulerH, onBar ? 1.6f : 1.0f, (float) (getHeight() - kRulerH));
-        if (m_snap <= 0 && !onBeat) {}  // no subdivisions when snap is off
+        const auto kind = piano_roll::classifyGridLine(
+            t, m_ticksPerBeat, m_beatsPerBar, gT);
+        float width = 1.0f;
+        if (kind == piano_roll::GridLineKind::Bar) {
+            g.setColour(juce::Colour(0xff738097));
+            width = 2.0f;
+        } else if (kind == piano_roll::GridLineKind::Beat) {
+            g.setColour(juce::Colour(0xff4d5868));
+            width = 1.25f;
+        } else {
+            g.setColour(juce::Colour(0xff343b47));
+        }
+        g.fillRect(x, (float) kRulerH, width,
+                   (float) (getHeight() - kRulerH));
     }
 
     // Ruler with bar numbers.
     g.setColour(juce::Colour(0xff181b21));
     g.fillRect(0, 0, getWidth(), kRulerH);
-    g.setColour(juce::Colours::lightgrey);
-    g.setFont(juce::Font(juce::FontOptions(12.0f)));
+    g.setColour(juce::Colour(0xffedf1f7));
+    g.setFont(juce::Font(juce::FontOptions(12.5f)).boldened());
     if (barT > 0) {
-        for (int t = 0, bar = 1; t < m_sectionTicks; t += barT, ++bar) {
+        for (int t = 0; t < m_sectionTicks; t += barT) {
             const float x = tickToX(t);
-            g.drawText(juce::String(bar), (int) x + 4, 2, 40, kRulerH - 4,
+            g.drawText(juce::String(piano_roll::measureNumberAtTick(
+                           t, m_ticksPerBeat, m_beatsPerBar)),
+                       (int) x + 5, 2, 40, kRulerH - 4,
                        juce::Justification::centredLeft, false);
         }
     }
@@ -184,40 +222,57 @@ void StylePartPianoRoll::paint(juce::Graphics& g)
         const float x0 = tickToX(n.tick);
         const float x1 = tickToX(std::min(m_sectionTicks, n.tick + n.duration));
         const float y = pitchToY(n.pitch);
-        if (y + kNoteH < kRulerH || y > getHeight()) continue;   // off-screen
-        juce::Rectangle<float> r(x0, y + 1.0f, std::max(3.0f, x1 - x0), (float) (kNoteH - 2));
+        if (y + rowH < kRulerH || y > getHeight()) continue;   // off-screen
+        juce::Rectangle<float> r(x0 + 1.0f, y + 2.0f,
+                                 std::max(3.0f, x1 - x0 - 2.0f),
+                                 (float) (rowH - 4));
         const float vel = std::clamp(n.velocity / 127.0f, 0.2f, 1.0f);
         g.setColour(juce::Colour(0xff3da5ff).withBrightness(0.55f + 0.45f * vel));
-        g.fillRoundedRectangle(r, 2.0f);
+        g.fillRoundedRectangle(r, 3.0f);
         g.setColour(juce::Colours::black.withAlpha(0.5f));
-        g.drawRoundedRectangle(r, 2.0f, 1.0f);
+        g.drawRoundedRectangle(r, 3.0f, 1.0f);
     }
 
     // Playback marker.
     if (m_playbackVisible && m_playbackTick >= 0) {
-        const float x = tickToX(m_playbackTick);
-        g.setColour(juce::Colours::orange.withAlpha(0.9f));
-        g.fillRect(x, (float) kRulerH, 1.5f, (float) (getHeight() - kRulerH));
+        const float x = piano_roll::playheadX(
+            m_playbackTick, m_sectionTicks,
+            static_cast<float>(gutterRight), static_cast<float>(getWidth()));
+        g.setColour(juce::Colour(0xffff9f32));
+        g.fillRect(x - 1.0f, 0.0f, 2.0f, (float) getHeight());
+        juce::Path marker;
+        marker.addTriangle(x - 5.0f, 0.0f, x + 5.0f, 0.0f, x, 7.0f);
+        g.fillPath(marker);
     }
 
-    // Piano keyboard gutter (drawn last so it overlays the grid edge).
+    // Instrument gutter (drawn last so it overlays the grid edge).
     g.setColour(juce::Colour(0xff14161b));
-    g.fillRect(0, kRulerH, kKeyboardW, getHeight() - kRulerH);
+    g.fillRect(0, kRulerH, gutterRight, getHeight() - kRulerH);
     for (int row = 0; row < rows; ++row) {
-        const int pitch = m_topNote - row;
-        const float y = (float) (kRulerH + row * kNoteH);
-        const bool black = isBlackKey(pitch);
-        g.setColour(black ? juce::Colour(0xff1c1f26) : juce::Colour(0xffe8e8ee));
-        g.fillRect(1.0f, y + 1.0f, (float) (kKeyboardW - 2), (float) (kNoteH - 1));
-        if (((pitch % 12) + 12) % 12 == 0) {   // label each C
-            g.setColour(juce::Colours::black);
-            g.setFont(juce::Font(juce::FontOptions(10.0f)));
-            g.drawText(noteName(pitch), 2, (int) y, kKeyboardW - 4, kNoteH,
-                       juce::Justification::centredRight, false);
+        const int pitch = piano_roll::pitchForRow(row, m_topNote);
+        const float y = (float) (kRulerH + row * rowH);
+        if (piano_roll::gutterMode(m_percussion) == piano_roll::GutterMode::Drums) {
+            g.setColour((row & 1) ? juce::Colour(0xff20252e)
+                                  : juce::Colour(0xff262c36));
+            g.fillRect(1.0f, y + 1.0f, (float) (gutterRight - 2), (float) (rowH - 1));
+            g.setColour(juce::Colour(0xffd8dee8));
+            g.setFont(juce::Font(juce::FontOptions(11.0f)));
+            g.drawText(piano_roll::drumLabelForPitch(pitch), 6, (int) y,
+                       gutterRight - 10, rowH, juce::Justification::centredLeft, true);
+        } else {
+            const bool black = isBlackKey(pitch);
+            g.setColour(black ? juce::Colour(0xff1c1f26) : juce::Colour(0xffe8e8ee));
+            g.fillRect(1.0f, y + 1.0f, (float) (gutterRight - 2), (float) (rowH - 1));
+            if (((pitch % 12) + 12) % 12 == 0) {
+                g.setColour(juce::Colours::black);
+                g.setFont(juce::Font(juce::FontOptions(10.0f)));
+                g.drawText(noteName(pitch), 2, (int) y, gutterRight - 4, rowH,
+                           juce::Justification::centredRight, false);
+            }
         }
     }
     g.setColour(juce::Colour(0xff3a4150));
-    g.drawVerticalLine(kKeyboardW, (float) kRulerH, (float) getHeight());
+    g.drawVerticalLine(gutterRight, (float) kRulerH, (float) getHeight());
 }
 
 void StylePartPianoRoll::resized() { clampScroll(); }
@@ -237,7 +292,7 @@ void StylePartPianoRoll::mouseDown(const juce::MouseEvent& e)
     const juce::Point<float> p = e.position;
 
     // Piano key click -> audition only.
-    if (p.x < kKeyboardW) {
+    if (p.x < gridLeft()) {
         if (p.y >= kRulerH) {
             const int pitch = yToPitch(p.y);
             m_lastAuditioned = -1;
@@ -345,5 +400,27 @@ void StylePartPianoRoll::commit()
 {
     if (onNotesEdited)
         onNotesEdited(m_notes);
+}
+
+float StylePartPianoRoll::xForTick(int tick) const noexcept
+{
+    return tickToX(tick);
+}
+
+int StylePartPianoRoll::tickForX(float x) const noexcept
+{
+    return xToTick(x);
+}
+
+void StylePartPianoRoll::setNoteVelocity(int index, int velocity)
+{
+    if (index < 0 || index >= static_cast<int>(m_notes.size()))
+        return;
+    const int clamped = std::clamp(velocity, 1, 127);
+    if (m_notes[index].velocity == clamped)
+        return;
+    m_notes[index].velocity = clamped;
+    commit();
+    repaint();
 }
 }

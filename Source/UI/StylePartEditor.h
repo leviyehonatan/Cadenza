@@ -33,7 +33,7 @@ public:
                  int beatsPerBar,
                  bool percussion);
 
-    void setPlaybackTick(int tickInSection, bool visible);
+    void setTransportState(int tickInSection, bool playing, bool recordArmed);
 
     void closeButtonPressed() override;
 
