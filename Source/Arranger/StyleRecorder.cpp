@@ -1,5 +1,6 @@
 #include "StyleRecorder.h"
 #include "StyleLoader.h"
+#include "PatternNoteMerge.h"
 #include "../Midi/GmInstruments.h"
 #include "../MusicalTiming.h"
 
@@ -51,47 +52,6 @@ int quantizeTick(int tick, int grid, int len) noexcept
         return std::max(0, tick);
     const int snapped = grid > 0 ? ((tick + grid / 2) / grid) * grid : tick;
     return ((snapped % len) + len) % len;
-}
-
-// Merge one (already quantized) note into a part, shared by recording and
-// piano-roll edits so both obey the same grid/dedup rules:
-//   * percussion: a same-pitch hit on the same grid cell updates the existing
-//     note (newest velocity/length wins) instead of stacking a duplicate;
-//   * melodic: a new note that overlaps an earlier same-pitch note trims that
-//     note to end where the new one begins, or drops it when fully covered.
-void mergeNoteIntoPart(Part& part, const PatternNote& incoming, bool percussion)
-{
-    if (percussion) {
-        for (auto& existing : part.notes) {
-            if (existing.pitch == incoming.pitch && existing.tick == incoming.tick) {
-                existing.velocity = incoming.velocity;   // newest hit wins
-                existing.duration = incoming.duration;
-                return;
-            }
-        }
-        part.notes.push_back(incoming);
-        return;
-    }
-
-    const int newStart = incoming.tick;
-    const int newEnd = incoming.tick + incoming.duration;
-    for (auto it = part.notes.begin(); it != part.notes.end();) {
-        if (it->pitch == incoming.pitch) {
-            const int exStart = it->tick;
-            const int exEnd = it->tick + it->duration;
-            if (exStart < newEnd && newStart < exEnd) {   // same-pitch overlap
-                if (exStart < newStart) {
-                    it->duration = newStart - exStart;     // trim the earlier note
-                    ++it;
-                    continue;
-                }
-                it = part.notes.erase(it);                 // fully covered: replace
-                continue;
-            }
-        }
-        ++it;
-    }
-    part.notes.push_back(incoming);
 }
 
 // Playback policy for a self-recorded part: the same per-channel defaults the
@@ -350,7 +310,7 @@ bool StyleRecorder::commitTake()
         n.pitch = take.pitch;
         n.velocity = take.velocity;
         n.role = roleForRecordedPitch(take.pitch, info.percussion);
-        mergeNoteIntoPart(part, n, info.percussion);
+        mergePatternNote(part.notes, n, info.percussion);
     }
     m_take.clear();
 
@@ -416,7 +376,7 @@ void StyleRecorder::replacePartNotes(std::vector<PatternNote> notes)
         n.duration = std::clamp(n.duration, 1, len);
         n.tick = quantizeTick(std::clamp(n.tick, 0, std::max(0, len - 1)), grid, len);
         n.role = roleForRecordedPitch(n.pitch, info.percussion);
-        mergeNoteIntoPart(part, n, info.percussion);
+        mergePatternNote(part.notes, n, info.percussion);
     }
     std::sort(part.notes.begin(), part.notes.end(),
               [](const PatternNote& a, const PatternNote& b) { return a.tick < b.tick; });

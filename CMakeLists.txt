@@ -43,6 +43,7 @@ add_library(cadenza_core STATIC
     Source/Midi/MidiControlMap.cpp
     Source/Midi/GmInstruments.cpp
     Source/Arranger/Style.cpp
+    Source/Arranger/PatternNoteMerge.cpp
     Source/Arranger/StyleLoader.cpp
     Source/Arranger/StyParser.cpp
     Source/Arranger/PatternTransposer.cpp
@@ -251,6 +252,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
             Source/Arranger/StyleEngine.cpp
             Source/UI/NativePanel.cpp
             Source/UI/StylePartEditor.cpp
+            Source/UI/StylePartPatternImport.cpp
             Source/UI/StylePartPianoRoll.cpp
     )
 
@@ -307,6 +309,20 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
             juce::juce_audio_processors
             juce::juce_gui_extra
     )
+
+    if(CADENZA_BUILD_TESTS)
+        add_executable(cadenza_pattern_import_tests
+            tests/StylePartPatternImportTests.cpp
+            Source/UI/StylePartPatternImport.cpp
+        )
+        target_link_libraries(cadenza_pattern_import_tests
+            PRIVATE
+                cadenza_core
+                juce::juce_audio_basics
+        )
+        add_test(NAME cadenza_pattern_import_tests
+                 COMMAND cadenza_pattern_import_tests)
+    endif()
 
     add_custom_command(TARGET Cadenza POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory

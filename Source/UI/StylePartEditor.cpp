@@ -1,4 +1,5 @@
 #include "StylePartEditor.h"
+#include "StylePartPatternImport.h"
 
 #include <algorithm>
 #include <functional>
@@ -16,6 +17,11 @@ constexpr int kContextClear = 4;
 constexpr int kHelpShortcuts = 101;
 constexpr int kHelpMouse = 102;
 constexpr int kHelpAbout = 103;
+constexpr int kHelpPatterns = 104;
+constexpr int kPatternRock = 201;
+constexpr int kPatternEdm = 202;
+constexpr int kPatternHipHop = 203;
+constexpr int kPasteMidiPattern = 204;
 
 bar_workflow::ShortcutKey shortcutKey(const juce::KeyPress& key)
 {
@@ -164,6 +170,12 @@ public:
         configureButton(clear, "Clear", [this] {
             executeCommand(bar_workflow::EditorCommand::Clear);
         });
+        configureButton(importMidi, "Import MIDI", [this] {
+            openMidiFileChooser();
+        });
+        configureButton(patterns, "Patterns", [this] {
+            showPatternsMenu();
+        });
         configureButton(help, "Help", [this] {
             showHelpMenu();
         });
@@ -224,6 +236,8 @@ public:
         paste.setBounds(bar.removeFromLeft(54).reduced(3));
         duplicate.setBounds(bar.removeFromLeft(76).reduced(3));
         clear.setBounds(bar.removeFromLeft(52).reduced(3));
+        importMidi.setBounds(bar.removeFromLeft(86).reduced(3));
+        patterns.setBounds(bar.removeFromLeft(72).reduced(3));
         help.setBounds(bar.removeFromLeft(48).reduced(3));
         bar.removeFromLeft(6);
         snapLabel.setBounds(bar.removeFromLeft(40));
@@ -244,6 +258,7 @@ public:
     void setPart(const std::vector<cadenza::arranger::PatternNote>& notes,
                  int sectionTicks, int ticksPerBeat, int beatsPerBar, bool percussion)
     {
+        percussionPart = percussion;
         roll.setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, percussion);
         updateSelectionStatus();
         velocityLane.repaint();
@@ -338,6 +353,7 @@ private:
         juce::PopupMenu menu;
         menu.addItem(kHelpShortcuts, "Keyboard shortcuts");
         menu.addItem(kHelpMouse, "Mouse controls");
+        menu.addItem(kHelpPatterns, "MIDI patterns");
         menu.addSeparator();
         menu.addItem(kHelpAbout, "About editor");
 
@@ -363,6 +379,15 @@ private:
                         "Drag empty grid  Box select\nDrag selected notes  Move\n"
                         "Shift+drag selected notes  Duplicate and move\n"
                         "Drag note right edge  Resize\nRight-click note  Delete");
+                } else if (result == kHelpPatterns) {
+                    juce::AlertWindow::showMessageBoxAsync(
+                        juce::MessageBoxIconType::InfoIcon,
+                        "MIDI patterns",
+                        "Import MIDI loads the first note track from a short .mid "
+                        "or .midi file.\nPatterns inserts an original built-in "
+                        "groove.\n\nDestination: selected bar, then playhead bar, "
+                        "then bar 1.\nImports overdub existing notes. Paste MIDI "
+                        "Pattern accepts a MIDI file path from the clipboard.");
                 } else if (result == kHelpAbout) {
                     juce::AlertWindow::showMessageBoxAsync(
                         juce::MessageBoxIconType::InfoIcon,
@@ -370,6 +395,134 @@ private:
                         "Cadenza Part Editor\nPiano-roll editing for melodic and drum parts.");
                 }
             });
+    }
+
+    void showPatternsMenu()
+    {
+        const auto available = pattern_import::builtInPatterns(
+            roll.ticksPerBeat(), roll.beatsPerBar());
+        juce::PopupMenu menu;
+        menu.addItem(kPatternRock, available[0].name);
+        menu.addItem(kPatternEdm, available[1].name);
+        menu.addItem(kPatternHipHop, available[2].name);
+        menu.addSeparator();
+        menu.addItem(kPasteMidiPattern, "Paste MIDI Pattern");
+
+        juce::Component::SafePointer<Content> safe(this);
+        menu.showMenuAsync(
+            juce::PopupMenu::Options().withTargetComponent(&patterns),
+            [safe](int result) {
+                auto* content = safe.getComponent();
+                if (content == nullptr)
+                    return;
+                if (result == kPasteMidiPattern) {
+                    content->pasteMidiPatternFromClipboard();
+                    return;
+                }
+                const int index = result - kPatternRock;
+                const auto presets = pattern_import::builtInPatterns(
+                    content->roll.ticksPerBeat(),
+                    content->roll.beatsPerBar());
+                if (index >= 0 && index < static_cast<int>(presets.size()))
+                    content->insertImportedPattern(presets[index].notes);
+            });
+    }
+
+    void openMidiFileChooser()
+    {
+        midiChooser = std::make_unique<juce::FileChooser>(
+            "Import MIDI Pattern",
+            juce::File::getSpecialLocation(
+                juce::File::userDocumentsDirectory),
+            "*.mid;*.midi");
+
+        juce::Component::SafePointer<Content> safe(this);
+        midiChooser->launchAsync(
+            juce::FileBrowserComponent::openMode
+                | juce::FileBrowserComponent::canSelectFiles,
+            [safe](const juce::FileChooser& chooser) {
+                if (auto* content = safe.getComponent()) {
+                    const auto file = chooser.getResult();
+                    if (file.existsAsFile())
+                        content->importMidiFile(file);
+                    content->midiChooser.reset();
+                }
+            });
+    }
+
+    void importMidiFile(const juce::File& file)
+    {
+        juce::FileInputStream input(file);
+        if (!input.openedOk()) {
+            showImportError("Could not open the selected MIDI file.");
+            return;
+        }
+
+        juce::MidiFile midi;
+        if (!midi.readFrom(input)) {
+            showImportError("The selected file is not a readable MIDI file.");
+            return;
+        }
+
+        const auto parsed = pattern_import::parseMidiPattern(
+            midi, roll.ticksPerBeat());
+        if (!parsed.ok()) {
+            showImportError(juce::String(parsed.error));
+            return;
+        }
+        insertImportedPattern(parsed.notes);
+    }
+
+    void pasteMidiPatternFromClipboard()
+    {
+        // JUCE exposes portable clipboard text here, not a common binary MIDI format.
+        auto path = juce::SystemClipboard::getTextFromClipboard().trim();
+        if (path.length() >= 2
+            && ((path.startsWithChar('"') && path.endsWithChar('"'))
+                || (path.startsWithChar('\'') && path.endsWithChar('\'')))) {
+            path = path.substring(1, path.length() - 1).trim();
+        }
+
+        const juce::File file(path);
+        const auto extension = file.getFileExtension().toLowerCase();
+        if (!file.existsAsFile()
+            || (extension != ".mid" && extension != ".midi")) {
+            showImportError(
+                "Clipboard text must be a path to an existing .mid or .midi file.");
+            return;
+        }
+        importMidiFile(file);
+    }
+
+    void insertImportedPattern(
+        const std::vector<cadenza::arranger::PatternNote>& imported)
+    {
+        const int destinationBar = pattern_import::resolveDestinationBar(
+            roll.barSelection(), playbackTick,
+            roll.totalBars(), roll.ticksPerBar());
+        const int division = roll.snapDivision();
+        const int duplicateGridTicks = division > 0
+            ? std::max(1, (roll.ticksPerBeat() * 4) / division)
+            : 0;
+        auto result = pattern_import::insertPattern(
+            roll.notes(), imported,
+            destinationBar * roll.ticksPerBar(),
+            roll.sectionTicks(), percussionPart, duplicateGridTicks);
+        if (result.selection.empty()) {
+            showImportError("No imported notes fit inside the current pattern.");
+            return;
+        }
+        roll.replaceNotesAndSelect(
+            std::move(result.notes), std::move(result.selection));
+        velocityLane.repaint();
+    }
+
+    void showImportError(const juce::String& message)
+    {
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::MessageBoxIconType::WarningIcon,
+            "MIDI Pattern Import",
+            message);
     }
 
     void showBarContextMenu(juce::Point<int> position)
@@ -490,7 +643,8 @@ private:
     StylePartEditorWindow::Callbacks& callbacks;
     StylePartPianoRoll roll;
     VelocityLane velocityLane;
-    juce::TextButton play, record, copy, paste, duplicate, clear, help;
+    juce::TextButton play, record, copy, paste, duplicate, clear;
+    juce::TextButton importMidi, patterns, help;
     juce::ComboBox mode, snap;
     juce::Label snapLabel, selectionStatus, position, rec;
     bar_workflow::BarClipboard clipboard;
@@ -500,6 +654,8 @@ private:
     int playbackTick = -1;
     int lastMouseTick = -1;
     int lastMousePitch = -1;
+    bool percussionPart = false;
+    std::unique_ptr<juce::FileChooser> midiChooser;
 };
 
 StylePartEditorWindow::StylePartEditorWindow(Callbacks callbacks)

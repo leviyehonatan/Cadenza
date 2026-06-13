@@ -67,6 +67,9 @@ public:
     void duplicateSelectedNotes();
     void deleteSelectedNotes();
     void replaceNotes(std::vector<cadenza::arranger::PatternNote> notes);
+    void replaceNotesAndSelect(
+        std::vector<cadenza::arranger::PatternNote> notes,
+        note_workflow::NoteSelection selection);
     void setNoteVelocity(int index, int velocity);
 
     void paint(juce::Graphics&) override;

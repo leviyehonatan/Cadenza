@@ -691,6 +691,23 @@ void StylePartPianoRoll::replaceNotes(std::vector<PatternNote> notes)
     repaint();
 }
 
+void StylePartPianoRoll::replaceNotesAndSelect(
+    std::vector<PatternNote> notes,
+    note_workflow::NoteSelection selection)
+{
+    for (auto it = selection.begin(); it != selection.end();) {
+        if (*it < 0 || *it >= static_cast<int>(notes.size()))
+            it = selection.erase(it);
+        else
+            ++it;
+    }
+    m_notes = std::move(notes);
+    m_noteSelection = std::move(selection);
+    commit();
+    notifyNoteSelection();
+    repaint();
+}
+
 void StylePartPianoRoll::notifyNoteSelection()
 {
     if (onNoteSelectionChanged)
