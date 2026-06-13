@@ -209,6 +209,105 @@ void replacePartNotesRebakesRoles()
     expect(style->sections[0].parts.empty(), "empty edit removes the part");
 }
 
+// --- loop recording: wraparound + merge / dedup / overlap rules ---
+
+void loopRecordingWrapsAroundSection()
+{
+    // Section is 7680 ticks (2 bars). A hit played during the SECOND loop pass
+    // folds into the section instead of landing past its end.
+    StyleRecorder rec;
+    rec.startSession(defaultConfig());
+    rec.setTargetPart(RecorderPart::Drums);
+
+    rec.noteOn(38, 100, 7680 + 250);    // 250 into the next pass
+    rec.noteOff(38, 7680 + 400);
+    rec.commitTake();
+
+    auto style = rec.snapshotStyle();
+    const auto& notes = style->sections[0].parts[0].notes;
+    expect(notes.size() == 1, "wrapped hit recorded as one note");
+    expect(notes[0].tick >= 0 && notes[0].tick < 7680, "wrapped tick folds into the section");
+    expect(notes[0].tick == 240, "250 in-section snaps to the 1/16 grid (240)");
+}
+
+void drumKickRecordedTwiceDoesNotDuplicate()
+{
+    // A kick on the same grid cell across two passes updates in place (newest
+    // velocity wins) rather than stacking a duplicate.
+    StyleRecorder rec;
+    rec.startSession(defaultConfig());
+    rec.setTargetPart(RecorderPart::Drums);
+
+    rec.noteOn(36, 100, 10); rec.noteOff(36, 120);     // pass 1: snaps to 0
+    rec.commitTake();
+    rec.noteOn(36, 70, 7680 + 15); rec.noteOff(36, 7680 + 120);  // pass 2: also snaps to 0
+    rec.commitTake();
+
+    auto style = rec.snapshotStyle();
+    const auto& notes = style->sections[0].parts[0].notes;
+    expect(notes.size() == 1, "same kick on the same grid cell is not duplicated");
+    expect(notes[0].tick == 0, "kick stays on grid position 0");
+    expect(notes[0].velocity == 70, "velocity updates from the newest hit");
+}
+
+void drumKickThenHatCreatesTwoNotes()
+{
+    // Different pitches on the same grid cell are two distinct hits.
+    StyleRecorder rec;
+    rec.startSession(defaultConfig());
+    rec.setTargetPart(RecorderPart::Drums);
+
+    rec.noteOn(36, 100, 0);  rec.noteOff(36, 100);     // kick
+    rec.noteOn(42, 80, 5);   rec.noteOff(42, 90);      // hat, same cell
+    rec.commitTake();
+
+    auto style = rec.snapshotStyle();
+    const auto& notes = style->sections[0].parts[0].notes;
+    expect(notes.size() == 2, "kick + hi-hat on the same cell make two notes");
+    const bool haveKick = notes[0].pitch == 36 || notes[1].pitch == 36;
+    const bool haveHat  = notes[0].pitch == 42 || notes[1].pitch == 42;
+    expect(haveKick && haveHat, "both the kick and the hat are kept");
+}
+
+void melodicOverlapSamePitchIsCleaned()
+{
+    // Two same-pitch melodic notes that overlap: the earlier note is trimmed to
+    // end where the new one starts, so they never sound on top of each other.
+    StyleRecorder rec;
+    rec.startSession(defaultConfig());
+    rec.setTargetPart(RecorderPart::Bass);
+
+    rec.noteOn(36, 100, 0);   rec.noteOff(36, 2000);   // long C2 (0..2000)
+    rec.noteOn(36, 90, 500);  rec.noteOff(36, 900);    // C2 again, snaps to 480
+    rec.commitTake();
+
+    auto style = rec.snapshotStyle();
+    const auto& notes = style->sections[0].parts[0].notes;
+    expect(notes.size() == 2, "overlapping same-pitch notes are kept as two");
+    expect(notes[0].pitch == 36 && notes[1].pitch == 36, "both notes are the same pitch");
+    expect(notes[0].duration == 480, "earlier note trimmed to where the new one begins");
+    expect(notes[0].tick + notes[0].duration <= notes[1].tick, "no remaining overlap");
+}
+
+void quantizeSnapsRecordedTicks()
+{
+    // 1/16 grid at 960 PPQ = 240 ticks per cell.
+    StyleRecorder rec;
+    rec.startSession(defaultConfig());
+    rec.setTargetPart(RecorderPart::Chord1);
+    rec.setQuantizeDivision(16);
+
+    rec.noteOn(60, 100, 100);  rec.noteOff(60, 600);    // 100 -> 0
+    rec.noteOn(64, 100, 1390); rec.noteOff(64, 1700);   // 1390 -> 1440
+    rec.commitTake();
+
+    auto style = rec.snapshotStyle();
+    const auto& notes = style->sections[0].parts[0].notes;
+    expect(notes[0].tick == 0, "100 snaps to 0 on the 240 grid");
+    expect(notes[1].tick == 1440, "1390 snaps to 1440 on the 240 grid");
+    expect(notes[0].duration == 500, "note length is preserved, not quantized");
+}
+
 void partInfoTableIsConsistent()
 {
     for (int i = 0; i < kNumRecorderParts; ++i) {
@@ -230,6 +329,11 @@ int main()
     overdubMergesAndClearRemoves();
     savedStyleRoundTrips();
     replacePartNotesRebakesRoles();
+    loopRecordingWrapsAroundSection();
+    drumKickRecordedTwiceDoesNotDuplicate();
+    drumKickThenHatCreatesTwoNotes();
+    melodicOverlapSamePitchIsCleaned();
+    quantizeSnapsRecordedTicks();
     partInfoTableIsConsistent();
 
     if (failures != 0) return EXIT_FAILURE;

@@ -36,6 +36,64 @@ NoteRole roleForRecordedPitch(int pitch, bool percussion) noexcept
     }
 }
 
+// Ticks per quantize cell for a division (16 = 1/16 grid). 0 disables snapping.
+int gridTicksFor(const RecorderConfig& cfg, int division) noexcept
+{
+    if (division <= 0)
+        return 0;
+    return std::max(1, (cfg.ticksPerBeat * 4) / division);
+}
+
+// Snap a tick to the grid and fold it into the looping section [0, len).
+int quantizeTick(int tick, int grid, int len) noexcept
+{
+    if (len <= 0)
+        return std::max(0, tick);
+    const int snapped = grid > 0 ? ((tick + grid / 2) / grid) * grid : tick;
+    return ((snapped % len) + len) % len;
+}
+
+// Merge one (already quantized) note into a part, shared by recording and
+// piano-roll edits so both obey the same grid/dedup rules:
+//   * percussion: a same-pitch hit on the same grid cell updates the existing
+//     note (newest velocity/length wins) instead of stacking a duplicate;
+//   * melodic: a new note that overlaps an earlier same-pitch note trims that
+//     note to end where the new one begins, or drops it when fully covered.
+void mergeNoteIntoPart(Part& part, const PatternNote& incoming, bool percussion)
+{
+    if (percussion) {
+        for (auto& existing : part.notes) {
+            if (existing.pitch == incoming.pitch && existing.tick == incoming.tick) {
+                existing.velocity = incoming.velocity;   // newest hit wins
+                existing.duration = incoming.duration;
+                return;
+            }
+        }
+        part.notes.push_back(incoming);
+        return;
+    }
+
+    const int newStart = incoming.tick;
+    const int newEnd = incoming.tick + incoming.duration;
+    for (auto it = part.notes.begin(); it != part.notes.end();) {
+        if (it->pitch == incoming.pitch) {
+            const int exStart = it->tick;
+            const int exEnd = it->tick + it->duration;
+            if (exStart < newEnd && newStart < exEnd) {   // same-pitch overlap
+                if (exStart < newStart) {
+                    it->duration = newStart - exStart;     // trim the earlier note
+                    ++it;
+                    continue;
+                }
+                it = part.notes.erase(it);                 // fully covered: replace
+                continue;
+            }
+        }
+        ++it;
+    }
+    part.notes.push_back(incoming);
+}
+
 // Playback policy for a self-recorded part: the same per-channel defaults the
 // importer falls back to when a .sty has no CASM (StyParser::fallbackYamahaPolicy),
 // so recorded styles follow chords the way the equivalent Yamaha part would.
@@ -275,23 +333,24 @@ bool StyleRecorder::commitTake()
 
     const int len = m_config.bars
         * cadenza::ticksPerBar(m_config.ticksPerBeat, m_config.beatsPerBar, m_config.beatUnit);
-    const int grid = m_quantizeDivision > 0
-        ? std::max(1, (m_config.ticksPerBeat * 4) / m_quantizeDivision)
-        : 0;
+    const int grid = gridTicksFor(m_config, m_quantizeDivision);
 
     const auto& info = recorderPartInfo(m_target);
     auto& part = findOrCreateTargetPart();
 
+    // Merge in time order so overlap trimming is deterministic, and so a hit
+    // that snaps onto an earlier same-cell hit updates it (no duplicates).
+    std::sort(m_take.begin(), m_take.end(),
+              [](const TakeNote& a, const TakeNote& b) { return a.startTick < b.startTick; });
+
     for (const auto& take : m_take) {
         PatternNote n;
-        n.tick = take.startTick;
-        if (grid > 0)
-            n.tick = (((take.startTick + grid / 2) / grid) * grid) % len;
-        n.duration = take.durationTicks;
+        n.tick = quantizeTick(take.startTick, grid, len);
+        n.duration = std::max(1, std::min(take.durationTicks, len));
         n.pitch = take.pitch;
         n.velocity = take.velocity;
         n.role = roleForRecordedPitch(take.pitch, info.percussion);
-        part.notes.push_back(n);
+        mergeNoteIntoPart(part, n, info.percussion);
     }
     m_take.clear();
 
@@ -341,15 +400,23 @@ void StyleRecorder::replacePartNotes(std::vector<PatternNote> notes)
     const int len = m_config.bars
         * cadenza::ticksPerBar(m_config.ticksPerBeat, m_config.beatsPerBar, m_config.beatUnit);
 
+    const int grid = gridTicksFor(m_config, m_quantizeDivision);
+
+    // Drawn/edited notes go through the SAME quantize + merge path as recording,
+    // so the piano roll lands on the same grid and obeys the same dedup/overlap
+    // rules. Sort by start so overlap trimming is deterministic.
+    std::sort(notes.begin(), notes.end(),
+              [](const PatternNote& a, const PatternNote& b) { return a.tick < b.tick; });
+
     auto& part = findOrCreateTargetPart();
     part.notes.clear();
     for (auto n : notes) {
         n.pitch = std::clamp(n.pitch, 0, 127);
         n.velocity = std::clamp(n.velocity, 1, 127);
-        n.tick = std::clamp(n.tick, 0, std::max(0, len - 1));
         n.duration = std::clamp(n.duration, 1, len);
+        n.tick = quantizeTick(std::clamp(n.tick, 0, std::max(0, len - 1)), grid, len);
         n.role = roleForRecordedPitch(n.pitch, info.percussion);
-        part.notes.push_back(n);
+        mergeNoteIntoPart(part, n, info.percussion);
     }
     std::sort(part.notes.begin(), part.notes.end(),
               [](const PatternNote& a, const PatternNote& b) { return a.tick < b.tick; });
