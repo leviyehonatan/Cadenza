@@ -99,6 +99,14 @@ public:
     bool clearTargetPart();
     bool targetPartHasNotes() const;
 
+    // Replace the target part's notes wholesale (piano-roll editing). Roles are
+    // re-baked from the new pitches; the part is created when missing and
+    // removed when `notes` is empty. Ticks/durations are clamped to the section.
+    void replacePartNotes(std::vector<PatternNote> notes);
+
+    // The target part's current notes (empty when none recorded yet).
+    std::vector<PatternNote> targetPartNotes() const;
+
     // Write the current style as .cstyle JSON. Returns false on I/O failure.
     bool save(const std::string& path) const;
 

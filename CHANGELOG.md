@@ -21,6 +21,30 @@ converter.
 
 ## Timeline of what got built
 
+### Piano-roll part editor — fix recorded notes visually
+
+A visual editor for Style Recorder parts, so you can correct what you played
+without re-recording. New **Edit…** button on the recorder row opens a
+piano-roll window showing the selected part:
+
+- Drag notes to move/resize, double-click to add, Delete to remove, with the
+  usual marquee-select and multi-edit. Notes audition on the part's voice as
+  you edit them.
+- Every edit writes straight back into the in-progress style and re-bakes
+  note roles from the new pitches (move a note to an E and it becomes the
+  chord 3rd), so the change is audible on the very next loop pass.
+- A playback marker sweeps the grid in time with the looping section.
+- Switching the target part (or committing/clearing a take) refreshes the
+  open editor automatically.
+
+The grid is vendored from **Sjhunt93/Piano-Roll-Editor** (MIT, JUCE-based) in
+`Source/UI/PianoRoll/` — its IGME-specific hooks are already compiled out via
+`LIB_VERSION`, and the only local change is swapping the Projucer `JuceHeader.h`
+include for the CMake module include. `StylePartEditorWindow` wraps it and
+bridges the 480-PPQ grid domain to Cadenza's style ticks. `StyleRecorder`
+gained `replacePartNotes` / `targetPartNotes` for the round-trip (covered by
+a new test). 32 suites pass.
+
 ### Style Recorder — record your own styles (no Yamaha file needed)
 
 The first step away from .sty dependence: styles can now be CREATED inside

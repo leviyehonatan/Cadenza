@@ -157,6 +157,7 @@ public:
         std::function<void(int)>  onRecNew;                   // bars -> start a new session
         std::function<void(int)>  onRecPart;                  // target part index 0..6
         std::function<void(bool)> onRecArm;                   // record on/off (off commits the take)
+        std::function<void()>     onRecEdit;                  // open the piano-roll part editor
         std::function<void()>     onRecClear;                 // clear the target part
         std::function<void()>     onRecSave;                  // save the style (.cstyle)
         std::function<void()>     onRecExit;                  // abandon the session
@@ -313,6 +314,7 @@ private:
     juce::ComboBox   m_recPart;            // target part
     juce::TextButton m_recNew   { "New" };
     juce::TextButton m_recArm   { "Record" };
+    juce::TextButton m_recEdit  { "Edit..." };
     juce::TextButton m_recClear { "Clear Part" };
     juce::TextButton m_recSave  { "Save..." };
     juce::TextButton m_recExit  { "Exit" };

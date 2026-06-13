@@ -18,7 +18,7 @@
 #include <memory>
 #include <string>
 
-namespace cadenza::ui { class NativePanel; }
+namespace cadenza::ui { class NativePanel; class StylePartEditorWindow; }
 
 class MainComponent final : public juce::Component,
                             private juce::Timer,
@@ -94,6 +94,9 @@ private:
     void recorderExit();
     void recorderRefreshStyle();          // republish the in-progress style + UI
     juce::String recorderStatusText() const;
+    void recorderOpenEditor();            // piano-roll editor for the target part
+    void recorderReloadEditor();          // refresh the editor contents (if open)
+    void recorderCloseEditor();
     void applySongStepForBar(int bar, bool applySection = true);
     void queueSongSectionForBar(int bar);
     bool loadAndApplySoundFontFile(const juce::File& file, bool persist);
@@ -125,6 +128,7 @@ private:
     cadenza::arranger::StyleRecorder m_recorder;
     std::atomic<bool> m_recordArmed { false };
     std::unique_ptr<juce::FileChooser> m_recSaveChooser;
+    std::unique_ptr<cadenza::ui::StylePartEditorWindow> m_partEditor;
 
     // Live sections: one-shot returns / ending stops are sequenced inside the
     // StyleEngine (sample-tight); we only track the last Main as the return target.

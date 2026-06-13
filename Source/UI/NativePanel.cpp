@@ -385,6 +385,10 @@ NativePanel::NativePanel()
     };
     addAndMakeVisible(m_recArm);
 
+    m_recEdit.setTooltip("Open the selected part in the piano-roll editor");
+    m_recEdit.onClick = [this] { if (m_cb.onRecEdit) m_cb.onRecEdit(); };
+    addAndMakeVisible(m_recEdit);
+
     m_recClear.setTooltip("Delete everything recorded on the selected part");
     m_recClear.onClick = [this] { if (m_cb.onRecClear) m_cb.onRecClear(); };
     addAndMakeVisible(m_recClear);
@@ -606,6 +610,7 @@ void NativePanel::setRecorderState(bool sessionActive, bool armed, const juce::S
     m_recArmed = armed;
     m_recArm.setToggleState(armed, juce::dontSendNotification);
     m_recArm.setEnabled(sessionActive);
+    m_recEdit.setEnabled(sessionActive && !armed);
     m_recClear.setEnabled(sessionActive && !armed);
     m_recSave.setEnabled(sessionActive && !armed);
     m_recExit.setEnabled(sessionActive);
@@ -867,6 +872,7 @@ void NativePanel::resized()
         m_recBars.setBounds(r.removeFromLeft(76));   r.removeFromLeft(6);
         m_recPart.setBounds(r.removeFromLeft(92));   r.removeFromLeft(6);
         m_recArm.setBounds(r.removeFromLeft(76));    r.removeFromLeft(6);
+        m_recEdit.setBounds(r.removeFromLeft(56));   r.removeFromLeft(6);
         m_recClear.setBounds(r.removeFromLeft(82));  r.removeFromLeft(6);
         m_recSave.setBounds(r.removeFromLeft(64));   r.removeFromLeft(6);
         m_recExit.setBounds(r.removeFromLeft(50));   r.removeFromLeft(10);

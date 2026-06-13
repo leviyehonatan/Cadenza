@@ -322,6 +322,52 @@ bool StyleRecorder::clearTargetPart()
     return parts.size() != before;
 }
 
+void StyleRecorder::replacePartNotes(std::vector<PatternNote> notes)
+{
+    std::lock_guard<std::mutex> lk(m_mutex);
+    if (!m_active || m_style.sections.empty())
+        return;
+
+    const auto& info = recorderPartInfo(m_target);
+    auto& parts = m_style.sections.front().parts;
+
+    if (notes.empty()) {
+        parts.erase(std::remove_if(parts.begin(), parts.end(),
+                                   [&](const Part& p) { return p.midiChannel == info.midiChannel; }),
+                    parts.end());
+        return;
+    }
+
+    const int len = m_config.bars
+        * cadenza::ticksPerBar(m_config.ticksPerBeat, m_config.beatsPerBar, m_config.beatUnit);
+
+    auto& part = findOrCreateTargetPart();
+    part.notes.clear();
+    for (auto n : notes) {
+        n.pitch = std::clamp(n.pitch, 0, 127);
+        n.velocity = std::clamp(n.velocity, 1, 127);
+        n.tick = std::clamp(n.tick, 0, std::max(0, len - 1));
+        n.duration = std::clamp(n.duration, 1, len);
+        n.role = roleForRecordedPitch(n.pitch, info.percussion);
+        part.notes.push_back(n);
+    }
+    std::sort(part.notes.begin(), part.notes.end(),
+              [](const PatternNote& a, const PatternNote& b) { return a.tick < b.tick; });
+}
+
+std::vector<PatternNote> StyleRecorder::targetPartNotes() const
+{
+    std::lock_guard<std::mutex> lk(m_mutex);
+    std::vector<PatternNote> notes;
+    if (!m_active || m_style.sections.empty())
+        return notes;
+    const auto& info = recorderPartInfo(m_target);
+    for (const auto& part : m_style.sections.front().parts)
+        if (part.midiChannel == info.midiChannel)
+            return part.notes;
+    return notes;
+}
+
 bool StyleRecorder::targetPartHasNotes() const
 {
     std::lock_guard<std::mutex> lk(m_mutex);

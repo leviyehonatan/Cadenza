@@ -7,6 +7,7 @@
 #include "Arranger/OtsRecall.h"
 #include "Arranger/SectionButtons.h"
 #include "UI/NativePanel.h"
+#include "UI/StylePartEditor.h"
 
 #include <algorithm>
 #include <cctype>
@@ -1351,6 +1352,7 @@ void MainComponent::recorderNewSession(int bars)
 void MainComponent::recorderSetPart(int partIndex)
 {
     m_recorder.setTargetPart(cadenza::arranger::recorderPartInfo(partIndex).part);
+    recorderReloadEditor();
     if (m_recorder.sessionActive() && m_panel)
         m_panel->setRecorderState(true, m_recordArmed.load(),
             recorderStatusText() + " - press Record, then play");
@@ -1376,6 +1378,7 @@ void MainComponent::recorderArm(bool on)
         m_recordArmed.store(false);
         const bool added = m_recorder.commitTake();
         recorderRefreshStyle();
+        recorderReloadEditor();
         if (m_panel)
             m_panel->setRecorderState(true, false,
                 added ? juce::String("Take kept - pick another part, Record again, or Save")
@@ -1408,7 +1411,10 @@ void MainComponent::recorderClearPart()
 {
     if (!m_recorder.sessionActive()) return;
     const bool removed = m_recorder.clearTargetPart();
-    if (removed) recorderRefreshStyle();
+    if (removed) {
+        recorderRefreshStyle();
+        recorderReloadEditor();
+    }
     if (m_panel)
         m_panel->setRecorderState(true, false,
             removed ? juce::String("Cleared ")
@@ -1462,12 +1468,68 @@ void MainComponent::recorderSave()
         });
 }
 
+void MainComponent::recorderOpenEditor()
+{
+    if (!m_recorder.sessionActive()) return;
+
+    if (!m_partEditor) {
+        cadenza::ui::StylePartEditorWindow::Callbacks cb;
+        cb.onNotesEdited = [this](std::vector<cadenza::arranger::PatternNote> notes) {
+            m_recorder.replacePartNotes(std::move(notes));
+            recorderRefreshStyle();   // hear the edit immediately while looping
+        };
+        cb.onAudition = [this](int note, int velocity) {
+            const auto& info = cadenza::arranger::recorderPartInfo(m_recorder.targetPart());
+            const int channel = info.midiChannel;
+            if (velocity > 0) {
+                m_audio.noteOn(channel, note, velocity);
+                // The editor only reports presses; release the audition note shortly.
+                juce::Component::SafePointer<MainComponent> safe(this);
+                juce::Timer::callAfterDelay(220, [safe, channel, note] {
+                    if (auto* self = safe.getComponent())
+                        self->m_audio.noteOff(channel, note);
+                });
+            } else {
+                m_audio.noteOff(channel, note);
+            }
+        };
+        cb.onClosed = [this] {
+            juce::Component::SafePointer<MainComponent> safe(this);
+            juce::MessageManager::callAsync([safe] {
+                if (auto* self = safe.getComponent())
+                    self->m_partEditor.reset();   // not from inside the window's callback
+            });
+        };
+        m_partEditor = std::make_unique<cadenza::ui::StylePartEditorWindow>(std::move(cb));
+    }
+
+    recorderReloadEditor();
+    m_partEditor->setVisible(true);
+    m_partEditor->toFront(true);
+}
+
+void MainComponent::recorderReloadEditor()
+{
+    if (!m_partEditor || !m_recorder.sessionActive()) return;
+    const auto& info = cadenza::arranger::recorderPartInfo(m_recorder.targetPart());
+    m_partEditor->setPart(info.label,
+                          m_recorder.targetPartNotes(),
+                          m_recorder.sectionLengthTicks(),
+                          m_recorder.config().ticksPerBeat);
+}
+
+void MainComponent::recorderCloseEditor()
+{
+    m_partEditor.reset();
+}
+
 void MainComponent::recorderExit()
 {
     m_recordArmed.store(false);
     m_midi.setCaptureMode(false);
     m_audio.setMetronomeEnabled(false);
     if (m_state.playing()) togglePlayback();
+    recorderCloseEditor();
     m_recorder.endSession();
 
     if (m_panel)
@@ -1582,6 +1644,16 @@ void MainComponent::timerCallback()
 
     // Section one-shot returns / ending stops are now handled sample-tight in the
     // StyleEngine (audio thread) via its section-changed / stop callbacks.
+
+    // Piano-roll editor: sweep the playback marker across the looping section.
+    if (m_partEditor && m_recorder.sessionActive()) {
+        const int len = m_recorder.sectionLengthTicks();
+        const bool playing = m_audio.transport().playing();
+        const int tick = (playing && len > 0)
+            ? m_audio.transport().positionTickInt() % len
+            : 0;
+        m_partEditor->setPlaybackTick(tick, playing);
+    }
 
     // A fade-out that reached silence stopped the transport on the audio thread;
     // sync the UI play state here.
@@ -1876,6 +1948,7 @@ void MainComponent::buildNativePanel()
     cb.onRecNew   = [this](int bars) { recorderNewSession(bars); };
     cb.onRecPart  = [this](int idx)  { recorderSetPart(idx); };
     cb.onRecArm   = [this](bool on)  { recorderArm(on); };
+    cb.onRecEdit  = [this] { recorderOpenEditor(); };
     cb.onRecClear = [this] { recorderClearPart(); };
     cb.onRecSave  = [this] { recorderSave(); };
     cb.onRecExit  = [this] { recorderExit(); };

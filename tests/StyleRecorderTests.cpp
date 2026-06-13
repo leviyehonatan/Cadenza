@@ -180,6 +180,35 @@ void savedStyleRoundTrips()
     std::remove(path.c_str());
 }
 
+void replacePartNotesRebakesRoles()
+{
+    StyleRecorder rec;
+    rec.startSession(defaultConfig());
+    rec.setTargetPart(RecorderPart::Bass);
+    rec.noteOn(36, 100, 0); rec.noteOff(36, 900);   // C2 root
+    rec.commitTake();
+
+    // Piano-roll edit: move the C to an E (3rd) and add a B (7th).
+    auto notes = rec.targetPartNotes();
+    expect(notes.size() == 1, "one note before the edit");
+    notes[0].pitch = 40;                            // E2
+    PatternNote added;
+    added.tick = 1920; added.duration = 480; added.pitch = 47; added.velocity = 90;
+    notes.push_back(added);
+    rec.replacePartNotes(notes);
+
+    auto style = rec.snapshotStyle();
+    const auto& bass = style->sections[0].parts[0];
+    expect(bass.notes.size() == 2, "edited part has two notes");
+    expect(bass.notes[0].role == NoteRole::Chord3, "moved note re-bakes as 3rd");
+    expect(bass.notes[1].role == NoteRole::Chord7, "added note bakes as 7th");
+
+    // Replacing with nothing removes the part.
+    rec.replacePartNotes({});
+    style = rec.snapshotStyle();
+    expect(style->sections[0].parts.empty(), "empty edit removes the part");
+}
+
 void partInfoTableIsConsistent()
 {
     for (int i = 0; i < kNumRecorderParts; ++i) {
@@ -200,6 +229,7 @@ int main()
     loopWrapGivesWrapAwareDuration();
     overdubMergesAndClearRemoves();
     savedStyleRoundTrips();
+    replacePartNotesRebakesRoles();
     partInfoTableIsConsistent();
 
     if (failures != 0) return EXIT_FAILURE;
