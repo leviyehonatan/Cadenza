@@ -21,6 +21,26 @@ converter.
 
 ## Timeline of what got built
 
+### Custom FL-style piano roll (replaced the vendored one)
+
+The vendored Sjhunt93 grid had no visible/clickable keyboard and a confusing
+control panel, so it was removed entirely and replaced with a self-contained
+`StylePartPianoRoll` (no external deps):
+
+- A real piano keyboard down the left edge (white/black keys, octave labels),
+  click a key to audition the pitch.
+- Draw a note by clicking empty grid (drag to set its length); drag a note's
+  body to move it (pitch + time); drag its right edge to resize; right-click
+  to delete. Mouse wheel scrolls the visible pitch range.
+- Everything snaps to a selectable grid (1/4…1/32, or Off), defaulting to
+  1/16; a bar/beat ruler and an orange playback marker track the loop.
+- Opens on a useful register automatically (GM percussion for drums, the
+  playing range for melodic parts). Edits write straight back into the style
+  so they're heard on the next loop pass.
+
+`Source/UI/PianoRoll/` (the vendored MIT sources) and its wrapper are gone;
+`StylePartEditorWindow` now hosts the new roll with a small grid-snap toolbar.
+
 ### Piano-roll part editor — fix recorded notes visually
 
 A visual editor for Style Recorder parts, so you can correct what you played

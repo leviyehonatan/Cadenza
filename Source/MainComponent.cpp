@@ -1515,10 +1515,12 @@ void MainComponent::recorderReloadEditor()
 {
     if (!m_partEditor || !m_recorder.sessionActive()) return;
     const auto& info = cadenza::arranger::recorderPartInfo(m_recorder.targetPart());
+    const auto cfg = m_recorder.config();
     m_partEditor->setPart(info.label,
                           m_recorder.targetPartNotes(),
                           m_recorder.sectionLengthTicks(),
-                          m_recorder.config().ticksPerBeat,
+                          cfg.ticksPerBeat,
+                          cfg.beatsPerBar,
                           info.percussion);
 }
 

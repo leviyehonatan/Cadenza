@@ -245,15 +245,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
             Source/Arranger/StyleEngine.cpp
             Source/UI/NativePanel.cpp
             Source/UI/StylePartEditor.cpp
-            # Piano roll editor, vendored from Sjhunt93/Piano-Roll-Editor (MIT).
-            Source/UI/PianoRoll/NoteModel.cpp
-            Source/UI/PianoRoll/NoteGridStyleSheet.cpp
-            Source/UI/PianoRoll/PNoteComponent.cpp
-            Source/UI/PianoRoll/NoteGridComponent.cpp
-            Source/UI/PianoRoll/NoteGridControlPanel.cpp
-            Source/UI/PianoRoll/KeyboardComponent.cpp
-            Source/UI/PianoRoll/TimelineComponent.cpp
-            Source/UI/PianoRoll/PianoRollEditorComponent.cpp
+            Source/UI/StylePartPianoRoll.cpp
     )
 
     target_compile_definitions(Cadenza
