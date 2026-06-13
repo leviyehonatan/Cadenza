@@ -35,7 +35,8 @@ StylePartEditorWindow::StylePartEditorWindow(Callbacks callbacks)
 void StylePartEditorWindow::setPart(const juce::String& partLabel,
                                     const std::vector<cadenza::arranger::PatternNote>& notes,
                                     int sectionTicks,
-                                    int ticksPerBeat)
+                                    int ticksPerBeat,
+                                    bool percussion)
 {
     m_sectionTicks = std::max(1, sectionTicks);
     m_toGrid = static_cast<double>(kGridPpq) / std::max(1, ticksPerBeat);
@@ -61,6 +62,14 @@ void StylePartEditorWindow::setPart(const juce::String& partLabel,
     m_loading = true;
     m_editor.loadSequence(sequence);   // fires onEdit internally; m_loading gates it
     m_loading = false;
+
+    // Scroll to a useful note range instead of the top of the 0..127 grid:
+    // drums show the GM percussion area (~kick..cymbals), melodic parts show
+    // the playing register (~C2..C6). setScroll takes a 0..1 proportion where
+    // 0 is the top (note 127). Aim a note near the top of the viewport.
+    const int topNote = percussion ? 64 : 86;     // first note visible below the top
+    const double y = juce::jlimit(0.0, 1.0, (127.0 - topNote) / 127.0);
+    m_editor.setScroll(0.0, y);
 }
 
 void StylePartEditorWindow::setPlaybackTick(int tickInSection, bool visible)

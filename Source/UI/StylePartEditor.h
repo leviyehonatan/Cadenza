@@ -38,7 +38,8 @@ public:
     void setPart(const juce::String& partLabel,
                  const std::vector<cadenza::arranger::PatternNote>& notes,
                  int sectionTicks,
-                 int ticksPerBeat);
+                 int ticksPerBeat,
+                 bool percussion);
 
     // Move the playback marker (style ticks within the section).
     void setPlaybackTick(int tickInSection, bool visible);

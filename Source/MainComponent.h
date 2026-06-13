@@ -93,6 +93,7 @@ private:
     void recorderSave();
     void recorderExit();
     void recorderRefreshStyle();          // republish the in-progress style + UI
+    void recorderPrepareTargetChannel();  // give the target part channel an audible voice
     juce::String recorderStatusText() const;
     void recorderOpenEditor();            // piano-roll editor for the target part
     void recorderReloadEditor();          // refresh the editor contents (if open)
@@ -127,6 +128,7 @@ private:
     // Style Recorder. m_recordArmed is read on the MIDI thread (capture callback).
     cadenza::arranger::StyleRecorder m_recorder;
     std::atomic<bool> m_recordArmed { false };
+    bool m_metronomeOn = true;   // recorder click track on/off (message thread)
     std::unique_ptr<juce::FileChooser> m_recSaveChooser;
     std::unique_ptr<cadenza::ui::StylePartEditorWindow> m_partEditor;
 

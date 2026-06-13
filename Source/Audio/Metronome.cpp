@@ -16,10 +16,10 @@ void Metronome::prepare(double sampleRate)
 void Metronome::triggerClick(bool accent)
 {
     m_phase = 0.0;
-    m_freq = accent ? 1500.0 : 1000.0;
-    m_voiceGain = accent ? 0.35f : 0.22f;
-    // ~30 ms click
-    m_voiceSamplesRemaining = static_cast<int>(0.03 * m_sampleRate);
+    m_freq = accent ? 2000.0 : 1320.0;
+    m_voiceGain = accent ? 0.30f : 0.20f;
+    // A short ~14 ms click reads as a "tick" rather than a pitched beep.
+    m_voiceSamplesRemaining = static_cast<int>(0.014 * m_sampleRate);
 }
 
 void Metronome::renderBlock(juce::AudioBuffer<float>& buffer, Transport& transport)
@@ -55,9 +55,10 @@ void Metronome::renderBlock(juce::AudioBuffer<float>& buffer, Transport& transpo
 
     int toRender = std::min(numSamples, m_voiceSamplesRemaining);
     for (int i = 0; i < toRender; ++i) {
-        // Linear decay envelope for a punchy click.
-        const float env = static_cast<float>(m_voiceSamplesRemaining - i)
+        // Steep (squared) decay envelope so the click is percussive, not a beep.
+        const float lin = static_cast<float>(m_voiceSamplesRemaining - i)
                           / static_cast<float>(m_voiceSamplesRemaining + 1);
+        const float env = lin * lin;
         const float sample = m_voiceGain * env * static_cast<float>(std::sin(m_phase));
         for (int ch = 0; ch < numChannels; ++ch) {
             buffer.addSample(ch, i, sample);

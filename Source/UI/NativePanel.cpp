@@ -385,6 +385,13 @@ NativePanel::NativePanel()
     };
     addAndMakeVisible(m_recArm);
 
+    m_recClick.setTooltip("Metronome click while recording");
+    m_recClick.setToggleState(true, juce::dontSendNotification);
+    m_recClick.onClick = [this] {
+        if (m_cb.onRecMetronome) m_cb.onRecMetronome(m_recClick.getToggleState());
+    };
+    addAndMakeVisible(m_recClick);
+
     m_recEdit.setTooltip("Open the selected part in the piano-roll editor");
     m_recEdit.onClick = [this] { if (m_cb.onRecEdit) m_cb.onRecEdit(); };
     addAndMakeVisible(m_recEdit);
@@ -872,6 +879,7 @@ void NativePanel::resized()
         m_recBars.setBounds(r.removeFromLeft(76));   r.removeFromLeft(6);
         m_recPart.setBounds(r.removeFromLeft(92));   r.removeFromLeft(6);
         m_recArm.setBounds(r.removeFromLeft(76));    r.removeFromLeft(6);
+        m_recClick.setBounds(r.removeFromLeft(58));  r.removeFromLeft(6);
         m_recEdit.setBounds(r.removeFromLeft(56));   r.removeFromLeft(6);
         m_recClear.setBounds(r.removeFromLeft(82));  r.removeFromLeft(6);
         m_recSave.setBounds(r.removeFromLeft(64));   r.removeFromLeft(6);

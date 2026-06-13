@@ -1338,8 +1338,9 @@ void MainComponent::recorderNewSession(int bars)
     m_styleEngine.setStyle(m_recorder.snapshotStyle());
     m_styleEngine.setSection("mainA");
     m_currentMain = "mainA";
-    m_audio.setMetronomeEnabled(true);
+    m_audio.setMetronomeEnabled(m_metronomeOn);
     m_midi.setCaptureMode(true);   // whole keyboard plays/records the target part
+    recorderPrepareTargetChannel();
     updateNativePanelStyle();
     if (m_panel)
         m_panel->setRecorderState(true, false,
@@ -1352,6 +1353,8 @@ void MainComponent::recorderNewSession(int bars)
 void MainComponent::recorderSetPart(int partIndex)
 {
     m_recorder.setTargetPart(cadenza::arranger::recorderPartInfo(partIndex).part);
+    if (m_recorder.sessionActive())
+        recorderPrepareTargetChannel();   // audible voice on the newly-selected channel
     recorderReloadEditor();
     if (m_recorder.sessionActive() && m_panel)
         m_panel->setRecorderState(true, m_recordArmed.load(),
@@ -1515,7 +1518,28 @@ void MainComponent::recorderReloadEditor()
     m_partEditor->setPart(info.label,
                           m_recorder.targetPartNotes(),
                           m_recorder.sectionLengthTicks(),
-                          m_recorder.config().ticksPerBeat);
+                          m_recorder.config().ticksPerBeat,
+                          info.percussion);
+}
+
+void MainComponent::recorderPrepareTargetChannel()
+{
+    // Give the target part's channel an audible voice so playing the keyboard
+    // (audition) and the recorded loop are heard. An empty recorder section
+    // sends no channel setup of its own, so without this the channel can be
+    // silent or stuck on a stale/wrong preset.
+    const auto& info = cadenza::arranger::recorderPartInfo(m_recorder.targetPart());
+    if (info.percussion) {
+        // SynthEngine forces the drum bank for the drum synth channels, so a
+        // program change here selects the kit (0 = standard).
+        m_audio.programChange(info.midiChannel, 0);
+    } else {
+        m_audio.controlChange(info.midiChannel, 0, 0);    // bank MSB 0 (GM)
+        m_audio.controlChange(info.midiChannel, 32, 0);   // bank LSB 0
+        m_audio.programChange(info.midiChannel,
+                              cadenza::midi::defaultGmProgramForRole(info.partName));
+    }
+    m_audio.controlChange(info.midiChannel, 7, 100);      // audible volume
 }
 
 void MainComponent::recorderCloseEditor()
@@ -1947,6 +1971,10 @@ void MainComponent::buildNativePanel()
 
     cb.onRecNew   = [this](int bars) { recorderNewSession(bars); };
     cb.onRecPart  = [this](int idx)  { recorderSetPart(idx); };
+    cb.onRecMetronome = [this](bool on) {
+        m_metronomeOn = on;
+        if (m_recorder.sessionActive()) m_audio.setMetronomeEnabled(on);
+    };
     cb.onRecArm   = [this](bool on)  { recorderArm(on); };
     cb.onRecEdit  = [this] { recorderOpenEditor(); };
     cb.onRecClear = [this] { recorderClearPart(); };
