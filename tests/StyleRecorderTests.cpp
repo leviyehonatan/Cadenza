@@ -180,6 +180,104 @@ void savedStyleRoundTrips()
     std::remove(path.c_str());
 }
 
+void savedCadenzaStyleReloadsAsEditableSession()
+{
+    StyleRecorder original;
+    original.startSession(defaultConfig());
+    original.setTargetPart(RecorderPart::Bass);
+    original.noteOn(36, 100, 0);
+    original.noteOff(36, 480);
+    original.commitTake();
+
+    const std::string path = "test-editable-recorded-style.cstyle";
+    expect(original.save(path), "editable style fixture saves");
+    const auto loaded = loadStyleFromFile(path);
+    expect(loaded.ok && isEditableCadenzaStyle(loaded.style),
+           "native cstyle is recognized as recorder-editable");
+
+    StyleRecorder reopened;
+    expect(reopened.loadSession(loaded.style),
+           "saved cstyle rehydrates an editable recorder session");
+    expect(reopened.sessionActive(),
+           "reloaded editable style enables recorder controls");
+    expect(reopened.targetPart() == RecorderPart::Bass
+               && reopened.targetPartNotes().size() == 1,
+           "reloaded editable style can reopen its part in the editor");
+    std::remove(path.c_str());
+}
+
+void importedYamahaStyleIsNotRecorderEditable()
+{
+    Style imported;
+    imported.schema = "cadenza.style.v1";
+    imported.yamahaFormat = YamahaStyleFormat::SFF2;
+    imported.sections.push_back(Section { "mainA", 4, {} });
+
+    StyleRecorder recorder;
+    expect(!isEditableCadenzaStyle(imported),
+           "Yamaha-derived cstyle remains read-only in Style Recorder");
+    expect(!recorder.loadSession(imported) && !recorder.sessionActive(),
+           "read-only imported style does not activate recorder controls");
+}
+
+void barLengthChangesResizeSectionAndNotes()
+{
+    StyleRecorder recorder;
+    auto cfg = defaultConfig();
+    cfg.bars = 4;
+    recorder.startSession(cfg);
+    recorder.setQuantizeDivision(0);
+    recorder.setTargetPart(RecorderPart::Bass);
+    recorder.replacePartNotes({
+        PatternNote { 100, 200, 36, 90 },
+        PatternNote { 3800, 200, 40, 90 },
+        PatternNote { 4000, 200, 43, 90 },
+    });
+
+    expect(recorder.setBarCount(1), "one-bar selection updates active session");
+    expect(recorder.config().bars == 1
+               && recorder.snapshotStyle()->sections[0].barCount == 1
+               && recorder.sectionLengthTicks() == 3840,
+           "one-bar selection creates a one-bar part");
+    auto notes = recorder.targetPartNotes();
+    expect(notes.size() == 2, "notes starting after shorter end are removed");
+    expect(notes[1].tick == 3800 && notes[1].duration == 40,
+           "note crossing shorter end is trimmed");
+
+    expect(recorder.setBarCount(2), "two-bar selection updates active session");
+    expect(recorder.config().bars == 2
+               && recorder.snapshotStyle()->sections[0].barCount == 2
+               && recorder.sectionLengthTicks() == 7680,
+           "two-bar selection creates a two-bar part");
+
+    expect(recorder.setBarCount(4), "four-bar selection updates active session");
+    expect(recorder.config().bars == 4
+               && recorder.snapshotStyle()->sections[0].barCount == 4
+               && recorder.sectionLengthTicks() == 15360,
+           "four-bar selection creates a four-bar part");
+}
+
+void changedBarLengthSurvivesSaveReload()
+{
+    StyleRecorder recorder;
+    recorder.startSession(defaultConfig());
+    recorder.setBarCount(1);
+
+    const std::string path = "test-one-bar-recorded-style.cstyle";
+    expect(recorder.save(path), "resized style saves");
+    const auto loaded = loadStyleFromFile(path);
+    expect(loaded.ok && loaded.style.sections.size() == 1
+               && loaded.style.sections[0].barCount == 1,
+           "save and reload preserve selected bar count");
+
+    StyleRecorder reopened;
+    expect(reopened.loadSession(loaded.style)
+               && reopened.config().bars == 1
+               && reopened.sectionLengthTicks() == 3840,
+           "reloaded recorder restores selected bar count");
+    std::remove(path.c_str());
+}
+
 void replacePartNotesRebakesRoles()
 {
     StyleRecorder rec;
@@ -328,6 +426,10 @@ int main()
     loopWrapGivesWrapAwareDuration();
     overdubMergesAndClearRemoves();
     savedStyleRoundTrips();
+    savedCadenzaStyleReloadsAsEditableSession();
+    importedYamahaStyleIsNotRecorderEditable();
+    barLengthChangesResizeSectionAndNotes();
+    changedBarLengthSurvivesSaveReload();
     replacePartNotesRebakesRoles();
     loopRecordingWrapsAroundSection();
     drumKickRecordedTwiceDoesNotDuplicate();

@@ -44,6 +44,7 @@ struct RecorderPartInfo
 };
 const RecorderPartInfo& recorderPartInfo(RecorderPart part) noexcept;
 const RecorderPartInfo& recorderPartInfo(int index) noexcept;   // 0..6
+bool isEditableCadenzaStyle(const Style& style) noexcept;
 
 struct RecorderConfig
 {
@@ -61,6 +62,9 @@ class StyleRecorder
 public:
     // Begin a new recording session: a fresh one-section style skeleton.
     void startSession(const RecorderConfig& config);
+    // Resume editing a native Cadenza style. Yamaha-derived styles remain
+    // read-only because their imported multi-section semantics are not recorder-owned.
+    bool loadSession(const Style& style, const std::string& sectionName = {});
     void endSession();
     bool sessionActive() const;
     RecorderConfig config() const;
@@ -80,6 +84,7 @@ public:
     int quantizeDivision() const;
 
     int sectionLengthTicks() const;
+    bool setBarCount(int bars);
 
     // Live capture. `absoluteTick` is the transport tick; it is folded into the
     // looping section internally. Notes released after the loop wraps get a
@@ -125,11 +130,14 @@ private:
     };
 
     Part& findOrCreateTargetPart();   // caller holds m_mutex
+    Section* editableSection() noexcept;
+    const Section* editableSection() const noexcept;
 
     mutable std::mutex m_mutex;
     bool m_active = false;
     RecorderConfig m_config;
     Style m_style;
+    std::string m_sectionName = "mainA";
     RecorderPart m_target = RecorderPart::Drums;
     int m_quantizeDivision = 16;
     std::vector<TakeNote> m_take;

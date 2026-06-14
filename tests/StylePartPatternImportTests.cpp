@@ -1,4 +1,5 @@
 #include "Arranger/PatternNoteMerge.h"
+#include "Arranger/StyleRecorder.h"
 #include "UI/StylePartPatternImport.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -216,6 +217,24 @@ void testDrumDuplicateUsesQuantizedGridPosition()
            "updated quantized duplicate becomes selected");
 }
 
+void testRecorderBarLengthUpdatesImportClamp()
+{
+    cadenza::arranger::StyleRecorder recorder;
+    cadenza::arranger::RecorderConfig config;
+    config.bars = 4;
+    recorder.startSession(config);
+    recorder.setBarCount(1);
+
+    const auto result = insertPattern(
+        {}, { note(3800, 200, 60), note(3900, 100, 64) },
+        0, recorder.sectionLengthTicks(), false);
+
+    expect(result.notes.size() == 1,
+           "one-bar recorder length removes imported notes after bar one");
+    expect(result.notes[0].duration == 40,
+           "one-bar recorder length trims imported note at bar end");
+}
+
 const BuiltInPattern* findPreset(
     const std::vector<BuiltInPattern>& patterns,
     const std::string& name)
@@ -268,6 +287,7 @@ int main()
     testImportOverdubsAndSelectsImportedNotes();
     testImportClampsAtPatternEnd();
     testDrumDuplicateUsesQuantizedGridPosition();
+    testRecorderBarLengthUpdatesImportClamp();
     testBuiltInPatternsContainOriginalFoundationGrooves();
     std::cout << "All MIDI pattern import tests passed\n";
     return 0;

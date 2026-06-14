@@ -155,6 +155,7 @@ public:
         std::function<void(bool)> setOtsLink;                 // OTS Link toggle changed
         // Style Recorder (record your own style patterns).
         std::function<void(int)>  onRecNew;                   // bars -> start a new session
+        std::function<void(int)>  onRecBars;                  // resize active session
         std::function<void(int)>  onRecPart;                  // target part index 0..6
         std::function<void(bool)> onRecMetronome;             // click track on/off
         std::function<void(bool)> onRecArm;                   // record on/off (off commits the take)
@@ -203,6 +204,8 @@ public:
     void setOtsLinkEnabled(bool enabled);
     // Reflect the Style Recorder session state (enables/dims its buttons).
     void setRecorderState(bool sessionActive, bool armed, const juce::String& status);
+    void setRecorderBarCount(int bars);
+    void setRecorderPart(int partIndex);
 
     void resized() override;
     void paint(juce::Graphics&) override;

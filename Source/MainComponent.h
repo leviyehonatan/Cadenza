@@ -87,6 +87,7 @@ private:
 
     // Style Recorder (record your own style patterns into a .cstyle).
     void recorderNewSession(int bars);
+    void recorderSetBars(int bars);
     void recorderSetPart(int partIndex);
     void recorderArm(bool on);            // off commits the take into the style
     void recorderClearPart();

@@ -359,6 +359,10 @@ NativePanel::NativePanel()
     m_recBars.addItem("4 bars", 4);
     m_recBars.addItem("8 bars", 8);
     m_recBars.setSelectedId(4, juce::dontSendNotification);
+    m_recBars.onChange = [this] {
+        if (m_cb.onRecBars)
+            m_cb.onRecBars(m_recBars.getSelectedId());
+    };
     addAndMakeVisible(m_recBars);
     const char* recPartNames[] = { "Drums", "Bass", "Chord 1", "Chord 2",
                                    "Pad", "Phrase 1", "Phrase 2" };
@@ -624,6 +628,19 @@ void NativePanel::setRecorderState(bool sessionActive, bool armed, const juce::S
     m_recPart.setEnabled(sessionActive && !armed);
     m_recBars.setEnabled(!armed);
     m_recStatus.setText(status, juce::dontSendNotification);
+}
+
+void NativePanel::setRecorderBarCount(int bars)
+{
+    if (m_recBars.indexOfItemId(bars) >= 0)
+        m_recBars.setSelectedId(bars, juce::dontSendNotification);
+}
+
+void NativePanel::setRecorderPart(int partIndex)
+{
+    m_recPart.setSelectedId(
+        juce::jlimit(0, 6, partIndex) + 1,
+        juce::dontSendNotification);
 }
 
 void NativePanel::setEqGains(int lowDb, int midDb, int highDb)

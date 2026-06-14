@@ -1130,10 +1130,17 @@ bool MainComponent::loadAndApplyStyleFile(const juce::File& file)
         return false;
     }
 
-    auto sharedStyle = std::make_shared<const cadenza::arranger::Style>(std::move(loaded.style));
-    const auto initialSection = sharedStyle->findSection("mainA") != nullptr
+    const auto initialSection = loaded.style.findSection("mainA") != nullptr
         ? std::string("mainA")
-        : (sharedStyle->sections.empty() ? std::string() : sharedStyle->sections.front().name);
+        : (loaded.style.sections.empty() ? std::string() : loaded.style.sections.front().name);
+    const bool editableCadenzaStyle = file.hasFileExtension("cstyle")
+        && m_recorder.loadSession(loaded.style, initialSection);
+    if (!editableCadenzaStyle)
+        m_recorder.endSession();
+    m_recordArmed.store(false);
+
+    auto sharedStyle = std::make_shared<const cadenza::arranger::Style>(
+        std::move(loaded.style));
 
     auto appliedBpm = m_state.bpm();
     if (sharedStyle->defaultTempo > 0) {
@@ -1148,6 +1155,34 @@ bool MainComponent::loadAndApplyStyleFile(const juce::File& file)
     // Refresh the native panel's style name + sections + mixer, and (re)assign the
     // live-melody channel/program so it never collides with this style's channels.
     updateNativePanelStyle();
+    if (editableCadenzaStyle) {
+        m_midi.setCaptureMode(true);
+        m_audio.setMetronomeEnabled(m_metronomeOn);
+        recorderPrepareTargetChannel();
+        if (m_panel) {
+            const auto cfg = m_recorder.config();
+            int partIndex = 0;
+            for (int i = 0; i < cadenza::arranger::kNumRecorderParts; ++i)
+                if (cadenza::arranger::recorderPartInfo(i).part
+                    == m_recorder.targetPart()) {
+                    partIndex = i;
+                    break;
+                }
+            m_panel->setRecorderBarCount(cfg.bars);
+            m_panel->setRecorderPart(partIndex);
+            m_panel->setRecorderState(
+                true, false,
+                recorderStatusText() + " - ready to Record or Edit");
+        }
+        recorderReloadEditor();
+    } else {
+        m_midi.setCaptureMode(false);
+        m_audio.setMetronomeEnabled(false);
+        recorderCloseEditor();
+        if (m_panel)
+            m_panel->setRecorderState(
+                false, false, "Press New to record your own style");
+    }
 
     if (m_settings) {
         m_settings->state().lastStyleId = sharedStyle->id;
@@ -1348,6 +1383,23 @@ void MainComponent::recorderNewSession(int bars)
     juce::Logger::writeToLog("[Cadenza] Style Recorder: new session, "
                              + juce::String(cfg.bars) + " bars at "
                              + juce::String(cfg.tempo) + " BPM");
+}
+
+void MainComponent::recorderSetBars(int bars)
+{
+    if (!m_recorder.sessionActive() || m_recordArmed.load())
+        return;
+    if (!m_recorder.setBarCount(bars))
+        return;
+
+    recorderRefreshStyle();
+    recorderReloadEditor();
+    if (m_panel) {
+        m_panel->setRecorderBarCount(m_recorder.config().bars);
+        m_panel->setRecorderState(
+            true, false,
+            recorderStatusText() + " - pattern length updated");
+    }
 }
 
 void MainComponent::recorderSetPart(int partIndex)
@@ -1571,13 +1623,15 @@ void MainComponent::recorderExit()
     recorderCloseEditor();
     m_recorder.endSession();
 
-    if (m_panel)
-        m_panel->setRecorderState(false, false, "Press New to record your own style");
-
     // Back to the regular arranger: reload the previous style.
     if (!tryLoadLastStyle())
         tryLoadFactoryStyle();
+    m_recorder.endSession();
+    m_midi.setCaptureMode(false);
+    m_audio.setMetronomeEnabled(false);
     updateNativePanelStyle();
+    if (m_panel)
+        m_panel->setRecorderState(false, false, "Press New to record your own style");
     juce::Logger::writeToLog("[Cadenza] Style Recorder: session closed");
 }
 
@@ -1985,6 +2039,7 @@ void MainComponent::buildNativePanel()
     cb.onRecallRegistration = [this](int slot) { recallRegistration(slot); };
 
     cb.onRecNew   = [this](int bars) { recorderNewSession(bars); };
+    cb.onRecBars  = [this](int bars) { recorderSetBars(bars); };
     cb.onRecPart  = [this](int idx)  { recorderSetPart(idx); };
     cb.onRecMetronome = [this](bool on) {
         m_metronomeOn = on;

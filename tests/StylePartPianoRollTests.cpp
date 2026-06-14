@@ -1,4 +1,5 @@
 #include "UI/StylePartPianoRollGeometry.h"
+#include "Arranger/StyleRecorder.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -87,6 +88,24 @@ void velocityLaneMapsHeightAndFindsNearestNote()
     expect(findNearestNoteAtTick({}, 500) == -1,
            "velocity hit reports no note for an empty part");
 }
+
+void recorderBarLengthUpdatesPianoRollGeometry()
+{
+    cadenza::arranger::StyleRecorder recorder;
+    cadenza::arranger::RecorderConfig config;
+    config.bars = 4;
+    recorder.startSession(config);
+
+    recorder.setBarCount(1);
+    expect(closeTo(tickToX(3840, recorder.sectionLengthTicks(),
+                          100.0f, 900.0f), 900.0f),
+           "one-bar recorder length fills one-bar piano-roll geometry");
+
+    recorder.setBarCount(2);
+    expect(closeTo(tickToX(3840, recorder.sectionLengthTicks(),
+                          100.0f, 900.0f), 500.0f),
+           "two-bar recorder length maps bar two to piano-roll midpoint");
+}
 }
 
 int main()
@@ -96,6 +115,7 @@ int main()
     gridClassifiesMeasuresBeatsAndSubdivisions();
     percussionAndMelodicGuttersRemainDistinct();
     velocityLaneMapsHeightAndFindsNearestNote();
+    recorderBarLengthUpdatesPianoRollGeometry();
 
     if (failures != 0)
         return EXIT_FAILURE;

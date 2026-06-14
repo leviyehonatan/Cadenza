@@ -122,6 +122,13 @@ const RecorderPartInfo& recorderPartInfo(int index) noexcept
     return kParts[index];
 }
 
+bool isEditableCadenzaStyle(const Style& style) noexcept
+{
+    return style.schema == "cadenza.style.v1"
+        && style.yamahaFormat == YamahaStyleFormat::Unknown
+        && !style.sections.empty();
+}
+
 void StyleRecorder::startSession(const RecorderConfig& config)
 {
     std::lock_guard<std::mutex> lk(m_mutex);
@@ -143,10 +150,56 @@ void StyleRecorder::startSession(const RecorderConfig& config)
     section.name = m_config.section;
     section.barCount = m_config.bars;
     m_style.sections.push_back(std::move(section));
+    m_sectionName = m_config.section;
 
     m_take.clear();
     std::fill(std::begin(m_openActive), std::end(m_openActive), false);
     m_active = true;
+}
+
+bool StyleRecorder::loadSession(const Style& style,
+                                const std::string& sectionName)
+{
+    std::lock_guard<std::mutex> lk(m_mutex);
+    if (!isEditableCadenzaStyle(style))
+        return false;
+
+    const Section* selected = nullptr;
+    if (!sectionName.empty())
+        selected = style.findSection(sectionName);
+    if (selected == nullptr)
+        selected = style.findSection("mainA");
+    if (selected == nullptr)
+        selected = &style.sections.front();
+
+    m_style = style;
+    m_sectionName = selected->name;
+    m_config.name = m_style.name;
+    m_config.tempo = m_style.defaultTempo;
+    m_config.beatsPerBar = std::max(1, m_style.beatsPerBar);
+    m_config.beatUnit = std::max(1, m_style.beatUnit);
+    m_config.ticksPerBeat = std::max(24, m_style.ticksPerBeat);
+    m_config.bars = std::max(1, selected->barCount);
+    m_config.section = m_sectionName;
+
+    m_target = RecorderPart::Drums;
+    for (const auto& part : selected->parts) {
+        bool found = false;
+        for (const auto& info : kParts) {
+            if (part.midiChannel == info.midiChannel) {
+                m_target = info.part;
+                found = true;
+                break;
+            }
+        }
+        if (found)
+            break;
+    }
+
+    m_take.clear();
+    std::fill(std::begin(m_openActive), std::end(m_openActive), false);
+    m_active = true;
+    return true;
 }
 
 void StyleRecorder::endSession()
@@ -220,6 +273,46 @@ int StyleRecorder::sectionLengthTicks() const
         * cadenza::ticksPerBar(m_config.ticksPerBeat, m_config.beatsPerBar, m_config.beatUnit);
 }
 
+bool StyleRecorder::setBarCount(int bars)
+{
+    std::lock_guard<std::mutex> lk(m_mutex);
+    auto* section = editableSection();
+    if (!m_active || section == nullptr)
+        return false;
+
+    m_config.bars = std::max(1, bars);
+    section->barCount = m_config.bars;
+    const int length = m_config.bars
+        * cadenza::ticksPerBar(
+            m_config.ticksPerBeat, m_config.beatsPerBar, m_config.beatUnit);
+
+    for (auto& part : section->parts) {
+        part.notes.erase(
+            std::remove_if(
+                part.notes.begin(), part.notes.end(),
+                [length](const PatternNote& note) {
+                    return note.tick >= length;
+                }),
+            part.notes.end());
+        for (auto& note : part.notes) {
+            note.tick = std::max(0, note.tick);
+            note.duration = std::clamp(
+                note.duration, 1, std::max(1, length - note.tick));
+        }
+        part.automation.erase(
+            std::remove_if(
+                part.automation.begin(), part.automation.end(),
+                [length](const AutomationEvent& event) {
+                    return event.tick >= length;
+                }),
+            part.automation.end());
+    }
+
+    m_take.clear();
+    std::fill(std::begin(m_openActive), std::end(m_openActive), false);
+    return true;
+}
+
 void StyleRecorder::noteOn(int pitch, int velocity, int absoluteTick)
 {
     std::lock_guard<std::mutex> lk(m_mutex);
@@ -269,7 +362,7 @@ bool StyleRecorder::hasPendingTake() const
 Part& StyleRecorder::findOrCreateTargetPart()
 {
     const auto& info = recorderPartInfo(m_target);
-    auto& section = m_style.sections.front();
+    auto& section = *editableSection();
     for (auto& part : section.parts)
         if (part.midiChannel == info.midiChannel)
             return part;
@@ -283,6 +376,22 @@ Part& StyleRecorder::findOrCreateTargetPart()
     part.yamahaPolicy = recorderPolicy(info);
     section.parts.push_back(std::move(part));
     return section.parts.back();
+}
+
+Section* StyleRecorder::editableSection() noexcept
+{
+    for (auto& section : m_style.sections)
+        if (section.name == m_sectionName)
+            return &section;
+    return nullptr;
+}
+
+const Section* StyleRecorder::editableSection() const noexcept
+{
+    for (const auto& section : m_style.sections)
+        if (section.name == m_sectionName)
+            return &section;
+    return nullptr;
 }
 
 bool StyleRecorder::commitTake()
@@ -332,7 +441,10 @@ bool StyleRecorder::clearTargetPart()
     if (!m_active)
         return false;
     const auto& info = recorderPartInfo(m_target);
-    auto& parts = m_style.sections.front().parts;
+    auto* section = editableSection();
+    if (section == nullptr)
+        return false;
+    auto& parts = section->parts;
     const auto before = parts.size();
     parts.erase(std::remove_if(parts.begin(), parts.end(),
                                [&](const Part& p) { return p.midiChannel == info.midiChannel; }),
@@ -344,11 +456,14 @@ bool StyleRecorder::clearTargetPart()
 void StyleRecorder::replacePartNotes(std::vector<PatternNote> notes)
 {
     std::lock_guard<std::mutex> lk(m_mutex);
-    if (!m_active || m_style.sections.empty())
+    if (!m_active)
         return;
 
     const auto& info = recorderPartInfo(m_target);
-    auto& parts = m_style.sections.front().parts;
+    auto* section = editableSection();
+    if (section == nullptr)
+        return;
+    auto& parts = section->parts;
 
     if (notes.empty()) {
         parts.erase(std::remove_if(parts.begin(), parts.end(),
@@ -386,10 +501,13 @@ std::vector<PatternNote> StyleRecorder::targetPartNotes() const
 {
     std::lock_guard<std::mutex> lk(m_mutex);
     std::vector<PatternNote> notes;
-    if (!m_active || m_style.sections.empty())
+    if (!m_active)
         return notes;
     const auto& info = recorderPartInfo(m_target);
-    for (const auto& part : m_style.sections.front().parts)
+    const auto* section = editableSection();
+    if (section == nullptr)
+        return notes;
+    for (const auto& part : section->parts)
         if (part.midiChannel == info.midiChannel)
             return part.notes;
     return notes;
@@ -398,10 +516,13 @@ std::vector<PatternNote> StyleRecorder::targetPartNotes() const
 bool StyleRecorder::targetPartHasNotes() const
 {
     std::lock_guard<std::mutex> lk(m_mutex);
-    if (!m_active || m_style.sections.empty())
+    if (!m_active)
         return false;
     const auto& info = recorderPartInfo(m_target);
-    for (const auto& part : m_style.sections.front().parts)
+    const auto* section = editableSection();
+    if (section == nullptr)
+        return false;
+    for (const auto& part : section->parts)
         if (part.midiChannel == info.midiChannel)
             return !part.notes.empty();
     return false;
