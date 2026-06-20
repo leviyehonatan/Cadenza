@@ -58,11 +58,22 @@ public:
     void closeInputs();
     juce::StringArray availableInputs() const;
 
-    // Open every available MIDI input device that isn't already open (and log it).
-    // Safe to call repeatedly — used at startup and periodically for hot-plug so a
-    // keyboard plugged in after launch is picked up. Returns the number of inputs
-    // now open.
+    // Open the MIDI input device(s) that should be active and aren't yet (and log
+    // it). Safe to call repeatedly — used at startup and periodically for hot-plug
+    // so a keyboard plugged in after launch is picked up. Which devices count as
+    // "should be active" depends on the selected input (see setSelectedInput).
+    // Returns the number of inputs now open.
     int refreshInputs();
+
+    // Choose which input port to use. Empty string = AUTO: open the main keyboard
+    // port(s) and ignore Windows secondary ports ("MIDIIN2 (Device)", etc.) that
+    // carry pad / DAW-control data and would pollute chord detection. A non-empty
+    // name opens exactly that one port. Applies immediately (resets held notes).
+    void setSelectedInput(const juce::String& deviceName);
+    juce::String selectedInput() const { return m_selectedInput; }
+
+    // True for Windows secondary MIDI ports ("MIDIIN2 (Device)", "MIDIIN3 (...)").
+    static bool isAuxPort(const juce::String& deviceName);
 
     void setSplitPoint(int midiNote) noexcept;
     int  splitPoint() const noexcept;
@@ -153,6 +164,7 @@ private:
 
     juce::OwnedArray<juce::MidiInput> m_inputs;
     juce::StringArray m_openIdentifiers;       // identifiers of devices already opened
+    juce::String m_selectedInput;              // "" = auto (main port, skip aux ports)
     juce::String m_lastDeviceSignature;        // to log the device list only when it changes
 
     arranger::ArrangerMidiRouter m_router;

@@ -19,6 +19,10 @@
 
 namespace
 {
+// Defined further down (next to the MIDI settings UI); declared here so the
+// constructor can restore the saved chord-detection mode.
+arranger::ChordDetectionMode chordModeFromId(const std::string& id) noexcept;
+
 std::string lowercase(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
@@ -102,6 +106,9 @@ MainComponent::MainComponent()
         m_audio.setMasterVolume(st.masterVolume);
         m_audio.setReverbLevel(st.reverbLevel);
         m_midi.setSplitPoint(st.splitNote);
+        // Restore the saved MIDI input selection ("" = auto: main port, skip aux
+        // ports) before opening any device, so we don't briefly open all ports.
+        m_midi.setSelectedInput(juce::String(st.midiInputDevice));
     }
     juce::Logger::writeToLog("[Cadenza] Synth engine: " + juce::String(m_audio.synthEngineName()));
     if (!m_audio.supportsSoundFonts()) {
@@ -285,7 +292,7 @@ MainComponent::MainComponent()
         });
     });
 
-    m_midi.refreshInputs();   // open ALL available MIDI inputs (logs the device list)
+    m_midi.refreshInputs();   // open the selected / main MIDI input(s) (logs the device list)
 
     // Always-on timer: hot-plug MIDI rescan (~every 2s) + song-mode auto-stepping.
     startTimerHz(20);
@@ -345,24 +352,101 @@ void MainComponent::showAudioSettings()
 }
 
 namespace {
-// MIDI Settings / button-mapping window: lists connected MIDI inputs and one row
-// per arranger action (current mapping + Learn + Clear). Refreshes the displayed
-// mappings on a timer so a MIDI-learn capture shows up live.
+// Chord-detection mode <-> persisted string. Keep in sync with the combo items
+// and SettingsState::midiChordMode.
+struct ChordModeChoice { const char* id; const char* label; arranger::ChordDetectionMode mode; };
+const ChordModeChoice kChordModeChoices[] = {
+    { "fingered", "Fingered (play full chords)",  arranger::ChordDetectionMode::Fingered },
+    { "single",   "Single Finger (1-key chords)", arranger::ChordDetectionMode::SingleFinger },
+    { "multi",    "Multi Finger",                 arranger::ChordDetectionMode::MultiFinger },
+    { "onbass",   "Fingered on Bass (slash)",     arranger::ChordDetectionMode::FingeredOnBass },
+    { "full",     "Full Keyboard",                arranger::ChordDetectionMode::FullKeyboard },
+};
+constexpr int kNumChordModes = (int) (sizeof(kChordModeChoices) / sizeof(kChordModeChoices[0]));
+
+arranger::ChordDetectionMode chordModeFromId(const std::string& id) noexcept
+{
+    for (const auto& c : kChordModeChoices)
+        if (id == c.id) return c.mode;
+    return arranger::ChordDetectionMode::Fingered;
+}
+
+juce::String noteName(int midiNote)
+{
+    static const char* n[] = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
+    return juce::String(n[((midiNote % 12) + 12) % 12]) + juce::String(midiNote / 12 - 1);
+}
+
+// MIDI Settings / button-mapping window: input-port picker, chord-detection mode,
+// split point, plus one row per arranger action (current mapping + Learn + Clear).
+// Refreshes the displayed mappings on a timer so a MIDI-learn capture shows live.
 class MidiSettingsComponent : public juce::Component, private juce::Timer
 {
 public:
     using MappingTextFn = std::function<juce::String(const std::string&)>;
     using CommandFn     = std::function<void(const std::string&)>;
+    using SelectFn      = std::function<void(juce::String)>;
+    using SplitFn       = std::function<void(int)>;
 
     MidiSettingsComponent(const juce::StringArray& devices,
                           const std::vector<std::pair<juce::String, std::string>>& actions,
-                          MappingTextFn mappingText, CommandFn onLearn, CommandFn onClear)
-        : m_mappingText(std::move(mappingText)), m_onLearn(std::move(onLearn)), m_onClear(std::move(onClear))
+                          MappingTextFn mappingText, CommandFn onLearn, CommandFn onClear,
+                          const juce::String& selectedDevice, const std::string& chordModeId, int splitNote,
+                          SelectFn onSelectDevice, CommandFn onChordMode, SplitFn onSplit)
+        : m_mappingText(std::move(mappingText)), m_onLearn(std::move(onLearn)), m_onClear(std::move(onClear)),
+          m_onSelectDevice(std::move(onSelectDevice)), m_onChordMode(std::move(onChordMode)), m_onSplit(std::move(onSplit))
     {
+        // --- Input port picker (item 1 = Auto, then each detected device) ---
+        m_inputLabel.setText("Input", juce::dontSendNotification);
+        m_inputLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        addAndMakeVisible(m_inputLabel);
+        m_inputBox.addItem("Auto (main keyboard, skip aux ports)", 1);
+        int sel = 1;
+        for (int i = 0; i < devices.size(); ++i) {
+            m_inputBox.addItem(devices[i], i + 2);
+            if (devices[i] == selectedDevice) sel = i + 2;
+        }
+        m_inputBox.setSelectedId(sel, juce::dontSendNotification);
+        m_inputBox.onChange = [this] {
+            if (!m_onSelectDevice) return;
+            const int id = m_inputBox.getSelectedId();
+            m_onSelectDevice(id <= 1 ? juce::String() : m_inputBox.getText());
+        };
+        addAndMakeVisible(m_inputBox);
+
+        // --- Chord-detection mode ---
+        m_modeLabel.setText("Chord mode", juce::dontSendNotification);
+        m_modeLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        addAndMakeVisible(m_modeLabel);
+        for (int i = 0; i < kNumChordModes; ++i) {
+            m_modeBox.addItem(kChordModeChoices[i].label, i + 1);
+            if (chordModeId == kChordModeChoices[i].id) m_modeBox.setSelectedId(i + 1, juce::dontSendNotification);
+        }
+        if (m_modeBox.getSelectedId() == 0) m_modeBox.setSelectedId(1, juce::dontSendNotification);
+        m_modeBox.onChange = [this] {
+            const int idx = m_modeBox.getSelectedId() - 1;
+            if (m_onChordMode && idx >= 0 && idx < kNumChordModes)
+                m_onChordMode(kChordModeChoices[idx].id);
+        };
+        addAndMakeVisible(m_modeBox);
+
+        // --- Split point ---
+        m_splitLabel.setText("Split", juce::dontSendNotification);
+        m_splitLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        addAndMakeVisible(m_splitLabel);
+        m_split.setSliderStyle(juce::Slider::IncDecButtons);
+        m_split.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 64, 22);
+        m_split.setRange(36, 84, 1);
+        m_split.setValue(splitNote, juce::dontSendNotification);
+        m_split.textFromValueFunction = [](double v) { return noteName((int) v); };
+        m_split.setValue(splitNote, juce::dontSendNotification);   // re-apply so text uses note name
+        m_split.onValueChange = [this] { if (m_onSplit) m_onSplit((int) m_split.getValue()); };
+        addAndMakeVisible(m_split);
+
         m_devices.setText(devices.isEmpty() ? "No MIDI inputs detected"
-                                            : "MIDI inputs: " + devices.joinIntoString(", "),
+                                            : juce::String(devices.size()) + " port(s) detected",
                           juce::dontSendNotification);
-        m_devices.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        m_devices.setColour(juce::Label::textColourId, juce::Colours::grey);
         addAndMakeVisible(m_devices);
 
         for (const auto& a : actions) {
@@ -391,13 +475,26 @@ public:
         }
         refresh();
         startTimerHz(5);
-        setSize(440, 70 + static_cast<int>(m_rows.size()) * 30);
+        setSize(460, 70 + kHeaderHeight + static_cast<int>(m_rows.size()) * 30);
     }
 
     void resized() override
     {
         auto a = getLocalBounds().reduced(10);
-        m_devices.setBounds(a.removeFromTop(24));
+
+        // Top settings block: input port, chord mode, split point.
+        auto labelled = [&a](juce::Label& lab, juce::Component& ctl, int ctlWidth) {
+            auto row = a.removeFromTop(28);
+            lab.setBounds(row.removeFromLeft(80));
+            ctl.setBounds(row.removeFromLeft(ctlWidth));
+            a.removeFromTop(4);
+        };
+        labelled(m_inputLabel, m_inputBox, a.getWidth() - 80);
+        labelled(m_modeLabel,  m_modeBox,  a.getWidth() - 80);
+        labelled(m_splitLabel, m_split,    150);
+        a.removeFromTop(2);
+
+        m_devices.setBounds(a.removeFromTop(20));
         a.removeFromTop(8);
         for (auto& r : m_rows) {
             auto row = a.removeFromTop(26);
@@ -432,9 +529,18 @@ private:
 
     void timerCallback() override { refresh(); }
 
+    static constexpr int kHeaderHeight = 28 * 3 + 4 * 3 + 2 + 20 + 8;  // 3 control rows + device line
+
     MappingTextFn m_mappingText;
     CommandFn m_onLearn, m_onClear;
-    juce::Label m_devices;
+    SelectFn  m_onSelectDevice;
+    CommandFn m_onChordMode;
+    SplitFn   m_onSplit;
+
+    juce::Label m_inputLabel, m_modeLabel, m_splitLabel, m_devices;
+    juce::ComboBox m_inputBox, m_modeBox;
+    juce::Slider m_split;
+
     std::vector<std::unique_ptr<Row>> m_rows;
     std::string m_pending;
     juce::String m_pendingPrev;
@@ -476,8 +582,34 @@ void MainComponent::showMidiSettings()
         self->saveSettings();
     };
 
+    auto onSelectDevice = [safe](juce::String name) {
+        auto* self = safe.getComponent();
+        if (!self || !self->m_settings) return;
+        self->m_midi.setSelectedInput(name);
+        self->m_settings->state().midiInputDevice = name.toStdString();
+        self->saveSettings();
+    };
+    auto onChordMode = [safe](const std::string& id) {
+        auto* self = safe.getComponent();
+        if (!self || !self->m_settings) return;
+        self->m_midi.setChordDetectionMode(chordModeFromId(id));
+        self->m_settings->state().midiChordMode = id;
+        self->saveSettings();
+    };
+    auto onSplit = [safe](int note) {
+        auto* self = safe.getComponent();
+        if (!self || !self->m_settings) return;
+        self->m_midi.setSplitPoint(note);
+        if (self->m_panel) self->m_panel->setSplitPoint(note);
+        self->m_settings->state().splitNote = note;
+        self->saveSettings();
+    };
+
+    const auto& st = m_settings->state();
     auto* comp = new MidiSettingsComponent(m_midi.availableInputs(), actions,
-                                           std::move(mappingText), std::move(onLearn), std::move(onClear));
+                                           std::move(mappingText), std::move(onLearn), std::move(onClear),
+                                           juce::String(st.midiInputDevice), st.midiChordMode, st.splitNote,
+                                           std::move(onSelectDevice), std::move(onChordMode), std::move(onSplit));
     juce::DialogWindow::LaunchOptions opts;
     opts.content.setOwned(comp);
     opts.dialogTitle = "MIDI Settings & Button Mapping";
@@ -571,9 +703,11 @@ void MainComponent::applyRuntimeStateToEngines()
     m_midi.setLiveTranspose(m_state.transpose());   // transpose shifts the right-hand melody too
     m_midi.setLiveOctave(m_state.octave());   // Octave affects live right-hand only, not style parts
     m_styleEngine.setEnabled(m_state.chordSourceEnabled("arranger"));
+    // Bass chord-source forces slash detection (FingeredOnBass); otherwise use the
+    // mode the player picked in MIDI Settings (default Fingered).
     m_midi.setChordDetectionMode(m_state.chordSourceEnabled("bass")
         ? arranger::ChordDetectionMode::FingeredOnBass
-        : arranger::ChordDetectionMode::Fingered);
+        : chordModeFromId(m_settings ? m_settings->state().midiChordMode : std::string("fingered")));
     m_midi.setChordMemory(m_state.chordSourceEnabled("memory"));
     m_midi.setSyncroStopOnRelease(m_state.syncroStopOnRelease());
 }

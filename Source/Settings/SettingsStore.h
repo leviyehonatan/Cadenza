@@ -74,7 +74,8 @@ struct Settings
     std::string lastStylePath;
     std::string lastSongId;
     std::string lastSoundFontPath;
-    std::string midiInputDevice;     // empty = system default
+    std::string midiInputDevice;     // empty = auto (main keyboard port, skip aux ports)
+    std::string midiChordMode = "fingered";  // fingered|single|multi|onbass|full
     int crossfade = 50;
     bool chordBassEnabled = true;
     bool chordArrangerEnabled = true;

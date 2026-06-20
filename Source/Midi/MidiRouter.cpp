@@ -81,7 +81,15 @@ int MidiRouter::refreshInputs()
         }
     }
 
+    const bool autoMode = m_selectedInput.isEmpty();
     for (const auto& d : available) {
+        // AUTO: open the keyboard's main port(s), skip aux pad/DAW-control ports.
+        // SELECTED: open only the chosen port. Either way, never re-open one that
+        // is already open (keeps the hot-plug poll idempotent).
+        const bool shouldOpen = autoMode ? !isAuxPort(d.name)
+                                         : (d.name == m_selectedInput);
+        if (!shouldOpen)
+            continue;
         if (m_openIdentifiers.contains(d.identifier))
             continue;
         if (auto input = juce::MidiInput::openDevice(d.identifier, this)) {
@@ -94,6 +102,23 @@ int MidiRouter::refreshInputs()
         }
     }
     return m_inputs.size();
+}
+
+bool MidiRouter::isAuxPort(const juce::String& deviceName)
+{
+    // Windows names a controller's secondary ports "MIDIIN2 (Name)", "MIDIIN3
+    // (Name)", ... These carry pads / transport / DAW-control data, not the keys,
+    // and must not feed chord detection.
+    return deviceName.startsWith("MIDIIN");
+}
+
+void MidiRouter::setSelectedInput(const juce::String& deviceName)
+{
+    if (m_selectedInput == deviceName)
+        return;
+    m_selectedInput = deviceName;
+    closeInputs();        // also resets the router, clearing any held/stuck notes
+    refreshInputs();
 }
 
 void MidiRouter::setSplitPoint(int midiNote) noexcept
