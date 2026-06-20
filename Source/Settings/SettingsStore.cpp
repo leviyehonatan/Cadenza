@@ -52,6 +52,7 @@ bool SettingsStore::load()
     m_state.masterVolume = root.get("masterVolume").asInt(m_state.masterVolume);
     m_state.reverbLevel  = root.get("reverbLevel").asInt(m_state.reverbLevel);
     m_state.splitNote  = root.get("splitNote").asInt(m_state.splitNote);
+    m_state.humanizeAmount = root.get("humanizeAmount").asInt(m_state.humanizeAmount);
 
     // Right 1/2/3 layered voices. If absent (older settings), migrate Right 1 from
     // melodyProgram so behaviour is unchanged.
@@ -180,6 +181,7 @@ bool SettingsStore::save() const
     root["masterVolume"] = J::Value::number(m_state.masterVolume);
     root["reverbLevel"]  = J::Value::number(m_state.reverbLevel);
     root["splitNote"]  = J::Value::number(m_state.splitNote);
+    root["humanizeAmount"] = J::Value::number(m_state.humanizeAmount);
 
     J::Array rightLayers;
     for (const auto& layer : m_state.rightLayers) {

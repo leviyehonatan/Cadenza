@@ -106,6 +106,7 @@ MainComponent::MainComponent()
         m_audio.setMasterVolume(st.masterVolume);
         m_audio.setReverbLevel(st.reverbLevel);
         m_midi.setSplitPoint(st.splitNote);
+        m_styleEngine.setHumanizeAmount(st.humanizeAmount);
         // Restore the saved MIDI input selection ("" = auto: main port, skip aux
         // ports) before opening any device, so we don't briefly open all ports.
         m_midi.setSelectedInput(juce::String(st.midiInputDevice));
@@ -392,9 +393,11 @@ public:
                           const std::vector<std::pair<juce::String, std::string>>& actions,
                           MappingTextFn mappingText, CommandFn onLearn, CommandFn onClear,
                           const juce::String& selectedDevice, const std::string& chordModeId, int splitNote,
-                          SelectFn onSelectDevice, CommandFn onChordMode, SplitFn onSplit)
+                          int humanizeAmount,
+                          SelectFn onSelectDevice, CommandFn onChordMode, SplitFn onSplit, SplitFn onHumanize)
         : m_mappingText(std::move(mappingText)), m_onLearn(std::move(onLearn)), m_onClear(std::move(onClear)),
-          m_onSelectDevice(std::move(onSelectDevice)), m_onChordMode(std::move(onChordMode)), m_onSplit(std::move(onSplit))
+          m_onSelectDevice(std::move(onSelectDevice)), m_onChordMode(std::move(onChordMode)), m_onSplit(std::move(onSplit)),
+          m_onHumanize(std::move(onHumanize))
     {
         // --- Input port picker (item 1 = Auto, then each detected device) ---
         m_inputLabel.setText("Input", juce::dontSendNotification);
@@ -443,6 +446,19 @@ public:
         m_split.onValueChange = [this] { if (m_onSplit) m_onSplit((int) m_split.getValue()); };
         addAndMakeVisible(m_split);
 
+        // --- Humanize (accompaniment velocity/timing variation) ---
+        m_humanizeLabel.setText("Humanize", juce::dontSendNotification);
+        m_humanizeLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        addAndMakeVisible(m_humanizeLabel);
+        m_humanize.setSliderStyle(juce::Slider::LinearHorizontal);
+        m_humanize.setTextBoxStyle(juce::Slider::TextBoxRight, false, 48, 22);
+        m_humanize.setRange(0, 100, 1);
+        m_humanize.setValue(humanizeAmount, juce::dontSendNotification);
+        m_humanize.textFromValueFunction = [](double v) { return v <= 0 ? juce::String("Off") : juce::String((int) v) + "%"; };
+        m_humanize.setValue(humanizeAmount, juce::dontSendNotification);
+        m_humanize.onValueChange = [this] { if (m_onHumanize) m_onHumanize((int) m_humanize.getValue()); };
+        addAndMakeVisible(m_humanize);
+
         m_devices.setText(devices.isEmpty() ? "No MIDI inputs detected"
                                             : juce::String(devices.size()) + " port(s) detected",
                           juce::dontSendNotification);
@@ -489,9 +505,10 @@ public:
             ctl.setBounds(row.removeFromLeft(ctlWidth));
             a.removeFromTop(4);
         };
-        labelled(m_inputLabel, m_inputBox, a.getWidth() - 80);
-        labelled(m_modeLabel,  m_modeBox,  a.getWidth() - 80);
-        labelled(m_splitLabel, m_split,    150);
+        labelled(m_inputLabel,    m_inputBox,  a.getWidth() - 80);
+        labelled(m_modeLabel,     m_modeBox,   a.getWidth() - 80);
+        labelled(m_splitLabel,    m_split,     150);
+        labelled(m_humanizeLabel, m_humanize,  a.getWidth() - 80);
         a.removeFromTop(2);
 
         m_devices.setBounds(a.removeFromTop(20));
@@ -529,17 +546,18 @@ private:
 
     void timerCallback() override { refresh(); }
 
-    static constexpr int kHeaderHeight = 28 * 3 + 4 * 3 + 2 + 20 + 8;  // 3 control rows + device line
+    static constexpr int kHeaderHeight = 28 * 4 + 4 * 4 + 2 + 20 + 8;  // 4 control rows + device line
 
     MappingTextFn m_mappingText;
     CommandFn m_onLearn, m_onClear;
     SelectFn  m_onSelectDevice;
     CommandFn m_onChordMode;
     SplitFn   m_onSplit;
+    SplitFn   m_onHumanize;
 
-    juce::Label m_inputLabel, m_modeLabel, m_splitLabel, m_devices;
+    juce::Label m_inputLabel, m_modeLabel, m_splitLabel, m_humanizeLabel, m_devices;
     juce::ComboBox m_inputBox, m_modeBox;
-    juce::Slider m_split;
+    juce::Slider m_split, m_humanize;
 
     std::vector<std::unique_ptr<Row>> m_rows;
     std::string m_pending;
@@ -604,12 +622,21 @@ void MainComponent::showMidiSettings()
         self->m_settings->state().splitNote = note;
         self->saveSettings();
     };
+    auto onHumanize = [safe](int amount) {
+        auto* self = safe.getComponent();
+        if (!self || !self->m_settings) return;
+        self->m_styleEngine.setHumanizeAmount(amount);
+        self->m_settings->state().humanizeAmount = amount;
+        self->saveSettings();
+    };
 
     const auto& st = m_settings->state();
     auto* comp = new MidiSettingsComponent(m_midi.availableInputs(), actions,
                                            std::move(mappingText), std::move(onLearn), std::move(onClear),
                                            juce::String(st.midiInputDevice), st.midiChordMode, st.splitNote,
-                                           std::move(onSelectDevice), std::move(onChordMode), std::move(onSplit));
+                                           st.humanizeAmount,
+                                           std::move(onSelectDevice), std::move(onChordMode), std::move(onSplit),
+                                           std::move(onHumanize));
     juce::DialogWindow::LaunchOptions opts;
     opts.content.setOwned(comp);
     opts.dialogTitle = "MIDI Settings & Button Mapping";

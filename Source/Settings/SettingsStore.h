@@ -93,6 +93,7 @@ struct Settings
     int masterVolume = 100;          // master output volume 0..127 (100 = unity)
     int reverbLevel = 80;            // master reverb amount 0..100
     int splitNote = 60;              // keyboard split: notes < this drive chords, >= play melody
+    int humanizeAmount = 35;         // 0..100 accompaniment velocity/timing variation (0 = off)
 
     // MIDI control mappings: trigger id (see MidiControlMap) -> command string
     // (section id or "play"). Lets hardware buttons drive the arranger.

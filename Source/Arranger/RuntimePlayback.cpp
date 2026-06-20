@@ -3,6 +3,7 @@
 #include "../Audio/Transport.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace cadenza::arranger
 {
@@ -267,5 +268,56 @@ int liveMelodyNote(int note, int octaves) noexcept
     if (n < 0)   n = 0;
     if (n > 127) n = 127;
     return n;
+}
+
+HumanizeProfile humanizeProfileForPart(const Part& part, int amountPercent) noexcept
+{
+    if (amountPercent <= 0)
+        return {};
+
+    const double a = std::clamp(amountPercent, 0, 100) / 100.0;
+
+    // Base (full-amount) spreads per role. Drums get the most velocity life but
+    // stay rhythmically tight; bass holds the pocket; comp/keys/guitar breathe the
+    // most. Late ticks are tiny (960 ppq => ~0.5ms/tick at 120bpm).
+    int vel = 10, late = 6;
+    if (part.percussion || part.name == "drums") { vel = 12; late = 4; }
+    else if (part.name == "bass")                { vel = 7;  late = 2; }
+    else if (part.name == "pad")                 { vel = 6;  late = 3; }
+    else                                         { vel = 10; late = 8; }
+
+    HumanizeProfile p;
+    p.velocityJitter = static_cast<int>(std::lround(vel * a));
+    p.maxLateTicks   = static_cast<int>(std::lround(late * a));
+    return p;
+}
+
+std::uint32_t humanizeSeed(int tick, int pitch, int partIndex, int loopCounter) noexcept
+{
+    // FNV-1a over the note's stable identity plus the section-loop counter.
+    std::uint32_t h = 2166136261u;
+    for (int v : { tick, pitch, partIndex, loopCounter }) {
+        h ^= static_cast<std::uint32_t>(v);
+        h *= 16777619u;
+    }
+    return h;
+}
+
+int humanizeVelocity(int baseVelocity, std::uint32_t seed, int velocityJitter) noexcept
+{
+    if (velocityJitter <= 0)
+        return std::clamp(baseVelocity, 1, 127);
+    const int span  = 2 * velocityJitter + 1;
+    const int delta = static_cast<int>(seed % static_cast<std::uint32_t>(span)) - velocityJitter;
+    return std::clamp(baseVelocity + delta, 1, 127);
+}
+
+int humanizeLateTicks(std::uint32_t seed, int maxLateTicks) noexcept
+{
+    if (maxLateTicks <= 0)
+        return 0;
+    // Decorrelate from the velocity draw by mixing the seed first.
+    const std::uint32_t s = seed * 2654435761u;
+    return static_cast<int>(s % static_cast<std::uint32_t>(maxLateTicks + 1));
 }
 }

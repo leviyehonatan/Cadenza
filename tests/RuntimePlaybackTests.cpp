@@ -475,6 +475,64 @@ void registerFenceFoldsLowNoteUpIntoWindow()
     expect(playback && *playback == 48, "below-window pad note folds up into [48,84]");
 }
 
+void humanizeOffIsExactlyOriginal()
+{
+    Part drums; drums.name = "drums"; drums.percussion = true;
+    const auto prof = humanizeProfileForPart(drums, 0);
+    expect(prof.velocityJitter == 0 && prof.maxLateTicks == 0, "amount 0 yields a zero humanize profile");
+
+    const std::uint32_t seed = humanizeSeed(0, 36, 0, 0);
+    expect(humanizeVelocity(100, seed, 0) == 100, "zero jitter leaves velocity unchanged");
+    expect(humanizeLateTicks(seed, 0) == 0, "zero late-ticks yields no timing offset");
+}
+
+void humanizeVelocityStaysInRangeAndIsDeterministic()
+{
+    Part comp; comp.name = "harmony";
+    const auto prof = humanizeProfileForPart(comp, 100);
+    expect(prof.velocityJitter > 0, "full amount gives a non-zero velocity jitter");
+
+    bool inRange = true, deterministic = true;
+    for (int s = 0; s < 500; ++s) {
+        const std::uint32_t seed = humanizeSeed(s * 17, 60, 2, s);
+        const int v1 = humanizeVelocity(80, seed, prof.velocityJitter);
+        const int v2 = humanizeVelocity(80, seed, prof.velocityJitter);
+        if (v1 < 1 || v1 > 127 || v1 < 80 - prof.velocityJitter || v1 > 80 + prof.velocityJitter) inRange = false;
+        if (v1 != v2) deterministic = false;
+    }
+    expect(inRange, "humanized velocity stays within [base-jitter, base+jitter] and [1,127]");
+    expect(deterministic, "same seed always yields the same humanized velocity");
+}
+
+void humanizeVelocityClampsExtremes()
+{
+    const std::uint32_t seed = humanizeSeed(1, 2, 3, 4);
+    expect(humanizeVelocity(125, seed, 20) <= 127, "humanized velocity never exceeds 127");
+    expect(humanizeVelocity(3,   seed, 20) >= 1,   "humanized velocity never drops below 1");
+}
+
+void humanizeLateTicksStayWithinBound()
+{
+    bool ok = true;
+    for (int s = 0; s < 500; ++s) {
+        const int late = humanizeLateTicks(humanizeSeed(s, s * 3, 1, s), 8);
+        if (late < 0 || late > 8) ok = false;
+    }
+    expect(ok, "late offset stays within [0, maxLateTicks]");
+}
+
+void humanizeProfileScalesAndDiffersByRole()
+{
+    Part drums; drums.name = "drums"; drums.percussion = true;
+    Part bass;  bass.name  = "bass";
+    const auto d = humanizeProfileForPart(drums, 100);
+    const auto b = humanizeProfileForPart(bass, 100);
+    expect(d.velocityJitter > b.velocityJitter, "drums get more velocity life than bass");
+
+    const auto half = humanizeProfileForPart(drums, 50);
+    expect(half.velocityJitter < d.velocityJitter && half.velocityJitter > 0, "amount scales the profile down");
+}
+
 std::string readText(const std::filesystem::path& path)
 {
     std::ifstream in(path);
@@ -711,6 +769,11 @@ int main()
     registerFenceLeavesInRangeNotesUntouched();
     registerFenceFoldsHighNoteDownIntoWindow();
     registerFenceFoldsLowNoteUpIntoWindow();
+    humanizeOffIsExactlyOriginal();
+    humanizeVelocityStaysInRangeAndIsDeterministic();
+    humanizeVelocityClampsExtremes();
+    humanizeLateTicksStayWithinBound();
+    humanizeProfileScalesAndDiffersByRole();
     playbackDiagnosticsExportCsvMidiAndSummary();
     playbackDiagnosticsMidiSetupPrefersMainDrumsOnSharedChannel();
     playbackDiagnosticsRoutesPercussionEventsToDrumChannel();

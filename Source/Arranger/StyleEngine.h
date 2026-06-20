@@ -68,6 +68,11 @@ public:
     void setGlobalTranspose(int semitones);
     void setKeyTonic(int pitchClass);
     void setEnabled(bool enabled);
+
+    // Humanization amount 0..100 (0 = exact grid/velocities, the original
+    // behavior). Adds subtle per-note velocity + late-timing variation so the
+    // accompaniment feels played rather than sequenced.
+    void setHumanizeAmount(int amount0to100);
     void reapplyCurrentSectionChannelSetup();
     PlaybackDiagnosticResult exportCurrentSectionDiagnostics(const std::string& outputDirectory) const;
 
@@ -111,6 +116,7 @@ private:
     // Audio-thread-only state.
     int m_lastFiredTickInSection = -1;
     int m_sectionLengthTicks = 0;
+    int m_humanizeLoopCounter = 0;   // bumped each section loop; varies the feel
     std::vector<ActiveNote> m_active;
 
     // One-shot / quantized section sequencing.
@@ -132,6 +138,7 @@ private:
     cadenza::midi::Chord m_chord;
     std::atomic<int> m_globalTranspose { 0 };
     std::atomic<int> m_keyTonic { 0 };
+    std::atomic<int> m_humanizeAmount { 0 };   // 0..100; 0 = off (original behavior)
     std::atomic<bool> m_enabled { true };
     std::atomic<bool> m_chordDirty { false };
     // Set by the message thread (allNotesOff / setStyle) to ask the audio thread to

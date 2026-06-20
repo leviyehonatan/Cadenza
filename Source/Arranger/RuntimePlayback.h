@@ -3,6 +3,7 @@
 #include "PatternTransposer.h"
 #include "Style.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -64,4 +65,30 @@ TransposeContext makeStylePlaybackContext(const cadenza::midi::Chord& chord,
 // Apply the live-keyboard Octave control to a right-hand melody note, clamped to
 // the valid MIDI range. Used for live melody input only, never for style parts.
 int liveMelodyNote(int note, int octaves) noexcept;
+
+// --- Humanization -----------------------------------------------------------
+// Subtle, deterministic per-note variation so the accompaniment breathes like a
+// live band instead of a metronome grid. All functions are pure and seeded, so
+// playback is reproducible and unit-testable.
+
+// How much a given part is humanized, scaled by a 0..100 amount.
+struct HumanizeProfile
+{
+    int velocityJitter = 0;   // +/- velocity spread
+    int maxLateTicks   = 0;   // notes may fire 0..N ticks LATE (never early)
+};
+
+// Per-role amounts (drums lively but tight, bass tightest, comp/keys loosest),
+// scaled by amountPercent (0 = off => an all-zero profile = original behavior).
+HumanizeProfile humanizeProfileForPart(const Part& part, int amountPercent) noexcept;
+
+// Stable, well-distributed 32-bit seed for one note occurrence. loopCounter lets
+// the feel vary from one pass of the section to the next.
+std::uint32_t humanizeSeed(int tick, int pitch, int partIndex, int loopCounter) noexcept;
+
+// Deterministic velocity in [1,127]: base +/- up to velocityJitter.
+int humanizeVelocity(int baseVelocity, std::uint32_t seed, int velocityJitter) noexcept;
+
+// Deterministic late offset in [0, maxLateTicks].
+int humanizeLateTicks(std::uint32_t seed, int maxLateTicks) noexcept;
 }

@@ -223,6 +223,7 @@ void StyleEngine::setChord(const cadenza::midi::Chord& chord)
 }
 
 void StyleEngine::setGlobalTranspose(int semitones) { m_globalTranspose.store(semitones); }
+void StyleEngine::setHumanizeAmount(int amount0to100) { m_humanizeAmount.store(std::clamp(amount0to100, 0, 100)); }
 void StyleEngine::setKeyTonic(int pc)               { m_keyTonic.store(pc); }
 void StyleEngine::setEnabled(bool enabled)           { m_enabled.store(enabled); }
 
@@ -343,8 +344,10 @@ void StyleEngine::onTick(int ticksAdvanced, cadenza::audio::Transport& transport
         // At the loop restart, return expression/bend/sustain to their default
         // so a part that faded out (or bent up) at the end of the bar doesn't
         // start the next loop stuck quiet/detuned before its first event.
-        if (tickInSection == 0)
+        if (tickInSection == 0) {
             resetPartControllers();
+            ++m_humanizeLoopCounter;   // vary the humanized feel each section pass
+        }
         firePatternNotesAtTick(tickInSection);
         fireAutomationAtTick(tickInSection);
         m_lastFiredTickInSection = tickInSection;
@@ -458,9 +461,23 @@ void StyleEngine::firePatternNotesAtTick(int tickInSection)
     }
     const TransposeContext ctx = makeStylePlaybackContext(chord, m_keyTonic.load(), m_globalTranspose.load());
 
-    for (const auto& part : section->parts) {
+    const int humanize = m_humanizeAmount.load();
+    const int secLen   = m_sectionLengthTicks;
+
+    for (std::size_t partIndex = 0; partIndex < section->parts.size(); ++partIndex) {
+        const auto& part = section->parts[partIndex];
+        const HumanizeProfile hp = humanizeProfileForPart(part, humanize);
+
         for (const auto& note : part.notes) {
-            if (note.tick != tickInSection) continue;
+            // Humanized micro-timing: the note may fire a few ticks LATE (never
+            // early, so it can't fire in the past or be skipped). Clamp so a note
+            // near the loop end still lands inside the section and isn't dropped.
+            const std::uint32_t seed = humanizeSeed(note.tick, note.pitch,
+                                                    static_cast<int>(partIndex), m_humanizeLoopCounter);
+            int late = humanizeLateTicks(seed, hp.maxLateTicks);
+            if (secLen > 0)
+                late = std::min(late, std::max(0, secLen - 1 - note.tick));
+            if (note.tick + late != tickInSection) continue;
 
             auto maybeMidi = playbackNoteForPart(part, note, ctx);
             if (!maybeMidi) continue;
@@ -481,12 +498,13 @@ void StyleEngine::firePatternNotesAtTick(int tickInSection)
                 }
             }
 
-            m_engine.noteOn(channel, midi, note.velocity);
+            const int velocity = humanizeVelocity(note.velocity, seed, hp.velocityJitter);
+            m_engine.noteOn(channel, midi, velocity);
 
             // Schedule a note-off after `duration` ticks. Keep source pointers so
             // sustained notes can be re-voiced if the chord changes mid-hold.
             m_active.push_back(ActiveNote{ channel, midi,
-                                           std::max(1, note.duration), note.velocity,
+                                           std::max(1, note.duration), velocity,
                                            &part, &note });
         }
     }
