@@ -900,6 +900,15 @@ void NativePanel::paint(juce::Graphics& g)
                    juce::Justification::topLeft, false);
     }
 
+    // Style header detail line (bank / meter / tempo), like the design's Style card.
+    if (! m_styleDetail.isEmpty())
+    {
+        g.setColour(CadenzaLookAndFeel::textDim());
+        g.setFont(juce::Font(juce::FontOptions(9.0f, juce::Font::bold)));
+        g.drawText("FACTORY     4/4     " + m_bpmVal.getText() + " BPM",
+                   m_styleDetail, juce::Justification::centredLeft, false);
+    }
+
     // Chord card mini-piano: two octaves with the held chord's tones lit gold.
     if (! m_chordPiano.isEmpty())
     {
@@ -1283,16 +1292,18 @@ void NativePanel::resized()
 
     // Two-column upper band: a performance card (left) and a memory card (right).
     {
-        auto band = area.removeFromTop(206);
+        auto band = area.removeFromTop(222);
         auto bandL = band.removeFromLeft((band.getWidth() - gap) * 56 / 100);
         band.removeFromLeft(gap);
         auto bandR = band;
 
-        // LEFT card: style name + chord LCD (name + mini-piano), transpose/octave, toggles.
+        // LEFT card: style header, chord LCD (name + mini-piano), transpose/octave, toggles.
         {
             m_cards.push_back(bandL);
             auto col = bandL.reduced(9, 9);
-            m_styleName.setBounds(col.removeFromTop(18));
+            m_styleName.setBounds(col.removeFromTop(20));
+            m_styleDetail = col.removeFromTop(13);
+            col.removeFromTop(3);
             auto lcd = col.removeFromTop(72);
             m_chordCard = lcd.reduced(1, 1);
             m_chord.setBounds(lcd.removeFromTop(44));
