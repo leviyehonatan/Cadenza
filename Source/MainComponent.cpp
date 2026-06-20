@@ -527,21 +527,21 @@ void MainComponent::resized()
         m_panel->setBounds(getLocalBounds());
 }
 
-juce::File MainComponent::findWebRoot()
+juce::File MainComponent::findResourcesRoot()
 {
-    const auto executableResources = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
+    const auto exeResources = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
         .getParentDirectory()
-        .getChildFile("resources")
-        .getChildFile("web");
+        .getChildFile("resources");
 
-    if (executableResources.getChildFile("Cadenza Workstation.html").existsAsFile())
-        return executableResources;
+    if (exeResources.getChildFile("factory").isDirectory()
+        || exeResources.getChildFile("sf2").isDirectory())
+        return exeResources;
 
     const auto workingResources = juce::File::getCurrentWorkingDirectory()
-        .getChildFile("resources")
-        .getChildFile("web");
+        .getChildFile("resources");
 
-    if (workingResources.getChildFile("Cadenza Workstation.html").existsAsFile())
+    if (workingResources.getChildFile("factory").isDirectory()
+        || workingResources.getChildFile("sf2").isDirectory())
         return workingResources;
 
     return juce::File::getCurrentWorkingDirectory();
@@ -569,8 +569,7 @@ void MainComponent::applyRuntimeStateToEngines()
 
 juce::Array<juce::File> MainComponent::factoryStyleFiles() const
 {
-    const auto stylesDir = findWebRoot()
-        .getParentDirectory()
+    const auto stylesDir = findResourcesRoot()
         .getChildFile("factory")
         .getChildFile("styles");
 
@@ -855,8 +854,7 @@ void MainComponent::tryLoadFactorySoundFont()
     }
 
     // Look for any .sf2/.sf3 in resources/sf2 (factory or user-dropped).
-    const auto sf2Dir = findWebRoot()
-        .getParentDirectory()
+    const auto sf2Dir = findResourcesRoot()
         .getChildFile("sf2");
     if (!sf2Dir.isDirectory()) return;
 
@@ -879,8 +877,7 @@ void MainComponent::tryLoadFactorySoundFont()
 
 void MainComponent::openStyleFileChooser()
 {
-    const auto stylesDir = findWebRoot()
-        .getParentDirectory()
+    const auto stylesDir = findResourcesRoot()
         .getChildFile("factory")
         .getChildFile("styles");
 
@@ -904,8 +901,7 @@ void MainComponent::openStyleFileChooser()
 
 void MainComponent::openSoundFontFileChooser()
 {
-    const auto sf2Dir = findWebRoot()
-        .getParentDirectory()
+    const auto sf2Dir = findResourcesRoot()
         .getChildFile("sf2");
 
     m_soundFontChooser = std::make_unique<juce::FileChooser>(
@@ -1142,8 +1138,7 @@ bool MainComponent::loadAndApplyStyleFile(const juce::File& file)
 
 void MainComponent::openSongFileChooser()
 {
-    const auto songsDir = findWebRoot()
-        .getParentDirectory()
+    const auto songsDir = findResourcesRoot()
         .getChildFile("factory")
         .getChildFile("songs");
 
@@ -1716,7 +1711,7 @@ void MainComponent::timerCallback()
 void MainComponent::openPluginFileChooser()
 {
     // Default to the project root so the bundled VST3/ and NeuralPi/ folders are visible.
-    const auto projectRoot = findWebRoot().getParentDirectory().getParentDirectory();
+    const auto projectRoot = findResourcesRoot().getParentDirectory();
     const auto startDir = projectRoot.isDirectory()
         ? projectRoot
         : juce::File::getSpecialLocation(juce::File::globalApplicationsDirectory);
@@ -2439,48 +2434,3 @@ void MainComponent::refreshOtsAvailability()
     m_panel->setOtsAvailable(available);
 }
 
-void MainComponent::handleBridgePayload(const juce::var& payload)
-{
-    const auto json = payload.toString();
-    const auto result = m_router.route(parseBridgeMessage(json));
-
-    if (!result.handled)
-        juce::Logger::writeToLog("Unhandled Cadenza bridge message: " + json);
-}
-
-cadenza::BridgeMessage MainComponent::parseBridgeMessage(const juce::String& json) const
-{
-    cadenza::BridgeMessage message;
-
-    const auto parsed = juce::JSON::parse(json);
-    const auto* object = parsed.getDynamicObject();
-    if (object == nullptr)
-        return message;
-
-    message.type = object->getProperty("type").toString().toStdString();
-
-    const auto payload = object->getProperty("payload");
-    const auto* payloadObject = payload.getDynamicObject();
-    if (payloadObject == nullptr)
-        return message;
-
-    const auto& properties = payloadObject->getProperties();
-    for (int index = 0; index < properties.size(); ++index)
-    {
-        const auto& property = properties.getName(index).toString();
-        message.payload[property.toStdString()] = convertValue(properties.getValueAt(index));
-    }
-
-    return message;
-}
-
-cadenza::BridgeValue MainComponent::convertValue(const juce::var& value) const
-{
-    if (value.isBool())
-        return cadenza::BridgeValue::boolean(static_cast<bool>(value));
-
-    if (value.isInt() || value.isInt64() || value.isDouble())
-        return cadenza::BridgeValue::integer(static_cast<int>(value));
-
-    return cadenza::BridgeValue::text(value.toString().toStdString());
-}

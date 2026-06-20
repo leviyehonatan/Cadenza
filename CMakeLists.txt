@@ -235,7 +235,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
     juce_add_gui_app(Cadenza
         PRODUCT_NAME "Cadenza Workstation"
         COMPANY_NAME "Cadenza"
-        NEEDS_WEBVIEW2 TRUE
     )
 
     target_sources(Cadenza
@@ -259,8 +258,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
 
     target_compile_definitions(Cadenza
         PRIVATE
-            JUCE_WEB_BROWSER=1
-            JUCE_USE_WIN_WEBVIEW2=1
+            JUCE_WEB_BROWSER=0
             JUCE_PLUGINHOST_VST3=1
     )
 

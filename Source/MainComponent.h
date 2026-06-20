@@ -40,11 +40,7 @@ public:
     std::string audioStateFilePath() const;
 
 private:
-    static juce::File findWebRoot();
-
-    void handleBridgePayload(const juce::var& payload);
-    cadenza::BridgeMessage parseBridgeMessage(const juce::String& json) const;
-    cadenza::BridgeValue convertValue(const juce::var& value) const;
+    static juce::File findResourcesRoot();
 
     void installBridgeHooks();
     void applyRuntimeStateToEngines();
