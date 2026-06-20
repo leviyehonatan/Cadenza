@@ -421,6 +421,60 @@ void percussionSubRhythmBypassesChordTransposition()
     expect(playback && *playback == 42, "rhythm2 percussion bypasses chord transposition");
 }
 
+void registerFenceLeavesInRangeNotesUntouched()
+{
+    Part p;
+    p.name = "harmony";
+    p.midiChannel = 3;
+
+    PatternNote note;
+    note.pitch = 60;                 // C4 — squarely inside the harmony window
+    note.role = NoteRole::ChordRoot;
+
+    TransposeContext ctx;
+    ctx.chord.rootPitchClass = 0;    // C major
+    ctx.chord.quality = cadenza::midi::ChordQuality::Major;
+
+    const auto playback = playbackNoteForPart(p, note, ctx);
+    expect(playback && *playback == 60, "in-range harmony note is not moved by the register fence");
+}
+
+void registerFenceFoldsHighNoteDownIntoWindow()
+{
+    Part p;
+    p.name = "harmony";
+    p.midiChannel = 3;
+
+    PatternNote note;
+    note.pitch = 96;                 // C7 — above the harmony window [48,84]
+    note.role = NoteRole::ChordRoot;
+
+    TransposeContext ctx;
+    ctx.chord.rootPitchClass = 0;    // C major (root stays pitch class 0)
+    ctx.chord.quality = cadenza::midi::ChordQuality::Major;
+
+    const auto playback = playbackNoteForPart(p, note, ctx);
+    expect(playback && *playback == 84, "above-window harmony note folds down one octave into [48,84]");
+}
+
+void registerFenceFoldsLowNoteUpIntoWindow()
+{
+    Part p;
+    p.name = "pad";
+    p.midiChannel = 4;
+
+    PatternNote note;
+    note.pitch = 24;                 // C1 — below the pad window [48,84]
+    note.role = NoteRole::ChordRoot;
+
+    TransposeContext ctx;
+    ctx.chord.rootPitchClass = 0;    // C major
+    ctx.chord.quality = cadenza::midi::ChordQuality::Major;
+
+    const auto playback = playbackNoteForPart(p, note, ctx);
+    expect(playback && *playback == 48, "below-window pad note folds up into [48,84]");
+}
+
 std::string readText(const std::filesystem::path& path)
 {
     std::ifstream in(path);
@@ -654,6 +708,9 @@ int main()
     nonDrumPartsNeverRemap();
     drumPlaybackBypassesChordTranspositionAndThenRemaps();
     percussionSubRhythmBypassesChordTransposition();
+    registerFenceLeavesInRangeNotesUntouched();
+    registerFenceFoldsHighNoteDownIntoWindow();
+    registerFenceFoldsLowNoteUpIntoWindow();
     playbackDiagnosticsExportCsvMidiAndSummary();
     playbackDiagnosticsMidiSetupPrefersMainDrumsOnSharedChannel();
     playbackDiagnosticsRoutesPercussionEventsToDrumChannel();

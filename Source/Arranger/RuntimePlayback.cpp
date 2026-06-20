@@ -33,6 +33,32 @@ int channelSetupPriority(const Part& part) noexcept
         return 20;
     return 10;
 }
+
+// A per-part register window (MIDI note numbers) — the Cadenza equivalent of a
+// Genos channel Note Limit. The nearest-fold transpose already keeps triads
+// within ~an octave, so for normal content these windows are no-ops; they catch
+// escapees (extreme voicings, 7/9 stacks, future register biasing) and keep each
+// part planted in its register instead of scattering or dropping out of range.
+struct RegisterWindow { int low; int high; };
+
+RegisterWindow registerWindowForPart(const Part& part) noexcept
+{
+    const auto role = destinationRoleForPart(part);
+    if (role == "pad")     return { 48, 84 };   // C3..C6
+    if (role == "harmony") return { 48, 84 };   // C3..C6  keys / guitar stabs
+    if (role == "guitar")  return { 45, 81 };   // A2..A5
+    if (role == "lead" || role == "melody") return { 55, 91 };  // G3..G6
+    return { 40, 88 };                          // generous default, any pitched part
+}
+
+// Fold `pitch` by whole octaves until it sits inside [low, high]; clamp to MIDI
+// range as a last resort. Notes already inside the window are returned unchanged.
+int foldIntoWindow(int pitch, RegisterWindow w) noexcept
+{
+    while (pitch < w.low  && pitch + 12 <= 127) pitch += 12;
+    while (pitch > w.high && pitch - 12 >= 0)   pitch -= 12;
+    return std::clamp(pitch, 0, 127);
+}
 }
 
 int playbackChannelForPart(const Part& part) noexcept
@@ -205,6 +231,14 @@ std::optional<int> playbackNoteForPart(const Part& part,
         const int pc = ((*played % 12) + 12) % 12;
         return 28 + ((pc - 4 + 12) % 12);   // 28 = E1; window [28, 40)
     }
+
+    // Register fence (Genos Note Limit): keep the part planted in its window.
+    // Skipped when an explicit Yamaha policy already carried note limits (the
+    // policy path applied them) and for absolute notes (FX/SFX keep their pitch).
+    const bool hasPolicyLimits = part.yamahaPolicy
+        && (part.yamahaPolicy->noteLowLimit || part.yamahaPolicy->noteHighLimit);
+    if (!hasPolicyLimits && note.role != NoteRole::Absolute)
+        played = foldIntoWindow(*played, registerWindowForPart(part));
 
     // Per-part octave placement (e.g. the pad dropped an octave for a fuller body).
     if (part.octaveOffset != 0) {
