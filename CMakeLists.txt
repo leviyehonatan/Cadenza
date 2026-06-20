@@ -250,6 +250,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
             Source/Audio/PluginHost.cpp
             Source/Midi/MidiRouter.cpp
             Source/Arranger/StyleEngine.cpp
+            Source/UI/CadenzaLookAndFeel.cpp
             Source/UI/NativePanel.cpp
             Source/UI/StylePartEditor.cpp
             Source/UI/StylePartPatternImport.cpp

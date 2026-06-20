@@ -40,9 +40,7 @@ public:
     std::string audioStateFilePath() const;
 
 private:
-    juce::WebBrowserComponent::Options createBrowserOptions();
     static juce::File findWebRoot();
-    static juce::String startupUrl();
 
     void handleBridgePayload(const juce::var& payload);
     cadenza::BridgeMessage parseBridgeMessage(const juce::String& json) const;
@@ -154,7 +152,6 @@ private:
     std::string m_learnCommand;        // command currently waiting for a MIDI-learn press
 
     std::unique_ptr<cadenza::ui::NativePanel> m_panel;
-    juce::WebBrowserComponent m_webView;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

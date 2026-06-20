@@ -16,22 +16,6 @@
 
 namespace
 {
-constexpr auto compatibilityShim = R"js(
-(() => {
-  const install = () => {
-    if (!window.__JUCE__ || !window.__JUCE__.backend) return false;
-    window.__juce__ = {
-      postMessage: (message) => window.__JUCE__.backend.emitEvent("cadenzaMessage", message)
-    };
-    return true;
-  };
-
-  if (!install()) {
-    window.addEventListener("DOMContentLoaded", install, { once: true });
-  }
-})();
-)js";
-
 std::string lowercase(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
@@ -83,9 +67,7 @@ juce::String boolLiteral(bool value)
 }
 
 MainComponent::MainComponent()
-    : m_webView(createBrowserOptions())
 {
-    addAndMakeVisible(m_webView);
     setSize(1280, 800);
 
     // Load persisted settings BEFORE starting audio so saved BPM / device take effect.
@@ -297,12 +279,6 @@ MainComponent::MainComponent()
     // Always-on timer: hot-plug MIDI rescan (~every 2s) + song-mode auto-stepping.
     startTimerHz(20);
 
-    m_webView.goToURL(startupUrl());
-
-    // The native panel is the source of truth; the WebView starts hidden and can
-    // be shown via the panel's "Web UI" toggle. (It still loads/runs in the
-    // background so the toggle is instant and bridge mirroring keeps working.)
-    m_webView.setVisible(false);
     resized();
 }
 
@@ -547,34 +523,8 @@ void MainComponent::saveSettings()
 
 void MainComponent::resized()
 {
-    auto bounds = getLocalBounds();
-
-    if (m_webView.isVisible()) {
-        // Secondary web UI shown: native panel on the left, WebView fills the rest.
-        if (m_panel)
-            m_panel->setBounds(bounds.removeFromLeft(440));
-        m_webView.setBounds(bounds);
-    } else {
-        // Native panel is the whole window (source of truth).
-        if (m_panel)
-            m_panel->setBounds(bounds);
-    }
-}
-
-juce::WebBrowserComponent::Options MainComponent::createBrowserOptions()
-{
-    juce::WebBrowserComponent::Options options;
-
-#if JUCE_WINDOWS
-    options = options.withBackend(juce::WebBrowserComponent::Options::Backend::webview2);
-#endif
-
-    return options
-        .withNativeIntegrationEnabled()
-        .withUserScript(compatibilityShim)
-        .withEventListener("cadenzaMessage", [this](juce::var payload) {
-            handleBridgePayload(payload);
-        });
+    if (m_panel)
+        m_panel->setBounds(getLocalBounds());
 }
 
 juce::File MainComponent::findWebRoot()
@@ -597,23 +547,11 @@ juce::File MainComponent::findWebRoot()
     return juce::File::getCurrentWorkingDirectory();
 }
 
-juce::String MainComponent::startupUrl()
-{
-    const auto html = findWebRoot().getChildFile("Cadenza Workstation.html");
-    return juce::URL(html).toString(true);
-}
 
-void MainComponent::pushToWeb(const juce::String& js)
+void MainComponent::pushToWeb(const juce::String&)
 {
-    if (js.isEmpty()) return;
-    // evaluateJavascript must be called on the message thread. All callers
-    // (MIDI thread, audio thread) marshal here so WebView2 is never called
-    // from a background thread.
-    juce::Component::SafePointer<MainComponent> safe(this);
-    juce::MessageManager::callAsync([safe, js] {
-        if (auto* p = safe.getComponent())
-            p->m_webView.evaluateJavascript(js);
-    });
+    // The WebUI has been removed; the native panel is the sole UI. This is kept as
+    // a no-op so the existing mirror-to-web call sites compile without churn.
 }
 
 void MainComponent::applyRuntimeStateToEngines()
@@ -1893,10 +1831,6 @@ void MainComponent::buildNativePanel()
         }
         persistStyleMix();   // remember "GM" for this channel
     };
-    cb.toggleWeb     = [this] {
-        m_webView.setVisible(!m_webView.isVisible());
-        resized();
-    };
     cb.onSetTempo = [this](int target) {
         const int bpm = m_state.setBpm(target);
         m_audio.setBpm(static_cast<double>(bpm));
@@ -2511,13 +2445,7 @@ void MainComponent::handleBridgePayload(const juce::var& payload)
     const auto result = m_router.route(parseBridgeMessage(json));
 
     if (!result.handled)
-    {
         juce::Logger::writeToLog("Unhandled Cadenza bridge message: " + json);
-        return;
-    }
-
-    if (!result.javascript.empty())
-        m_webView.evaluateJavascript(juce::String(result.javascript));
 }
 
 cadenza::BridgeMessage MainComponent::parseBridgeMessage(const juce::String& json) const

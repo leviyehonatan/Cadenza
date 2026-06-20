@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "UI/CadenzaLookAndFeel.h"
 
 #include <juce_gui_extra/juce_gui_extra.h>
 
@@ -21,12 +22,19 @@ public:
         m_logger.reset(new juce::FileLogger(logFile, "=== Cadenza session start ==="));
         juce::Logger::setCurrentLogger(m_logger.get());
 
+        // Install the app-wide "sleek dark DAW" theme before any window is built
+        // so it cascades to every component and popup menu.
+        m_lookAndFeel = std::make_unique<cadenza::ui::CadenzaLookAndFeel>();
+        juce::LookAndFeel::setDefaultLookAndFeel(m_lookAndFeel.get());
+
         m_mainWindow = std::make_unique<MainWindow>(getApplicationName());
     }
 
     void shutdown() override
     {
         m_mainWindow = nullptr;
+        juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
+        m_lookAndFeel.reset();
         juce::Logger::setCurrentLogger(nullptr);
         m_logger.reset();
     }
@@ -65,6 +73,7 @@ private:
 
     std::unique_ptr<MainWindow> m_mainWindow;
     std::unique_ptr<juce::FileLogger> m_logger;
+    std::unique_ptr<cadenza::ui::CadenzaLookAndFeel> m_lookAndFeel;
 };
 
 START_JUCE_APPLICATION(CadenzaApplication)

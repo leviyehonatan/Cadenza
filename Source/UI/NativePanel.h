@@ -116,7 +116,6 @@ public:
         std::function<void()> openSoundFont;
         std::function<void()> openAudioSettings;
         std::function<void()> openMidiSettings;
-        std::function<void()> toggleWeb;
         std::function<void(int)> nudgeTranspose;     // delta -1 / +1
         std::function<void(int)> nudgeOctave;         // delta -1 / +1
         std::function<void(int)> nudgeTempo;          // delta in BPM (e.g. -1 / +1)
@@ -213,6 +212,14 @@ public:
 private:
     void refreshSectionHighlights();
 
+    // Card backgrounds drawn behind logical control groups (computed in resized(),
+    // painted in paint()). m_chordCard is the recessed "LCD" panel for the chord.
+    std::vector<juce::Rectangle<int>> m_cards;
+    juce::Rectangle<int> m_chordCard;
+    // Left hardware faceplate geometry, for paint() chrome (captions, D-Beam sensor).
+    juce::Rectangle<int> m_hwPanel, m_hwMasterCap, m_hwBalanceCap, m_dbeamSensor,
+                         m_hwAssignCap, m_hwStyleCtlCap;
+
     // juce::MidiKeyboardState::Listener
     void handleNoteOn (juce::MidiKeyboardState*, int midiChannel, int midiNoteNumber, float velocity) override;
     void handleNoteOff(juce::MidiKeyboardState*, int midiChannel, int midiNoteNumber, float velocity) override;
@@ -225,7 +232,34 @@ private:
     juce::TextButton m_openSf     { "Open SoundFont" };
     juce::TextButton m_openAudio  { "Audio" };
     juce::TextButton m_openMidi   { "MIDI" };
-    juce::TextButton m_webToggle  { "Web UI" };
+
+    // Left nav rail (icon nav items). Stage A: visual frame; paging next.
+    std::vector<std::unique_ptr<juce::TextButton>> m_navButtons;
+    int m_navActive = 0;
+
+    // Left hardware faceplate: CADENZA wordmark, master/balance knobs, D-Beam,
+    // assignable buttons, style-control + transport. Some are decorative chrome to
+    // match the design; the wired ones drive real engines.
+    juce::Label      m_logoMain, m_logoSub;
+    juce::Slider     m_hwMasterVol, m_hwBalance;
+    juce::TextButton m_assign1 { "1" }, m_assign2 { "2" };
+    juce::TextButton m_dbeamL  { "<" }, m_dbeamR  { ">" };
+    juce::TextButton m_scIntro { "INTRO" }, m_scVari { "VARI" }, m_scFill { "FILL" },
+                     m_scBreak { "BREAK" }, m_scEnd { "END" };
+    juce::TextButton m_syncroStart { "SYNCRO\nSTART" }, m_resetTempo { "RESET\nTEMPO" };
+
+    // Bottom hardware strip: LEFT/RIGHT knobs, split, PART ON/OFF LEDs, registration
+    // memory, EXIT/MENU, X-Fader (chrome that mirrors the design's lower deck).
+    juce::Slider     m_hwLeft, m_hwRight, m_xfader;
+    juce::TextButton m_splitSet { "SET" }, m_exitBtn { "ON/OFF" }, m_menuBtn { "ON/OFF" };
+    std::vector<std::unique_ptr<juce::TextButton>> m_partButtons;     // DRUM,PERC,BASS,ACC1-5
+    std::vector<std::unique_ptr<juce::TextButton>> m_regMemButtons;   // 1..8
+    juce::Rectangle<int> m_bottomStrip, m_wheelsZone, m_splitCap, m_partCap, m_regMemCap,
+                         m_exitCap, m_menuCap, m_xfaderCap, m_hwLeftCap, m_hwRightCap;
+
+    // Top status-bar readouts (painted) + a master-volume slider.
+    juce::Slider m_topMaster;
+    juce::Rectangle<int> m_statusReadout, m_topMasterCap;
 
     juce::Label      m_bpmCaption;
     juce::TextButton m_bpmDown { "-" };

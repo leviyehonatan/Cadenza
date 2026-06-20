@@ -1,4 +1,5 @@
 #include "NativePanel.h"
+#include "CadenzaLookAndFeel.h"
 #include "../Midi/GmInstruments.h"
 
 namespace cadenza::ui
@@ -88,8 +89,9 @@ void showRightVoiceMenu(juce::Component* anchor, bool hasPlugin,
 NativePanel::NativePanel()
 {
     auto styleCaption = [](juce::Label& l, const juce::String& text) {
-        l.setText(text, juce::dontSendNotification);
-        l.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        l.setText(text.toUpperCase(), juce::dontSendNotification);
+        l.setColour(juce::Label::textColourId, CadenzaLookAndFeel::textDim());
+        l.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
         l.setJustificationType(juce::Justification::centredLeft);
     };
 
@@ -98,7 +100,95 @@ NativePanel::NativePanel()
     addAndMakeVisible(m_openSf);
     addAndMakeVisible(m_openAudio);
     addAndMakeVisible(m_openMidi);
-    addAndMakeVisible(m_webToggle);
+
+    // Left hardware faceplate: CADENZA wordmark.
+    addAndMakeVisible(m_logoMain);
+    m_logoMain.setText("CADENZA", juce::dontSendNotification);
+    m_logoMain.setColour(juce::Label::textColourId, CadenzaLookAndFeel::accent());
+    m_logoMain.setFont(juce::Font(juce::FontOptions("Georgia", 34.0f, juce::Font::bold)));
+    m_logoMain.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(m_logoSub);
+    m_logoSub.setText("A R R A N G E R", juce::dontSendNotification);
+    m_logoSub.setColour(juce::Label::textColourId, CadenzaLookAndFeel::textDim());
+    m_logoSub.setFont(juce::Font(juce::FontOptions(10.0f, juce::Font::bold)));
+    m_logoSub.setJustificationType(juce::Justification::centred);
+
+    // Master volume + balance knobs (master drives the engine; balance is chrome).
+    auto setupHwKnob = [this](juce::Slider& s, double lo, double hi, double val) {
+        s.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        s.setRange(lo, hi, 1.0);
+        s.setValue(val, juce::dontSendNotification);
+        s.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        addAndMakeVisible(s);
+    };
+    setupHwKnob(m_hwMasterVol, 0.0, 127.0, 100.0);
+    setupHwKnob(m_hwBalance,   0.0, 127.0, 64.0);
+    m_hwMasterVol.onValueChange = [this] {
+        if (m_cb.onMasterChanged) m_cb.onMasterChanged((int) m_hwMasterVol.getValue());
+    };
+
+    for (auto* b : { &m_assign1, &m_assign2, &m_dbeamL, &m_dbeamR,
+                     &m_scIntro, &m_scVari, &m_scFill, &m_scBreak, &m_scEnd,
+                     &m_syncroStart, &m_resetTempo })
+        addAndMakeVisible(*b);
+
+    // Wire the obvious style-control buttons to real section triggers.
+    m_scIntro.onClick = [this] { if (m_cb.selectSection) m_cb.selectSection("intro"); };
+    m_scEnd.onClick   = [this] { if (m_cb.selectSection) m_cb.selectSection("ending"); };
+    m_scFill.onClick  = [this] { if (m_cb.selectSection) m_cb.selectSection("fillAA"); };
+
+    // Top status-bar master-volume slider.
+    m_topMaster.setSliderStyle(juce::Slider::LinearHorizontal);
+    m_topMaster.setRange(0.0, 127.0, 1.0);
+    m_topMaster.setValue(110.0, juce::dontSendNotification);
+    m_topMaster.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    m_topMaster.onValueChange = [this] {
+        if (m_cb.onMasterChanged) m_cb.onMasterChanged((int) m_topMaster.getValue());
+    };
+    addAndMakeVisible(m_topMaster);
+
+    // Bottom hardware strip.
+    setupHwKnob(m_hwLeft,  0.0, 127.0, 64.0);
+    setupHwKnob(m_hwRight, 0.0, 127.0, 64.0);
+    setupHwKnob(m_xfader,  0.0, 127.0, 64.0);
+    for (auto* b : { &m_splitSet, &m_exitBtn, &m_menuBtn })
+        addAndMakeVisible(*b);
+
+    const char* partNames[] = { "DRUM", "PERC", "BASS", "ACC 1", "ACC 2", "ACC 3", "ACC 4", "ACC 5" };
+    for (int i = 0; i < 8; ++i) {
+        auto b = std::make_unique<juce::TextButton>(partNames[i]);
+        b->setClickingTogglesState(true);
+        b->setToggleState(i < 6, juce::dontSendNotification);            // first six lit, like the render
+        b->setColour(juce::TextButton::buttonOnColourId, CadenzaLookAndFeel::led());
+        addAndMakeVisible(*b);
+        m_partButtons.push_back(std::move(b));
+    }
+    for (int i = 0; i < 8; ++i) {
+        auto b = std::make_unique<juce::TextButton>(juce::String(i + 1));
+        b->setToggleState(i == 0, juce::dontSendNotification);           // slot 1 active (gold)
+        const int idx = i;
+        b->onClick = [this, idx] {
+            for (std::size_t k = 0; k < m_regMemButtons.size(); ++k)
+                m_regMemButtons[k]->setToggleState(static_cast<int>(k) == idx, juce::dontSendNotification);
+        };
+        addAndMakeVisible(*b);
+        m_regMemButtons.push_back(std::move(b));
+    }
+
+    const char* navNames[] = { "Home", "Song", "Style", "Sound", "Mixer", "Effect", "Setting" };
+    for (int i = 0; i < 7; ++i) {
+        auto b = std::make_unique<juce::TextButton>(navNames[i]);
+        b->setToggleState(i == 0, juce::dontSendNotification);
+        b->onClick = [this, i] {
+            m_navActive = i;
+            for (std::size_t k = 0; k < m_navButtons.size(); ++k)
+                m_navButtons[k]->setToggleState(static_cast<int>(k) == i, juce::dontSendNotification);
+            resized();   // re-layout for the selected page
+            repaint();
+        };
+        addAndMakeVisible(*b);
+        m_navButtons.push_back(std::move(b));
+    }
 
     styleCaption(m_bpmCaption, "Tempo");
     addAndMakeVisible(m_bpmCaption);
@@ -125,17 +215,18 @@ NativePanel::NativePanel()
     };
     addAndMakeVisible(m_bpmTap);
     m_bpmVal.setJustificationType(juce::Justification::centred);
-    m_bpmVal.setColour(juce::Label::textColourId, juce::Colours::white);
+    m_bpmVal.setColour(juce::Label::textColourId, CadenzaLookAndFeel::cream());
+    m_bpmVal.setFont(juce::Font(juce::FontOptions(19.0f, juce::Font::bold)));
     m_bpmVal.setText("120", juce::dontSendNotification);
 
     addAndMakeVisible(m_styleName);
     m_styleName.setText("(no style)", juce::dontSendNotification);
-    m_styleName.setColour(juce::Label::textColourId, juce::Colours::white);
+    m_styleName.setColour(juce::Label::textColourId, CadenzaLookAndFeel::cream());
     m_styleName.setFont(juce::Font(juce::FontOptions(16.0f, juce::Font::bold)));
 
     addAndMakeVisible(m_chord);
     m_chord.setText("--", juce::dontSendNotification);
-    m_chord.setColour(juce::Label::textColourId, juce::Colours::aqua);
+    m_chord.setColour(juce::Label::textColourId, CadenzaLookAndFeel::accent());
     m_chord.setFont(juce::Font(juce::FontOptions(34.0f, juce::Font::bold)));
     m_chord.setJustificationType(juce::Justification::centred);
 
@@ -145,7 +236,7 @@ NativePanel::NativePanel()
     addAndMakeVisible(m_transposeUp);
     addAndMakeVisible(m_transposeVal);
     m_transposeVal.setJustificationType(juce::Justification::centred);
-    m_transposeVal.setColour(juce::Label::textColourId, juce::Colours::white);
+    m_transposeVal.setColour(juce::Label::textColourId, CadenzaLookAndFeel::cream());
     m_transposeVal.setText("0", juce::dontSendNotification);
 
     styleCaption(m_octaveCaption, "Octave (live melody)");
@@ -154,7 +245,7 @@ NativePanel::NativePanel()
     addAndMakeVisible(m_octaveUp);
     addAndMakeVisible(m_octaveVal);
     m_octaveVal.setJustificationType(juce::Justification::centred);
-    m_octaveVal.setColour(juce::Label::textColourId, juce::Colours::white);
+    m_octaveVal.setColour(juce::Label::textColourId, CadenzaLookAndFeel::cream());
     m_octaveVal.setText("0", juce::dontSendNotification);
 
     addAndMakeVisible(m_arranger);
@@ -219,8 +310,9 @@ NativePanel::NativePanel()
     };
     setupEqKnob(m_eqLow); setupEqKnob(m_eqMid); setupEqKnob(m_eqHigh);
     auto eqLabel = [this](juce::Label& l, const juce::String& t) {
-        l.setText(t, juce::dontSendNotification);
-        l.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        l.setText(t.toUpperCase(), juce::dontSendNotification);
+        l.setColour(juce::Label::textColourId, CadenzaLookAndFeel::textDim());
+        l.setFont(juce::Font(juce::FontOptions(9.5f, juce::Font::bold)));
         l.setJustificationType(juce::Justification::centred);
         addAndMakeVisible(l);
     };
@@ -267,7 +359,7 @@ NativePanel::NativePanel()
         const int layer = i;
 
         s.enable = std::make_unique<juce::ToggleButton>("Right " + juce::String(i + 1));
-        s.enable->setColour(juce::ToggleButton::textColourId, juce::Colours::lightgrey);
+        s.enable->setColour(juce::ToggleButton::textColourId, CadenzaLookAndFeel::textDim());
         s.enable->onClick = [this, layer] {
             if (m_cb.onRightEnabled)
                 m_cb.onRightEnabled(layer, m_rightVoices[static_cast<std::size_t>(layer)].enable->getToggleState());
@@ -301,7 +393,7 @@ NativePanel::NativePanel()
         s.octVal = std::make_unique<juce::Label>();
         s.octVal->setText("0", juce::dontSendNotification);
         s.octVal->setJustificationType(juce::Justification::centred);
-        s.octVal->setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        s.octVal->setColour(juce::Label::textColourId, CadenzaLookAndFeel::textDim());
         addAndMakeVisible(*s.octVal);
 
         s.octUp = std::make_unique<juce::TextButton>("+");
@@ -412,7 +504,7 @@ NativePanel::NativePanel()
     m_recExit.onClick = [this] { if (m_cb.onRecExit) m_cb.onRecExit(); };
     addAndMakeVisible(m_recExit);
 
-    m_recStatus.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+    m_recStatus.setColour(juce::Label::textColourId, CadenzaLookAndFeel::textDim());
     m_recStatus.setFont(juce::Font(juce::FontOptions(12.0f)));
     addAndMakeVisible(m_recStatus);
     setRecorderState(false, false, "Press New to record your own style");
@@ -426,7 +518,6 @@ NativePanel::NativePanel()
     m_openSf.onClick        = [this] { if (m_cb.openSoundFont) m_cb.openSoundFont(); };
     m_openAudio.onClick     = [this] { if (m_cb.openAudioSettings) m_cb.openAudioSettings(); };
     m_openMidi.onClick      = [this] { if (m_cb.openMidiSettings)  m_cb.openMidiSettings(); };
-    m_webToggle.onClick     = [this] { if (m_cb.toggleWeb)     m_cb.toggleWeb(); };
     m_transposeDown.onClick = [this] { if (m_cb.nudgeTranspose) m_cb.nudgeTranspose(-1); };
     m_transposeUp.onClick   = [this] { if (m_cb.nudgeTranspose) m_cb.nudgeTranspose(+1); };
     m_octaveDown.onClick    = [this] { if (m_cb.nudgeOctave)    m_cb.nudgeOctave(-1); };
@@ -473,7 +564,7 @@ void NativePanel::setMixerChannels(const std::vector<std::pair<int, std::string>
         strip.name = std::make_unique<juce::Label>();
         strip.name->setText(juce::String(label), juce::dontSendNotification);
         strip.name->setJustificationType(juce::Justification::centred);
-        strip.name->setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        strip.name->setColour(juce::Label::textColourId, CadenzaLookAndFeel::textDim());
         strip.name->setFont(juce::Font(juce::FontOptions(12.0f)));
         addAndMakeVisible(*strip.name);
 
@@ -576,10 +667,8 @@ void NativePanel::refreshSectionHighlights()
 {
     for (auto& s : m_sections) {
         const bool active = (m_activeSection == juce::String(s.id));
-        s.button->setColour(juce::TextButton::buttonColourId,
-                            active ? juce::Colours::orange : juce::Colours::darkgrey);
-        s.button->setColour(juce::TextButton::textColourOffId,
-                            active ? juce::Colours::black : juce::Colours::white);
+        // Toggle state drives the gold-gradient "active" look in CadenzaLookAndFeel.
+        s.button->setToggleState(active, juce::dontSendNotification);
     }
 }
 
@@ -723,30 +812,346 @@ void NativePanel::setSplitPoint(int midiNote)
 
 void NativePanel::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff1c1f26));
-    g.setColour(juce::Colour(0xff2a2f3a));
-    g.drawRect(getLocalBounds(), 1);
+    auto b = getLocalBounds().toFloat();
+
+    // Body: deep charcoal gradient (design: #1b1d22 -> #101216 -> #0a0b0d).
+    juce::ColourGradient bg(CadenzaLookAndFeel::backgroundHi(), b.getCentreX(), b.getY(),
+                            CadenzaLookAndFeel::background(),   b.getCentreX(), b.getBottom(), false);
+    bg.addColour(0.36, juce::Colour(0xff101216));
+    g.setGradientFill(bg);
+    g.fillRect(b);
+
+    // Cards: the design's #1c1f27 -> #0e1015 gradient, white-7% border, inset top
+    // highlight. Controls paint on top.
+    for (const auto& c : m_cards)
+    {
+        auto r = c.toFloat();
+        g.setGradientFill(juce::ColourGradient(CadenzaLookAndFeel::cardTop(), r.getX(), r.getY(),
+                                               CadenzaLookAndFeel::cardBot(), r.getX(), r.getBottom(), false));
+        g.fillRoundedRectangle(r, 8.0f);
+        g.setColour(CadenzaLookAndFeel::cream().withAlpha(0.05f));
+        g.drawLine(r.getX() + 8.0f, r.getY() + 1.0f, r.getRight() - 8.0f, r.getY() + 1.0f, 1.0f);
+        g.setColour(CadenzaLookAndFeel::cream().withAlpha(0.07f));
+        g.drawRoundedRectangle(r, 8.0f, 1.0f);
+    }
+
+    // Recessed "LCD" panel for the big chord readout, with a gold bezel.
+    if (! m_chordCard.isEmpty())
+    {
+        auto r = m_chordCard.toFloat();
+        g.setColour(juce::Colour(0xff0b0d11));
+        g.fillRoundedRectangle(r, 7.0f);
+        g.setColour(juce::Colours::black.withAlpha(0.6f));
+        g.drawRoundedRectangle(r.reduced(1.0f), 6.0f, 1.5f);    // inner shadow
+        g.setColour(CadenzaLookAndFeel::accent().withAlpha(0.5f));
+        g.drawRoundedRectangle(r, 7.0f, 1.4f);
+    }
+
+    // Left hardware-panel chrome: section captions + the glowing D-Beam sensor.
+    if (! m_hwPanel.isEmpty())
+    {
+        auto cap = [&g](juce::Rectangle<int> rr, const juce::String& t) {
+            g.setColour(CadenzaLookAndFeel::textDim());
+            g.setFont(juce::Font(juce::FontOptions(9.0f, juce::Font::bold)));
+            g.drawText(t, rr, juce::Justification::centred, false);
+        };
+        cap(m_hwMasterCap,   "MASTER VOLUME");
+        cap(m_hwBalanceCap,  "BALANCE");
+        cap(m_hwAssignCap,   "ASSIGNABLE");
+        cap(m_hwStyleCtlCap, "STYLE CONTROL");
+        cap(m_dbeamSensor.translated(0, -15).withHeight(12), "D-BEAM");
+
+        auto s = m_dbeamSensor.toFloat();
+        g.setColour(juce::Colour(0xff05060a));
+        g.fillRoundedRectangle(s, 6.0f);
+        g.setColour(juce::Colours::black.withAlpha(0.7f));
+        g.drawRoundedRectangle(s.reduced(0.5f), 6.0f, 1.0f);
+        const auto c = s.getCentre();
+        for (float rad = 11.0f; rad >= 3.0f; rad -= 2.0f) {
+            g.setColour(juce::Colour(0xff3aa0ff).withAlpha(rad <= 3.5f ? 0.95f : 0.10f));
+            g.fillEllipse(juce::Rectangle<float>(rad * 2.0f, rad * 2.0f).withCentre(c));
+        }
+    }
+
+    // Bottom hardware-strip captions.
+    {
+        auto cap = [&g](juce::Rectangle<int> rr, const juce::String& t) {
+            if (rr.isEmpty()) return;
+            g.setColour(CadenzaLookAndFeel::textDim());
+            g.setFont(juce::Font(juce::FontOptions(8.5f, juce::Font::bold)));
+            g.drawText(t, rr, juce::Justification::centred, false);
+        };
+        cap(m_hwLeftCap, "LEFT");   cap(m_hwRightCap, "RIGHT 1");
+        cap(m_splitCap,  "SPLIT POINT");
+        cap(m_partCap,   "PART ON / OFF");
+        cap(m_regMemCap, "REGISTRATION MEMORY");
+        cap(m_exitCap,   "EXIT");   cap(m_menuCap, "MENU");   cap(m_xfaderCap, "X-FADER");
+    }
+
+    // Pitch-bend + modulation wheels at the keyboard's left.
+    if (! m_wheelsZone.isEmpty())
+    {
+        auto wz = m_wheelsZone.reduced(10, 10);
+        const int labelH = 12;
+        auto wheels = wz; wheels.removeFromBottom(labelH);
+        auto w1 = wheels.removeFromLeft(wheels.getWidth() / 2 - 3);
+        wheels.removeFromLeft(6);
+        auto w2 = wheels;
+
+        auto drawWheel = [&g](juce::Rectangle<float> r) {
+            g.setColour(juce::Colour(0xff0a0b0e));
+            g.fillRoundedRectangle(r, 5.0f);
+            g.setColour(juce::Colours::black.withAlpha(0.6f));
+            g.drawRoundedRectangle(r, 5.0f, 1.0f);
+            for (float y = r.getY() + 4.0f; y < r.getBottom() - 3.0f; y += 4.0f) {
+                const float d = (y > r.getCentreY()) ? (y - r.getCentreY()) : (r.getCentreY() - y);
+                g.setColour(juce::Colours::white.withAlpha(juce::jmax(0.02f, 0.16f - d * 0.006f)));
+                g.drawLine(r.getX() + 2.0f, y, r.getRight() - 2.0f, y, 1.0f);
+            }
+        };
+        drawWheel(w1.toFloat());
+        drawWheel(w2.toFloat());
+
+        g.setColour(CadenzaLookAndFeel::textDim());
+        g.setFont(juce::Font(juce::FontOptions(7.0f, juce::Font::bold)));
+        auto lab = juce::Rectangle<int>(m_wheelsZone.getX(), m_wheelsZone.getBottom() - labelH,
+                                        m_wheelsZone.getWidth(), labelH);
+        g.drawText("PITCH", lab.removeFromLeft(m_wheelsZone.getWidth() / 2),
+                   juce::Justification::centred, false);
+        g.drawText("MOD", lab, juce::Justification::centred, false);
+    }
+
+    // Status-bar readouts: BPM / TRANSPOSE / TIME SIGNATURE / CPU / MIDI.
+    if (! m_statusReadout.isEmpty())
+    {
+        auto r = m_statusReadout;
+        auto readout = [&g, &r](const juce::String& label, const juce::String& value, int w) {
+            auto col = r.removeFromLeft(w);
+            g.setColour(CadenzaLookAndFeel::textDim());
+            g.setFont(juce::Font(juce::FontOptions(8.5f, juce::Font::bold)));
+            g.drawText(label, col.removeFromTop(13), juce::Justification::centredLeft, false);
+            g.setColour(CadenzaLookAndFeel::cream());
+            g.setFont(juce::Font(juce::FontOptions(18.0f, juce::Font::bold)));
+            g.drawText(value, col, juce::Justification::centredLeft, false);
+        };
+        readout("BPM", m_bpmVal.getText(), 58);
+        readout("TRANSPOSE", m_transposeVal.getText(), 92);
+        readout("TIME SIGNATURE", "4/4", 116);
+
+        auto cpu = r.removeFromLeft(56);
+        g.setColour(CadenzaLookAndFeel::textDim());
+        g.setFont(juce::Font(juce::FontOptions(8.5f, juce::Font::bold)));
+        g.drawText("CPU", cpu.removeFromTop(13), juce::Justification::centredLeft, false);
+        int bx = cpu.getX();
+        for (int i = 0; i < 3; ++i) {
+            const float h = 5.0f + i * 4.0f;
+            g.setColour(i < 2 ? CadenzaLookAndFeel::accent() : CadenzaLookAndFeel::outline());
+            g.fillRoundedRectangle(juce::Rectangle<float>((float) bx, cpu.getBottom() - h, 6.0f, h), 1.0f);
+            bx += 9;
+        }
+
+        auto midi = r.removeFromLeft(54);
+        g.setColour(CadenzaLookAndFeel::textDim());
+        g.setFont(juce::Font(juce::FontOptions(8.5f, juce::Font::bold)));
+        g.drawText("MIDI", midi.removeFromTop(13), juce::Justification::centredLeft, false);
+        g.setColour(CadenzaLookAndFeel::accent());
+        g.fillEllipse(juce::Rectangle<float>(7.0f, 7.0f)
+                          .withCentre({ (float) midi.getX() + 8.0f, (float) midi.getCentreY() + 3.0f }));
+    }
+    if (! m_topMasterCap.isEmpty())
+    {
+        g.setColour(CadenzaLookAndFeel::textDim());
+        g.setFont(juce::Font(juce::FontOptions(8.5f, juce::Font::bold)));
+        g.drawText("MASTER VOLUME", m_topMasterCap, juce::Justification::centredRight, false);
+    }
 }
 
 void NativePanel::resized()
 {
-    auto area = getLocalBounds().reduced(10);
+    auto full = getLocalBounds().reduced(10);
     const int row = 34;
     const int gap = 6;
 
-    // On-screen keyboard pinned to the bottom, full width, with the draggable
-    // "Chords | Melody" split bar in a thin strip directly above the keys.
+    m_cards.clear();
+    auto cardHere = [this](const juce::Rectangle<int>& a, int y0) {
+        m_cards.push_back(juce::Rectangle<int>(a.getX() - 5, y0 - 4, a.getWidth() + 10, (a.getY() - y0) + 8));
+    };
+
+    // On-screen keyboard full-width at the very bottom; pitch/mod wheels on its left.
     if (m_keyboard) {
-        auto kb = area.removeFromBottom(140).reduced(0, 4);
+        auto kbRow = full.removeFromBottom(140);
+        m_wheelsZone = kbRow.removeFromLeft(96);
+        auto kb = kbRow.reduced(0, 4);
         auto bar = kb.removeFromTop(16);
         if (m_splitBar) m_splitBar->setBounds(bar);
         m_keyboard->setBounds(kb);
-        area.removeFromBottom(gap);
+        full.removeFromBottom(gap);
     }
 
-    // Mixer band above the keyboard.
+    // Bottom hardware strip (full width): LEFT/RIGHT knobs + split, PART ON/OFF,
+    // registration memory, EXIT/MENU, X-Fader.
     {
-        auto mixerArea = area.removeFromBottom(170);
+        auto strip = full.removeFromBottom(96);
+        m_bottomStrip = strip;
+        m_cards.push_back(strip);
+        auto s = strip.reduced(12, 9);
+
+        auto left = s.removeFromLeft(232);
+        {
+            auto k1 = left.removeFromLeft(56);
+            m_hwLeftCap = k1.removeFromBottom(13);
+            m_hwLeft.setBounds(k1.reduced(8, 2));
+            auto k2 = left.removeFromLeft(56);
+            m_hwRightCap = k2.removeFromBottom(13);
+            m_hwRight.setBounds(k2.reduced(8, 2));
+            left.removeFromLeft(8);
+            m_splitCap = left.removeFromTop(26);
+            m_splitSet.setBounds(left.removeFromTop(30).reduced(6, 1));
+        }
+
+        auto right = s.removeFromRight(190);
+        {
+            auto xf = right.removeFromRight(62);
+            m_xfaderCap = xf.removeFromBottom(13);
+            m_xfader.setBounds(xf.reduced(8, 2));
+            right.removeFromRight(12);
+            auto ex = right.removeFromLeft(right.getWidth() / 2);
+            m_exitCap = ex.removeFromTop(14); m_exitBtn.setBounds(ex.removeFromTop(28).reduced(2, 1));
+            m_menuCap = right.removeFromTop(14); m_menuBtn.setBounds(right.removeFromTop(28).reduced(2, 1));
+        }
+
+        auto partZone = s.removeFromLeft(s.getWidth() * 46 / 100);
+        m_partCap = partZone.removeFromTop(14);
+        {
+            auto r = partZone.removeFromTop(30);
+            const int pw = (r.getWidth() - 7 * 3) / 8;
+            for (auto& b : m_partButtons) { b->setBounds(r.removeFromLeft(pw)); r.removeFromLeft(3); }
+        }
+        s.removeFromLeft(14);
+        m_regMemCap = s.removeFromTop(14);
+        {
+            auto r = s.removeFromTop(30);
+            const int rw = (r.getWidth() - 7 * 3) / 8;
+            for (auto& b : m_regMemButtons) { b->setBounds(r.removeFromLeft(rw)); r.removeFromLeft(3); }
+        }
+        full.removeFromBottom(gap);
+    }
+
+    // Left HARDWARE faceplate (full height of the remaining area).
+    {
+        auto hw = full.removeFromLeft(286);
+        m_hwPanel = hw;
+        m_cards.push_back(hw);
+        auto p = hw.reduced(16, 14);
+
+        m_logoMain.setBounds(p.removeFromTop(40));
+        m_logoSub.setBounds(p.removeFromTop(16));
+        p.removeFromTop(20);
+
+        // Master Volume + Balance brass knobs (captions painted in paint()).
+        {
+            auto kr = p.removeFromTop(86);
+            auto left = kr.removeFromLeft(kr.getWidth() / 2);
+            m_hwMasterCap  = left.removeFromTop(14);
+            m_hwMasterVol.setBounds(left.reduced(10, 2));
+            m_hwBalanceCap = kr.removeFromTop(14);
+            m_hwBalance.setBounds(kr.reduced(10, 2));
+        }
+        p.removeFromTop(14);
+
+        // D-Beam sensor (arrows are buttons; the glowing middle is painted).
+        {
+            p.removeFromTop(14);   // caption space
+            auto db = p.removeFromTop(46);
+            m_dbeamL.setBounds(db.removeFromLeft(42).reduced(2, 6));
+            m_dbeamR.setBounds(db.removeFromRight(42).reduced(2, 6));
+            m_dbeamSensor = db.reduced(4, 4);
+        }
+        p.removeFromTop(14);
+
+        // Assignable buttons.
+        {
+            m_hwAssignCap = p.removeFromTop(14);
+            auto ar = p.removeFromTop(32);
+            m_assign1.setBounds(ar.removeFromLeft(ar.getWidth() / 2 - 4));
+            ar.removeFromLeft(8);
+            m_assign2.setBounds(ar);
+        }
+
+        // Style Control + transport, anchored to the bottom.
+        {
+            auto bottom = p.removeFromBottom(108);
+            m_hwStyleCtlCap = bottom.removeFromTop(14);
+            auto sc = bottom.removeFromTop(38);
+            juce::TextButton* scs[] = { &m_scIntro, &m_scVari, &m_scFill, &m_scBreak, &m_scEnd };
+            const int scw = (sc.getWidth() - 4 * 4) / 5;
+            for (auto* b : scs) { b->setBounds(sc.removeFromLeft(scw)); sc.removeFromLeft(4); }
+            bottom.removeFromTop(8);
+            auto tr = bottom.removeFromTop(44);
+            const int tw = (tr.getWidth() - 3 * 4) / 4;
+            m_syncroStart.setBounds(tr.removeFromLeft(tw)); tr.removeFromLeft(4);
+            m_play.setBounds(tr.removeFromLeft(tw));        tr.removeFromLeft(4);  // START/STOP
+            m_bpmTap.setBounds(tr.removeFromLeft(tw));      tr.removeFromLeft(4);  // TAP TEMPO
+            m_resetTempo.setBounds(tr);
+        }
+        full.removeFromLeft(gap);
+    }
+
+    // Top status bar (card): painted readouts (left), editable tempo + master right.
+    {
+        auto sb = full.removeFromTop(48);
+        m_cards.push_back(sb);
+        sb.reduce(12, 7);
+
+        auto mv = sb.removeFromRight(196);
+        m_topMasterCap = mv.removeFromLeft(96);
+        m_topMaster.setBounds(mv.reduced(2, 11));
+        sb.removeFromRight(18);
+
+        auto tg = sb.removeFromRight(150);
+        m_bpmCaption.setBounds(tg.removeFromLeft(46));
+        m_bpmDown.setBounds(tg.removeFromLeft(28)); tg.removeFromLeft(3);
+        m_bpmVal.setBounds(tg.removeFromLeft(44));  tg.removeFromLeft(3);
+        m_bpmUp.setBounds(tg.removeFromLeft(28));
+        sb.removeFromRight(14);
+
+        m_statusReadout = sb;   // painted BPM / TRANSPOSE / TIME SIGNATURE / CPU / MIDI
+    }
+    full.removeFromTop(gap);
+
+    // Nav rail (icon column, right of the hardware panel).
+    {
+        auto nav = full.removeFromLeft(150);
+        m_cards.push_back(nav);
+        nav.reduce(10, 10);
+        for (auto& b : m_navButtons) { b->setBounds(nav.removeFromTop(40)); nav.removeFromTop(6); }
+        full.removeFromLeft(gap);
+    }
+
+    auto area = full;   // content area, right of the nav rail
+
+    // Nav paging: nav order = Home, Song, Style, Sound, Mixer, Effect, Setting.
+    // The upper card band is always shown; full-width groups switch per page.
+    const int page = m_navActive;
+    auto onPage = [page](std::initializer_list<int> ps) {
+        for (int p : ps) if (p == page) return true;
+        return false;
+    };
+    auto setVis = [](bool v, std::initializer_list<juce::Component*> cs) {
+        for (auto* c : cs) if (c != nullptr) c->setVisible(v);
+    };
+    const bool showSections = onPage({ 0, 1, 2 });   // Home, Song, Style
+    const bool showRec      = onPage({ 2 });         // Style
+    const bool showVoices   = onPage({ 3 });         // Sound
+    const bool showEQ       = onPage({ 3, 5 });      // Sound, Effect
+    const bool showMixer    = onPage({ 0, 4 });      // Home, Mixer
+    const bool showSettings = onPage({ 6 });         // Setting (file/device actions)
+    setVis(showSettings, { &m_fade, &m_openStyle, &m_openSf, &m_openAudio, &m_openMidi });
+
+    // Mixer band above the keyboard (inside the content area).
+    if (showMixer) {
+        auto mixerArea = area.removeFromBottom(168);
+        m_cards.push_back(mixerArea.expanded(5, 4));
         m_mixerCaption.setBounds(mixerArea.removeFromTop(18));
         const int sw = 78, sgap = 6;
         int mx = mixerArea.getX();
@@ -763,61 +1168,94 @@ void NativePanel::resized()
         }
         area.removeFromBottom(gap);
     }
+    m_mixerCaption.setVisible(showMixer);
+    for (auto& s : m_mixer)
+        setVis(showMixer, { s.name.get(), s.instrument.get(), s.volume.get(), s.mute.get(), s.solo.get() });
 
-    // Row 1: transport + file + web toggle + tempo
+    // Two-column upper band: a performance card (left) and a memory card (right).
     {
-        auto r = area.removeFromTop(row);
-        m_play.setBounds(r.removeFromLeft(80));        r.removeFromLeft(gap);
-        m_fade.setBounds(r.removeFromLeft(56));        r.removeFromLeft(gap);
-        m_openStyle.setBounds(r.removeFromLeft(100));  r.removeFromLeft(gap);
-        m_openSf.setBounds(r.removeFromLeft(120));     r.removeFromLeft(gap);
-        m_openAudio.setBounds(r.removeFromLeft(64));   r.removeFromLeft(gap);
-        m_openMidi.setBounds(r.removeFromLeft(56));    r.removeFromLeft(gap);
-        m_webToggle.setBounds(r.removeFromLeft(80));   r.removeFromLeft(gap * 3);
-        m_bpmCaption.setBounds(r.removeFromLeft(56));
-        m_bpmDown.setBounds(r.removeFromLeft(36));     r.removeFromLeft(gap);
-        m_bpmVal.setBounds(r.removeFromLeft(56));      r.removeFromLeft(gap);
-        m_bpmUp.setBounds(r.removeFromLeft(36));        r.removeFromLeft(gap * 2);
-        m_bpmTap.setBounds(r.removeFromLeft(56));
+        auto band = area.removeFromTop(190);
+        auto bandL = band.removeFromLeft((band.getWidth() - gap) * 56 / 100);
+        band.removeFromLeft(gap);
+        auto bandR = band;
+
+        // LEFT card: style name + big chord LCD, transpose/octave, toggles.
+        {
+            m_cards.push_back(bandL);
+            auto col = bandL.reduced(9, 9);
+            m_styleName.setBounds(col.removeFromTop(18));
+            auto lcd = col.removeFromTop(56);
+            m_chordCard = lcd.reduced(1, 1);
+            m_chord.setBounds(lcd);
+            col.removeFromTop(8);
+
+            auto tr = col.removeFromTop(28);
+            m_transposeCaption.setBounds(tr.removeFromLeft(70));
+            m_transposeDown.setBounds(tr.removeFromLeft(30)); tr.removeFromLeft(3);
+            m_transposeVal.setBounds(tr.removeFromLeft(40));  tr.removeFromLeft(3);
+            m_transposeUp.setBounds(tr.removeFromLeft(30));   tr.removeFromLeft(gap * 2);
+            m_octaveCaption.setBounds(tr.removeFromLeft(58));
+            m_octaveDown.setBounds(tr.removeFromLeft(30));    tr.removeFromLeft(3);
+            m_octaveVal.setBounds(tr.removeFromLeft(40));     tr.removeFromLeft(3);
+            m_octaveUp.setBounds(tr.removeFromLeft(30));
+            col.removeFromTop(gap);
+
+            juce::ToggleButton* tgs[] = { &m_arranger, &m_chordMemory, &m_syncroStop,
+                                          &m_autoFill, &m_fingeredOnBass };
+            const int tgColW = col.getWidth() / 2;
+            for (int i = 0; i < 5; ++i) {
+                const int rr = i / 2, cc = i % 2;
+                tgs[i]->setBounds(col.getX() + cc * tgColW, col.getY() + rr * 24, tgColW, 22);
+            }
+        }
+
+        // RIGHT card: registrations, one-touch settings, pads.
+        {
+            m_cards.push_back(bandR);
+            auto col = bandR.reduced(9, 9);
+            m_regCaption.setBounds(col.removeFromTop(16));
+            {
+                auto r = col.removeFromTop(26);
+                m_regStore.setBounds(r.removeFromLeft(58)); r.removeFromLeft(6);
+                const int bw = 34, bgap = 5;
+                for (auto& b : m_regButtons) { b->setBounds(r.removeFromLeft(bw)); r.removeFromLeft(bgap); }
+            }
+            col.removeFromTop(gap);
+            m_otsCaption.setBounds(col.removeFromTop(16));
+            {
+                auto r = col.removeFromTop(26);
+                m_otsLink.setBounds(r.removeFromLeft(72)); r.removeFromLeft(6);
+                const int bw = 44, bgap = 5;
+                for (auto& b : m_otsButtons) { if (b) b->setBounds(r.removeFromLeft(bw)); r.removeFromLeft(bgap); }
+            }
+            col.removeFromTop(gap);
+            m_padsCaption.setBounds(col.removeFromTop(16));
+            {
+                auto r = col.removeFromTop(28);
+                const int pw = (r.getWidth() - 3 * 6) / 4;
+                for (auto& p : m_pads) { p->setBounds(r.removeFromLeft(pw)); r.removeFromLeft(6); }
+            }
+        }
     }
     area.removeFromTop(gap);
 
-    // Row 2: style name (left) + chord (right, large)
-    {
-        auto r = area.removeFromTop(50);
-        m_styleName.setBounds(r.removeFromLeft(juce::jmax(180, r.getWidth() / 2)).withTrimmedTop(14));
-        m_chord.setBounds(r);
+    // Setting page: file / device actions as a row (keeps the top bar clean).
+    if (showSettings) {
+        auto r = area.removeFromTop(40);
+        m_fade.setBounds(r.removeFromLeft(90));       r.removeFromLeft(gap);
+        m_openStyle.setBounds(r.removeFromLeft(120)); r.removeFromLeft(gap);
+        m_openSf.setBounds(r.removeFromLeft(140));    r.removeFromLeft(gap);
+        m_openAudio.setBounds(r.removeFromLeft(90));  r.removeFromLeft(gap);
+        m_openMidi.setBounds(r.removeFromLeft(80));
+        area.removeFromTop(gap);
     }
-    area.removeFromTop(gap);
-
-    // Row 3: transpose + octave groups
-    {
-        auto r = area.removeFromTop(row);
-        m_transposeCaption.setBounds(r.removeFromLeft(90));
-        m_transposeDown.setBounds(r.removeFromLeft(36)); r.removeFromLeft(gap);
-        m_transposeVal.setBounds(r.removeFromLeft(46));  r.removeFromLeft(gap);
-        m_transposeUp.setBounds(r.removeFromLeft(36));   r.removeFromLeft(gap * 3);
-        m_octaveCaption.setBounds(r.removeFromLeft(140));
-        m_octaveDown.setBounds(r.removeFromLeft(36));    r.removeFromLeft(gap);
-        m_octaveVal.setBounds(r.removeFromLeft(46));     r.removeFromLeft(gap);
-        m_octaveUp.setBounds(r.removeFromLeft(36));
-    }
-    area.removeFromTop(gap);
-
-    // Row 4: toggles in a horizontal strip
-    {
-        auto r = area.removeFromTop(28);
-        const int tw = 150;
-        m_arranger.setBounds(r.removeFromLeft(tw));
-        m_chordMemory.setBounds(r.removeFromLeft(tw));
-        m_syncroStop.setBounds(r.removeFromLeft(tw));
-        m_autoFill.setBounds(r.removeFromLeft(110));
-        m_fingeredOnBass.setBounds(r.removeFromLeft(tw));
-    }
-    area.removeFromTop(gap);
 
     // Master EQ row: caption + 3 labelled knobs.
-    {
+    setVis(showEQ, { &m_eqCaption, &m_eqLowCap, &m_eqMidCap, &m_eqHighCap, &m_compCap,
+                     &m_masterCap, &m_drumsCap, &m_reverbCap, &m_eqLow, &m_eqMid, &m_eqHigh,
+                     &m_comp, &m_master, &m_drums, &m_reverb });
+    if (showEQ) {
+        const int y0 = area.getY();
         auto r = area.removeFromTop(64);
         m_eqCaption.setBounds(r.removeFromLeft(110).withTrimmedTop(24));
         const int kw = 64;
@@ -835,11 +1273,20 @@ void NativePanel::resized()
         placeKnob(m_master, m_masterCap);
         placeKnob(m_drums, m_drumsCap);
         placeKnob(m_reverb, m_reverbCap);
+        cardHere(area, y0);
+        area.removeFromTop(gap);
     }
-    area.removeFromTop(gap);
 
     // Right Voices row: three layer columns (enable + instrument / volume + octave).
     {
+        auto& v0 = m_rightVoices[0]; auto& v1 = m_rightVoices[1]; auto& v2 = m_rightVoices[2];
+        setVis(showVoices, { &m_rightCaption,
+            v0.enable.get(), v0.instrument.get(), v0.volume.get(), v0.octDown.get(), v0.octUp.get(), v0.octVal.get(),
+            v1.enable.get(), v1.instrument.get(), v1.volume.get(), v1.octDown.get(), v1.octUp.get(), v1.octVal.get(),
+            v2.enable.get(), v2.instrument.get(), v2.volume.get(), v2.octDown.get(), v2.octUp.get(), v2.octVal.get() });
+    }
+    if (showVoices) {
+        const int y0 = area.getY();
         m_rightCaption.setBounds(area.removeFromTop(18));
         auto r = area.removeFromTop(50);
         const int colGap = 10;
@@ -860,36 +1307,15 @@ void NativePanel::resized()
             if (s.octUp)   s.octUp->setBounds(oct.removeFromLeft(26));
             if (s.volume)  s.volume->setBounds(bot.reduced(2, 4));
         }
+        cardHere(area, y0);
+        area.removeFromTop(gap);
     }
-    area.removeFromTop(gap);
-
-    // Registrations row: Store toggle + numbered slot buttons.
-    {
-        m_regCaption.setBounds(area.removeFromTop(18));
-        auto r = area.removeFromTop(28);
-        m_regStore.setBounds(r.removeFromLeft(70));
-        r.removeFromLeft(10);
-        const int bw = 44, bgap = 6;
-        for (auto& b : m_regButtons) { b->setBounds(r.removeFromLeft(bw)); r.removeFromLeft(bgap); }
-    }
-    area.removeFromTop(gap);
-
-    // One Touch Settings row: Link toggle + OTS 1..4 buttons.
-    {
-        m_otsCaption.setBounds(area.removeFromTop(18));
-        auto r = area.removeFromTop(28);
-        m_otsLink.setBounds(r.removeFromLeft(80));
-        r.removeFromLeft(10);
-        const int bw = 56, bgap = 6;
-        for (auto& b : m_otsButtons) {
-            if (b) b->setBounds(r.removeFromLeft(bw));
-            r.removeFromLeft(bgap);
-        }
-    }
-    area.removeFromTop(gap);
 
     // Style Recorder row: bars + part pickers, transport-style buttons, status.
-    {
+    setVis(showRec, { &m_recCaption, &m_recNew, &m_recBars, &m_recPart, &m_recArm, &m_recClick,
+                      &m_recEdit, &m_recClear, &m_recSave, &m_recExit, &m_recStatus });
+    if (showRec) {
+        const int y0 = area.getY();
         m_recCaption.setBounds(area.removeFromTop(18));
         auto r = area.removeFromTop(28);
         m_recNew.setBounds(r.removeFromLeft(54));    r.removeFromLeft(6);
@@ -902,27 +1328,23 @@ void NativePanel::resized()
         m_recSave.setBounds(r.removeFromLeft(64));   r.removeFromLeft(6);
         m_recExit.setBounds(r.removeFromLeft(50));   r.removeFromLeft(10);
         m_recStatus.setBounds(r);
+        cardHere(area, y0);
+        area.removeFromTop(gap);
     }
-    area.removeFromTop(gap);
-
-    // Pads row.
-    {
-        m_padsCaption.setBounds(area.removeFromTop(18));
-        auto r = area.removeFromTop(32);
-        const int pw = 90, pgap = 6;
-        int px = r.getX();
-        for (auto& p : m_pads) { p->setBounds(px, r.getY(), pw, r.getHeight()); px += pw + pgap; }
-    }
-    area.removeFromTop(gap);
 
     // Sections caption + flowing buttons fill the rest.
-    m_sectionsCaption.setBounds(area.removeFromTop(22));
-    const int bw = 92, bh = 30, bgap = 6;
-    int x = area.getX(), y = area.getY();
-    for (auto& s : m_sections) {
-        if (x + bw > area.getRight()) { x = area.getX(); y += bh + bgap; }
-        s.button->setBounds(x, y, bw, bh);
-        x += bw + bgap;
+    m_sectionsCaption.setVisible(showSections);
+    for (auto& s : m_sections) s.button->setVisible(showSections);
+    if (showSections) {
+        m_cards.push_back(area.expanded(5, 4));
+        m_sectionsCaption.setBounds(area.removeFromTop(22));
+        const int bw = 92, bh = 30, bgap = 6;
+        int x = area.getX(), y = area.getY();
+        for (auto& s : m_sections) {
+            if (x + bw > area.getRight()) { x = area.getX(); y += bh + bgap; }
+            s.button->setBounds(x, y, bw, bh);
+            x += bw + bgap;
+        }
     }
 }
 }
