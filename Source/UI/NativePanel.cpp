@@ -137,6 +137,20 @@ NativePanel::NativePanel()
     m_scEnd.onClick   = [this] { if (m_cb.selectSection) m_cb.selectSection("ending"); };
     m_scFill.onClick  = [this] { if (m_cb.selectSection) m_cb.selectSection("fillAA"); };
 
+    // Tempo wheel (rotary dial) — replaces the -/+ tempo nudgers.
+    m_tempoWheel.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    m_tempoWheel.setRange(40.0, 300.0, 1.0);
+    m_tempoWheel.setValue(120.0, juce::dontSendNotification);
+    m_tempoWheel.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    m_tempoWheel.onValueChange = [this] {
+        const int bpm = (int) m_tempoWheel.getValue();
+        m_bpmVal.setText(juce::String(bpm), juce::dontSendNotification);
+        if (m_cb.onSetTempo) m_cb.onSetTempo(bpm);
+    };
+    addAndMakeVisible(m_tempoWheel);
+    m_bpmDown.setVisible(false);   // replaced by the wheel
+    m_bpmUp.setVisible(false);
+
     // Top status-bar master-volume slider.
     m_topMaster.setSliderStyle(juce::Slider::LinearHorizontal);
     m_topMaster.setRange(0.0, 127.0, 1.0);
@@ -265,6 +279,7 @@ NativePanel::NativePanel()
         m_keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard, m_splitNote);
     m_keyboard->setAvailableRange(36, 96);   // C2..C7
     m_keyboard->setLowestVisibleKey(36);     // show the chord zone too
+    m_keyboard->setScrollButtonsVisible(false);
     addAndMakeVisible(*m_keyboard);
     m_keyboardState.addListener(this);
 
@@ -552,6 +567,7 @@ void NativePanel::handleNoteOff(juce::MidiKeyboardState*, int, int midiNoteNumbe
 void NativePanel::setBpm(int bpm)
 {
     m_bpmVal.setText(juce::String(bpm), juce::dontSendNotification);
+    m_tempoWheel.setValue(bpm, juce::dontSendNotification);
 }
 
 void NativePanel::setMixerChannels(const std::vector<std::pair<int, std::string>>& channelLabels)
@@ -1026,12 +1042,21 @@ void NativePanel::resized()
 
     // On-screen keyboard full-width at the very bottom; pitch/mod wheels on its left.
     if (m_keyboard) {
-        auto kbRow = full.removeFromBottom(140);
+        auto kbRow = full.removeFromBottom(126);
         m_wheelsZone = kbRow.removeFromLeft(96);
         auto kb = kbRow.reduced(0, 4);
         auto bar = kb.removeFromTop(16);
         if (m_splitBar) m_splitBar->setBounds(bar);
         m_keyboard->setBounds(kb);
+        // Stretch the keys so the visible C2..C7 range fills the width (no blank gap).
+        int whiteKeys = 0;
+        for (int n = 36; n <= 96; ++n) {
+            const int pc = n % 12;
+            if (pc == 0 || pc == 2 || pc == 4 || pc == 5 || pc == 7 || pc == 9 || pc == 11)
+                ++whiteKeys;
+        }
+        if (whiteKeys > 0)
+            m_keyboard->setKeyWidth((float) kb.getWidth() / (float) whiteKeys);
         full.removeFromBottom(gap);
     }
 
@@ -1155,11 +1180,11 @@ void NativePanel::resized()
         m_topMaster.setBounds(mv.reduced(2, 11));
         sb.removeFromRight(18);
 
-        auto tg = sb.removeFromRight(150);
+        auto tg = sb.removeFromRight(168);
         m_bpmCaption.setBounds(tg.removeFromLeft(46));
-        m_bpmDown.setBounds(tg.removeFromLeft(28)); tg.removeFromLeft(3);
-        m_bpmVal.setBounds(tg.removeFromLeft(44));  tg.removeFromLeft(3);
-        m_bpmUp.setBounds(tg.removeFromLeft(28));
+        m_tempoWheel.setBounds(tg.removeFromLeft(42));
+        tg.removeFromLeft(6);
+        m_bpmVal.setBounds(tg);
         sb.removeFromRight(14);
 
         m_statusReadout = sb;   // painted BPM / TRANSPOSE / TIME SIGNATURE / CPU / MIDI

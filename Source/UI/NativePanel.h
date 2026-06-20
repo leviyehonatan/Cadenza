@@ -257,9 +257,9 @@ private:
     juce::Rectangle<int> m_bottomStrip, m_wheelsZone, m_splitCap, m_partCap, m_regMemCap,
                          m_exitCap, m_menuCap, m_xfaderCap, m_hwLeftCap, m_hwRightCap;
 
-    // Top status-bar readouts (painted) + a master-volume slider.
-    juce::Slider m_topMaster;
-    juce::Rectangle<int> m_statusReadout, m_topMasterCap;
+    // Top status-bar readouts (painted) + a master-volume slider + tempo wheel.
+    juce::Slider m_topMaster, m_tempoWheel;
+    juce::Rectangle<int> m_statusReadout, m_topMasterCap, m_tempoWheelCap;
 
     juce::Label      m_bpmCaption;
     juce::TextButton m_bpmDown { "-" };
