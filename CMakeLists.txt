@@ -133,6 +133,11 @@ add_executable(style-probe
 )
 target_link_libraries(style-probe PRIVATE cadenza_core)
 
+add_executable(ab-transpose
+    tools/ab-transpose/main.cpp
+)
+target_link_libraries(ab-transpose PRIVATE cadenza_core)
+
 add_executable(style-scan
     tools/style-scan/main.cpp
 )
