@@ -65,13 +65,13 @@ void absolutePassesThrough()
 
 void chordRootFollowsChord()
 {
-    // Yamaha placement: the root shift goes UP by the mod-12 root delta (0..11),
-    // then the tone snaps to the closest octave (matches a real arranger / Genos).
+    // Notes move to the NEAREST chord tone (within -5..+6 semitones of the source),
+    // preserving voicing rather than snapping into the source note's octave.
     auto n = noteOf(NoteRole::ChordRoot, 60);  // C5
 
     expect(transposeNote(n, ctxFor(0, ChordQuality::Major)).value() == 60, "C root stays C5");
-    expect(transposeNote(n, ctxFor(5, ChordQuality::Major)).value() == 65, "F root -> F5 (+5)");
-    expect(transposeNote(n, ctxFor(7, ChordQuality::Minor)).value() == 67, "G root -> G5 (+7, Yamaha up-shift)");
+    expect(transposeNote(n, ctxFor(5, ChordQuality::Major)).value() == 65, "F root -> nearest F (F5, +5)");
+    expect(transposeNote(n, ctxFor(7, ChordQuality::Minor)).value() == 55, "G root -> nearest G (G4, -5)");
 }
 
 void chord3rdReflectsQuality()
@@ -193,14 +193,14 @@ void unknownPolicyUsesCurrentBehavior()
 void chordColorFollowsChordByRootTransposition()
 {
     // A non-chord source tone (e.g. a 9th/6th in a piano/guitar phrase) must
-    // move with the chord instead of freezing. It shifts UP by the Yamaha root
-    // delta (0..11), preserving the recorded interval/voicing.
+    // move with the chord instead of freezing. It shifts by the folded root
+    // delta (-5..+6 semitones), preserving the recorded interval/voicing.
     auto n = noteOf(NoteRole::ChordColor, 62);  // D above middle C
 
     expect(transposeNote(n, ctxFor(0, ChordQuality::Major)).value() == 62, "ChordColor on C source stays put");
     expect(transposeNote(n, ctxFor(5, ChordQuality::Major)).value() == 67, "ChordColor to F shifts +5");
-    expect(transposeNote(n, ctxFor(9, ChordQuality::Minor)).value() == 71, "ChordColor to A shifts up +9 (Yamaha)");
-    expect(transposeNote(n, ctxFor(7, ChordQuality::Major)).value() == 69, "ChordColor to G shifts up +7 (Yamaha)");
+    expect(transposeNote(n, ctxFor(9, ChordQuality::Minor)).value() == 59, "ChordColor to A folds down -3");
+    expect(transposeNote(n, ctxFor(7, ChordQuality::Major)).value() == 57, "ChordColor to G folds down -5");
 
     // global transpose stacks on top of the chord shift
     expect(transposeNote(n, ctxFor(5, ChordQuality::Major, 0, 2)).value() == 69, "ChordColor + global transpose");
@@ -218,7 +218,7 @@ void rootTranspositionBypassShiftsByRootDelta()
 
     expect(transposeNote(n, ctxFor(0, ChordQuality::Major), &policy).value() == 62, "RT+Bypass on C stays");
     expect(transposeNote(n, ctxFor(2, ChordQuality::Major), &policy).value() == 64, "RT+Bypass to D shifts +2");
-    expect(transposeNote(n, ctxFor(9, ChordQuality::Minor), &policy).value() == 71, "RT+Bypass to A shifts +9 (Yamaha)");
+    expect(transposeNote(n, ctxFor(9, ChordQuality::Minor), &policy).value() == 59, "RT+Bypass to A folds -3");
 }
 
 void noteLowLimitFoldsIntoAllowedRange()
@@ -330,12 +330,12 @@ void colorToneFitsPlayedChordQuality()
            "color E over C major stays E");
 
     // Over A minor it should bend to the minor 3rd (C), not the clashing C#.
-    expect(transposeNote(major3, ctxFor(9, ChordQuality::Minor)).value() == 72,
+    expect(transposeNote(major3, ctxFor(9, ChordQuality::Minor)).value() == 60,
            "color E over Am fits minor 3rd C (not C#)");
 
     // The major 7th (B) over a dominant chord should fit the b7.
     auto maj7 = noteOf(NoteRole::ChordColor, 71);
-    expect(transposeNote(maj7, ctxFor(7, ChordQuality::Dominant7)).value() == 77,
+    expect(transposeNote(maj7, ctxFor(7, ChordQuality::Dominant7)).value() == 65,
            "color B over G7 fits the b7 (F)");
 }
 
@@ -366,7 +366,7 @@ void colorTonePolicyChordModeFitsPlayedQuality()
     auto major3 = noteOf(NoteRole::ChordColor, 64);
     auto policy = policyOf(YamahaNtr::RootFixed, YamahaNtt::Chord, "C");
 
-    expect(transposeNote(major3, ctxFor(9, ChordQuality::Minor), &policy).value() == 72,
+    expect(transposeNote(major3, ctxFor(9, ChordQuality::Minor), &policy).value() == 60,
            "Chord-NTT color E over Am fits minor 3rd C");
     expect(transposeNote(major3, ctxFor(0, ChordQuality::Major), &policy).value() == 64,
            "Chord-NTT color E over C major stays E");
@@ -398,7 +398,7 @@ void guitarChordRolesUseRootShiftedVoicingAnchor()
     auto third = noteOf(NoteRole::Chord3, 64); // E in the source C-major shape.
     auto guitar = policyOf(YamahaNtr::Guitar, YamahaNtt::Stroke, "C");
 
-    expect(transposeNote(third, ctxFor(7, ChordQuality::Minor), &guitar).value() == 70,
+    expect(transposeNote(third, ctxFor(7, ChordQuality::Minor), &guitar).value() == 58,
            "Guitar G-minor third stays near the root-shifted source shape");
 
     guitar.noteLowLimit = 60;
@@ -433,13 +433,12 @@ void fallbackPolicyWithRolesIsHonoured()
 
     auto root  = noteOf(NoteRole::ChordRoot,  36);   // C2
     auto fifth = noteOf(NoteRole::ChordColor, 43);   // G2, a 5th above
-    // To A minor the Yamaha root delta C->A is +9; the whole line shifts up by +9,
-    // preserving the recorded interval (no per-note chord snapping). The real bass
-    // register anchor (StyleEngine playbackNoteForPart) re-seats it afterwards.
-    expect(transposeNote(root,  ctxFor(9, ChordQuality::Minor), &bass).value() == 45,
-           "fallback bass root C2 -> A2 (+9)");
-    expect(transposeNote(fifth, ctxFor(9, ChordQuality::Minor), &bass).value() == 52,
-           "fallback bass 5th also shifts +9 (interval preserved)");
+    // To A minor the folded root delta C->A is -3; the whole line shifts by -3,
+    // preserving the recorded interval (no per-note chord snapping).
+    expect(transposeNote(root,  ctxFor(9, ChordQuality::Minor), &bass).value() == 33,
+           "fallback bass root C2 -> A1 (-3)");
+    expect(transposeNote(fifth, ctxFor(9, ChordQuality::Minor), &bass).value() == 40,
+           "fallback bass 5th also shifts -3 (interval preserved)");
 
     // A Fallback policy WITHOUT explicit NTR/NTT still uses the heuristic.
     YamahaChannelPolicy unknown;

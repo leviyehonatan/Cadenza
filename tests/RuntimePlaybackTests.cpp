@@ -626,7 +626,7 @@ void playbackDiagnosticsRoutesPercussionEventsToDrumChannel()
     const auto summary = readText(outDir / "playback_summary.md");
     expect(summary.find("- 42") != std::string::npos,
            "rhythm2 diagnostic summary classifies channel 9 as percussion");
-    expect(csv.find("0,12,72,64,80,60,chord1,chord-3,-/-/27") != std::string::npos,
+    expect(csv.find("0,12,60,64,80,60,chord1,chord-3,-/-/27") != std::string::npos,
            "melodic diagnostic event keeps channel 12");
 
     std::filesystem::remove_all(outDir);

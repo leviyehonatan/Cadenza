@@ -46,15 +46,13 @@ int applyGlobalOffsets(int pitch, const TransposeContext& ctx) noexcept
     return pitch + ctx.globalTranspose + 12 * ctx.globalOctave;
 }
 
-// Yamaha root transposition: shift UP by the mod-12 interval from the source root
-// to the live chord root (0..11), then placement snaps to the closest octave of the
-// target tone (matching getClosestPitch in a real arranger / YamJJazz). Cadenza
-// previously folded this to the nearest -5..+6, which sat parts a whole octave low
-// on ~45% of chord roots (a 5th..7th above the source) vs a Genos. See
-// docs/NOTE_TRANSPOSITION_FIDELITY_STUDY.md and tools/ab-transpose.
-int yamahaRootDelta(int chordRootPc, int sourceRootPc) noexcept
+// Root delta folded into the nearest octave (-5..+6 semitones) so a phrase
+// follows the chord without drifting up an octave across a progression.
+int foldedRootDelta(int chordRootPc, int sourceRootPc) noexcept
 {
-    return ((chordRootPc - sourceRootPc) % 12 + 12) % 12;   // 0..11 (up-shift)
+    int d = ((chordRootPc - sourceRootPc) % 12 + 12) % 12;  // 0..11
+    if (d > 6) d -= 12;                                     // -5..6
+    return d;
 }
 
 bool isUnknownPolicy(const YamahaChannelPolicy& policy) noexcept
@@ -95,7 +93,7 @@ bool hasChordScale(cadenza::midi::ChordQuality quality) noexcept
 
 int rootDeltaForPolicy(const TransposeContext& ctx, const YamahaChannelPolicy& policy) noexcept
 {
-    int delta = yamahaRootDelta(ctx.chord.rootPitchClass, sourceRootPitchClass(policy));
+    int delta = foldedRootDelta(ctx.chord.rootPitchClass, sourceRootPitchClass(policy));
 
     if (policy.chordRootUpperLimit) {
         const int limitPc = ((*policy.chordRootUpperLimit % 12) + 12) % 12;
@@ -279,22 +277,21 @@ std::optional<int> transposeNote(const PatternNote& note, const TransposeContext
     // so a major-key phrase takes the minor 3rd / dominant b7 / etc. instead of
     // clashing. Exotic qualities (dim/aug/power) skip the snap and just root-shift.
     if (note.role == NoteRole::ChordColor) {
-        int delta = yamahaRootDelta(ctx.chord.rootPitchClass, 0);
+        int delta = foldedRootDelta(ctx.chord.rootPitchClass, 0);
         int shifted = applyGlobalOffsets(note.pitch + delta, ctx);
         return fitColorToneToChord(shifted, ctx.chord.rootPitchClass, ctx.chord.quality);
     }
 
     // Chord roles: ChordRoot / Chord3 / Chord5 / Chord7.
-    // Yamaha placement: shift the note up by the root delta (0..11), then snap to
-    // the closest octave of the target chord tone for this role's quality. This
-    // matches a real arranger's register (getClosestPitch) instead of folding the
-    // root move to nearest, which sat parts an octave low on upper-root chords.
-    const int interval  = chordIntervalForRole(ctx.chord.quality, note.role);
-    const int targetPC  = ((ctx.chord.rootPitchClass + interval) % 12 + 12) % 12;
-    const int anchor    = note.pitch + yamahaRootDelta(ctx.chord.rootPitchClass, 0);
-    int delta = ((targetPC - ((anchor % 12) + 12) % 12) % 12 + 12) % 12;   // 0..11
-    if (delta > 6) delta -= 12;                            // closest octave: -5..+6
-    int n = anchor + delta + ctx.globalTranspose + 12 * ctx.globalOctave;
+    // Move the source note to the nearest chord tone (correct pitch class for the
+    // chord quality) rather than snapping into the source note's own octave. This
+    // preserves the recorded voicing instead of scattering notes across octaves.
+    const int interval = chordIntervalForRole(ctx.chord.quality, note.role);
+    const int targetPC = (ctx.chord.rootPitchClass + interval) % 12;
+    const int sourcePC = ((note.pitch % 12) + 12) % 12;
+    int delta = ((targetPC - sourcePC) % 12 + 12) % 12;   // 0..11
+    if (delta > 6) delta -= 12;                            // nearest tone: -5..+6
+    int n = note.pitch + delta + ctx.globalTranspose + 12 * ctx.globalOctave;
     if (n < 0 || n > 127) return std::nullopt;
     return n;
 }
