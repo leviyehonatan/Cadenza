@@ -116,6 +116,7 @@ public:
         std::function<void()> openSoundFont;
         std::function<void()> openAudioSettings;
         std::function<void()> openMidiSettings;
+        std::function<void()> openChordAnalysis;     // analyze an audio file for chords
         std::function<void(int)> nudgeTranspose;     // delta -1 / +1
         std::function<void(int)> nudgeOctave;         // delta -1 / +1
         std::function<void(int)> nudgeTempo;          // delta in BPM (e.g. -1 / +1)
@@ -178,6 +179,8 @@ public:
     void setOctave(int octaves);
     void setBpm(int bpm);
     void setPlaying(bool playing);
+    void setActivePage(int page);
+    void setChordAnalysisSummary(const juce::String& text);
 
     // Mixer: rebuild strips for (channel, label) pairs, then sync a strip's state.
     void setMixerChannels(const std::vector<std::pair<int, std::string>>& channelLabels);
@@ -232,6 +235,7 @@ private:
     juce::TextButton m_openSf     { "Open SoundFont" };
     juce::TextButton m_openAudio  { "Audio" };
     juce::TextButton m_openMidi   { "MIDI" };
+    juce::TextButton m_openAnalyze { "Analyze Song" };
 
     // Left nav rail (icon nav items). Stage A: visual frame; paging next.
     std::vector<std::unique_ptr<juce::TextButton>> m_navButtons;
@@ -260,6 +264,7 @@ private:
     // Top status-bar readouts (painted) + a master-volume slider + tempo wheel.
     juce::Slider m_topMaster, m_tempoWheel;
     juce::Rectangle<int> m_statusReadout, m_topMasterCap, m_tempoWheelCap;
+    juce::TextEditor m_chordAnalysis;
 
     juce::Label      m_bpmCaption;
     juce::TextButton m_bpmDown { "-" };

@@ -62,6 +62,7 @@ add_library(cadenza_core STATIC
     Source/Audio/VoiceMap.cpp
     Source/Audio/Transport.cpp
     Source/Audio/TransportCommandMailbox.cpp
+    Source/Audio/ChordAnalysis.cpp
     Source/Settings/SettingsStore.cpp
     Source/UI/StylePartBarWorkflow.cpp
     Source/UI/StylePartNoteWorkflow.cpp
@@ -114,6 +115,7 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_part_editor_tests tests/StylePartPianoRollTests.cpp)
     cadenza_add_test(cadenza_part_workflow_tests tests/StylePartBarWorkflowTests.cpp)
     cadenza_add_test(cadenza_note_workflow_tests tests/StylePartNoteWorkflowTests.cpp)
+    cadenza_add_test(cadenza_audio_chord_tests tests/AudioChordAnalysisTests.cpp)
 endif()
 
 # ============================================================
@@ -305,8 +307,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
             cadenza_core
             juce::juce_audio_utils
             juce::juce_audio_devices
+            juce::juce_audio_formats
             juce::juce_audio_processors
             juce::juce_gui_extra
+
     )
 
     if(CADENZA_BUILD_TESTS)

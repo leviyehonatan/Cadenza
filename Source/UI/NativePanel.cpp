@@ -100,6 +100,7 @@ NativePanel::NativePanel()
     addAndMakeVisible(m_openSf);
     addAndMakeVisible(m_openAudio);
     addAndMakeVisible(m_openMidi);
+    addAndMakeVisible(m_openAnalyze);
 
     // Left hardware faceplate: CADENZA wordmark.
     addAndMakeVisible(m_logoMain);
@@ -160,6 +161,16 @@ NativePanel::NativePanel()
         if (m_cb.onMasterChanged) m_cb.onMasterChanged((int) m_topMaster.getValue());
     };
     addAndMakeVisible(m_topMaster);
+
+    m_chordAnalysis.setMultiLine(true);
+    m_chordAnalysis.setReturnKeyStartsNewLine(true);
+    m_chordAnalysis.setReadOnly(true);
+    m_chordAnalysis.setScrollbarsShown(true);
+    m_chordAnalysis.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff11131a));
+    m_chordAnalysis.setColour(juce::TextEditor::textColourId, juce::Colours::white);
+    m_chordAnalysis.setColour(juce::TextEditor::outlineColourId, juce::Colour(0xff2c3544));
+    m_chordAnalysis.setText("Open an audio file to analyse chords.", juce::dontSendNotification);
+    addAndMakeVisible(m_chordAnalysis);
 
     // Bottom hardware strip.
     setupHwKnob(m_hwLeft,  0.0, 127.0, 64.0);
@@ -533,6 +544,7 @@ NativePanel::NativePanel()
     m_openSf.onClick        = [this] { if (m_cb.openSoundFont) m_cb.openSoundFont(); };
     m_openAudio.onClick     = [this] { if (m_cb.openAudioSettings) m_cb.openAudioSettings(); };
     m_openMidi.onClick      = [this] { if (m_cb.openMidiSettings)  m_cb.openMidiSettings(); };
+    m_openAnalyze.onClick   = [this] { if (m_cb.openChordAnalysis) m_cb.openChordAnalysis(); };
     m_transposeDown.onClick = [this] { if (m_cb.nudgeTranspose) m_cb.nudgeTranspose(-1); };
     m_transposeUp.onClick   = [this] { if (m_cb.nudgeTranspose) m_cb.nudgeTranspose(+1); };
     m_octaveDown.onClick    = [this] { if (m_cb.nudgeOctave)    m_cb.nudgeOctave(-1); };
@@ -709,6 +721,20 @@ void NativePanel::setPlaying(bool playing)
     m_play.setButtonText(playing ? "Stop" : "Play");
     m_play.setColour(juce::TextButton::buttonColourId,
                      playing ? juce::Colours::firebrick : juce::Colours::darkgreen);
+}
+
+void NativePanel::setActivePage(int page)
+{
+    m_navActive = juce::jlimit(0, 6, page);
+    for (std::size_t k = 0; k < m_navButtons.size(); ++k)
+        m_navButtons[k]->setToggleState(static_cast<int>(k) == m_navActive, juce::dontSendNotification);
+    resized();
+    repaint();
+}
+
+void NativePanel::setChordAnalysisSummary(const juce::String& text)
+{
+    m_chordAnalysis.setText(text.isEmpty() ? "Open an audio file to analyse chords." : text, juce::dontSendNotification);
 }
 
 void NativePanel::setToggleStates(bool arranger, bool chordMemory, bool syncroStop, bool fingeredOnBass,
@@ -1218,7 +1244,7 @@ void NativePanel::resized()
     const bool showEQ       = onPage({ 3, 5 });      // Sound, Effect
     const bool showMixer    = onPage({ 0, 4 });      // Home, Mixer
     const bool showSettings = onPage({ 6 });         // Setting (file/device actions)
-    setVis(showSettings, { &m_fade, &m_openStyle, &m_openSf, &m_openAudio, &m_openMidi });
+    setVis(showSettings, { &m_fade, &m_openStyle, &m_openSf, &m_openAudio, &m_openMidi, &m_openAnalyze });
 
     // Mixer band above the keyboard (inside the content area).
     if (showMixer) {
@@ -1319,7 +1345,8 @@ void NativePanel::resized()
         m_openStyle.setBounds(r.removeFromLeft(120)); r.removeFromLeft(gap);
         m_openSf.setBounds(r.removeFromLeft(140));    r.removeFromLeft(gap);
         m_openAudio.setBounds(r.removeFromLeft(90));  r.removeFromLeft(gap);
-        m_openMidi.setBounds(r.removeFromLeft(80));
+        m_openMidi.setBounds(r.removeFromLeft(80));   r.removeFromLeft(gap);
+        m_openAnalyze.setBounds(r.removeFromLeft(120));
         area.removeFromTop(gap);
     }
 
@@ -1401,6 +1428,18 @@ void NativePanel::resized()
         m_recSave.setBounds(r.removeFromLeft(64));   r.removeFromLeft(6);
         m_recExit.setBounds(r.removeFromLeft(50));   r.removeFromLeft(10);
         m_recStatus.setBounds(r);
+        cardHere(area, y0);
+        area.removeFromTop(gap);
+    }
+
+    // Song page analysis card.
+    const bool showAnalysis = (page == 1);
+    m_chordAnalysis.setVisible(showAnalysis);
+    if (showAnalysis) {
+        const int y0 = area.getY();
+        auto analysisCard = area.removeFromTop(120);
+        m_cards.push_back(analysisCard.expanded(5, 4));
+        m_chordAnalysis.setBounds(analysisCard.reduced(10, 10));
         cardHere(area, y0);
         area.removeFromTop(gap);
     }

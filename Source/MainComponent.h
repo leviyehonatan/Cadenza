@@ -50,6 +50,7 @@ private:
     void openStyleFileChooser();
     void openSoundFontFileChooser();
     void openSongFileChooser();
+    void openChordAnalysisChooser();
     void openPluginFileChooser();
     void choosePartInstrument(int channel);   // load a VST3 instrument onto a mixer channel
     void chooseRightLayerInstrument(int layer); // load a VST3 instrument onto a Right 1/2/3 layer
@@ -77,6 +78,7 @@ private:
     bool loadAndApplyStyleFile(const juce::File& file);
     bool loadAndApplySongFile(const juce::File& file);
     bool selectStyleById(const std::string& styleId);
+    bool analyzeAudioFile(const juce::File& file);
     void setSongMode(bool enabled);
 
     // Style Recorder (record your own style patterns into a .cstyle).
@@ -143,6 +145,7 @@ private:
     std::unique_ptr<juce::FileChooser> m_styleChooser;
     std::unique_ptr<juce::FileChooser> m_soundFontChooser;
     std::unique_ptr<juce::FileChooser> m_songChooser;
+    std::unique_ptr<juce::FileChooser> m_analysisChooser;
     std::unique_ptr<juce::FileChooser> m_pluginChooser;
     std::unique_ptr<juce::FileChooser> m_partPluginChooser;
     std::string m_learnCommand;        // command currently waiting for a MIDI-learn press

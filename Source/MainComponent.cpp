@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "Arranger/StyleLoader.h"
 #include "Arranger/SongLoader.h"
+#include "Audio/ChordAnalysis.h"
 #include "Audio/MidiChannel.h"
 #include "Midi/LiveMelodyVoice.h"
 #include "Midi/GmInstruments.h"
@@ -8,6 +9,8 @@
 #include "Arranger/SectionButtons.h"
 #include "UI/NativePanel.h"
 #include "UI/StylePartEditor.h"
+
+#include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
 #include <cctype>
@@ -37,6 +40,14 @@ bool isSupportedStyleFile(const juce::File& file)
     const auto ext = lowercase(file.getFileExtension().toStdString());
     return ext == ".cstyle" || ext == ".sty" || ext == ".prs"
         || ext == ".sst" || ext == ".fps" || ext == ".bcs";
+}
+
+bool isSupportedAudioAnalysisFile(const juce::File& file)
+{
+    const auto ext = lowercase(file.getFileExtension().toStdString());
+    return ext == ".wav" || ext == ".mp3" || ext == ".flac"
+        || ext == ".ogg" || ext == ".m4a" || ext == ".aif" || ext == ".aiff"
+        || ext == ".aac";
 }
 
 bool isSupportedSoundFontFile(const juce::File& file)
@@ -1160,6 +1171,30 @@ void MainComponent::openSongFileChooser()
         });
 }
 
+void MainComponent::openChordAnalysisChooser()
+{
+    const auto songsDir = findResourcesRoot()
+        .getChildFile("factory")
+        .getChildFile("songs");
+
+    m_analysisChooser = std::make_unique<juce::FileChooser>(
+        "Choose an audio file to analyse",
+        songsDir.isDirectory() ? songsDir : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+        "*.wav;*.mp3;*.flac;*.ogg;*.m4a;*.aif;*.aiff;*.aac");
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    m_analysisChooser->launchAsync(
+        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [safe](const juce::FileChooser& chooser) {
+            if (auto* self = safe.getComponent()) {
+                const auto file = chooser.getResult();
+                if (file.existsAsFile())
+                    self->analyzeAudioFile(file);
+                self->m_analysisChooser.reset();
+            }
+        });
+}
+
 bool MainComponent::selectStyleById(const std::string& styleId)
 {
     if (styleId.empty())
@@ -1224,7 +1259,71 @@ bool MainComponent::loadAndApplySongFile(const juce::File& file)
                              + file.getFullPathName());
 
     setSongMode(true);
+    if (m_panel) m_panel->setActivePage(1);
     pushRuntimeStateToWeb();
+    return true;
+}
+
+bool MainComponent::analyzeAudioFile(const juce::File& file)
+{
+    if (!file.existsAsFile() || !isSupportedAudioAnalysisFile(file)) {
+        juce::Logger::writeToLog("[Cadenza] Unsupported audio file: " + file.getFullPathName());
+        return false;
+    }
+
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+    auto reader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(file));
+    if (!reader) {
+        juce::Logger::writeToLog("[Cadenza] Could not open audio file: " + file.getFullPathName());
+        if (m_panel)
+            m_panel->setChordAnalysisSummary("Could not open audio file. Try WAV or MP3.");
+        return false;
+    }
+
+    const auto maxSamples = static_cast<juce::int64>(std::min<double>(reader->lengthInSamples, reader->sampleRate * 180.0));
+    if (maxSamples <= 0) {
+        juce::Logger::writeToLog("[Cadenza] Audio file is empty: " + file.getFullPathName());
+        if (m_panel)
+            m_panel->setChordAnalysisSummary("Audio file is empty.");
+        return false;
+    }
+
+    const int channels = juce::jmax(1, static_cast<int>(reader->numChannels));
+    const int blockSize = 16384;
+    juce::AudioBuffer<float> buffer(channels, blockSize);
+    std::vector<float> mono;
+    mono.reserve(static_cast<std::size_t>(maxSamples));
+
+    for (juce::int64 pos = 0; pos < maxSamples; pos += blockSize) {
+        const int num = static_cast<int>(std::min<juce::int64>(blockSize, maxSamples - pos));
+        buffer.setSize(channels, num, false, false, true);
+        reader->read(&buffer, 0, num, pos, true, true);
+        for (int i = 0; i < num; ++i) {
+            double sum = 0.0;
+            for (int ch = 0; ch < channels; ++ch)
+                sum += buffer.getSample(ch, i);
+            mono.push_back(static_cast<float>(sum / static_cast<double>(channels)));
+        }
+    }
+
+    const int sampleRate = static_cast<int>(std::lround(reader->sampleRate));
+    auto result = cadenza::audio::analyzeChordProgression(mono, sampleRate, file.getFileNameWithoutExtension().toStdString());
+    if (!result.ok) {
+        juce::Logger::writeToLog("[Cadenza] Chord analysis failed: " + juce::String(result.error));
+        if (m_panel)
+            m_panel->setChordAnalysisSummary(juce::String(result.error));
+        return false;
+    }
+
+    const auto summary = juce::String(cadenza::audio::formatChordAnalysisSummary(result));
+    juce::Logger::writeToLog("[Cadenza] Chord analysis completed for " + file.getFileNameWithoutExtension()
+                             + ": " + juce::String(result.detectedKeyName)
+                             + " transpose=" + juce::String(result.transposeToC));
+    if (m_panel) {
+        m_panel->setChordAnalysisSummary(summary);
+        m_panel->setActivePage(1);
+    }
     return true;
 }
 
@@ -1808,11 +1907,12 @@ void MainComponent::buildNativePanel()
 
     cadenza::ui::NativePanel::Callbacks cb;
 
-    cb.togglePlay = [this] { togglePlayback(); };
+    cb.togglePlay   = [this] { togglePlayback(); };
     cb.openStyle     = [this] { openStyleFileChooser(); };
     cb.openSoundFont = [this] { openSoundFontFileChooser(); };
     cb.openAudioSettings = [this] { showAudioSettings(); };
     cb.openMidiSettings  = [this] { showMidiSettings(); };
+    cb.openChordAnalysis = [this] { openChordAnalysisChooser(); };
 
     cb.onLoadInstrumentPlugin = [this](int channel) { choosePartInstrument(channel); };
     cb.onOpenInstrumentEditor = [this](int channel) { m_audio.showPartInstrumentEditor(channel); };
