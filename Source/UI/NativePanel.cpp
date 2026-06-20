@@ -883,10 +883,21 @@ void NativePanel::paint(juce::Graphics& g)
         auto r = m_chordCard.toFloat();
         g.setColour(juce::Colour(0xff0b0d11));
         g.fillRoundedRectangle(r, 7.0f);
+        // Soft gold glow from the top so it reads like a lit display.
+        juce::ColourGradient glow(CadenzaLookAndFeel::accent().withAlpha(0.12f), r.getCentreX(), r.getY(),
+                                  juce::Colours::transparentBlack, r.getCentreX(),
+                                  r.getY() + r.getHeight() * 0.62f, false);
+        g.setGradientFill(glow);
+        g.fillRoundedRectangle(r.reduced(2.0f), 6.0f);
         g.setColour(juce::Colours::black.withAlpha(0.6f));
         g.drawRoundedRectangle(r.reduced(1.0f), 6.0f, 1.5f);    // inner shadow
         g.setColour(CadenzaLookAndFeel::accent().withAlpha(0.5f));
         g.drawRoundedRectangle(r, 7.0f, 1.4f);
+        // "CHORD" caption in the corner.
+        g.setColour(CadenzaLookAndFeel::textDim());
+        g.setFont(juce::Font(juce::FontOptions(8.5f, juce::Font::bold)));
+        g.drawText("CHORD", r.toNearestInt().reduced(9, 5).removeFromTop(12),
+                   juce::Justification::topLeft, false);
     }
 
     // Chord card mini-piano: two octaves with the held chord's tones lit gold.
