@@ -215,7 +215,7 @@ private:
     // Card backgrounds drawn behind logical control groups (computed in resized(),
     // painted in paint()). m_chordCard is the recessed "LCD" panel for the chord.
     std::vector<juce::Rectangle<int>> m_cards;
-    juce::Rectangle<int> m_chordCard;
+    juce::Rectangle<int> m_chordCard, m_chordPiano;
     // Left hardware faceplate geometry, for paint() chrome (captions, D-Beam sensor).
     juce::Rectangle<int> m_hwPanel, m_hwMasterCap, m_hwBalanceCap, m_dbeamSensor,
                          m_hwAssignCap, m_hwStyleCtlCap;

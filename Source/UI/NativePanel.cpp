@@ -847,6 +847,53 @@ void NativePanel::paint(juce::Graphics& g)
         g.drawRoundedRectangle(r, 7.0f, 1.4f);
     }
 
+    // Chord card mini-piano: two octaves with the held chord's tones lit gold.
+    if (! m_chordPiano.isEmpty())
+    {
+        auto pz = m_chordPiano;
+        std::array<bool, 12> lit { {} };
+        const auto chordText = m_chord.getText().trim();
+        if (chordText.isNotEmpty() && chordText != "--") {
+            const auto c0 = chordText[0];
+            static const int base[7] = { 9, 11, 0, 2, 4, 5, 7 };   // A B C D E F G
+            if (c0 >= 'A' && c0 <= 'G') {
+                int root = base[(int) (c0 - 'A')];
+                int i = 1;
+                if (i < chordText.length() && chordText[i] == '#') { root = (root + 1) % 12; ++i; }
+                else if (i < chordText.length() && chordText[i] == 'b') { root = (root + 11) % 12; ++i; }
+                const bool minor = (i < chordText.length() && chordText[i] == 'm'
+                                    && ! chordText.substring(i).startsWith("maj"));
+                lit[(std::size_t) root] = true;
+                lit[(std::size_t) ((root + (minor ? 3 : 4)) % 12)] = true;
+                lit[(std::size_t) ((root + 7) % 12)] = true;
+            }
+        }
+
+        const int whiteCount = 14;
+        const float ww = (float) pz.getWidth() / (float) whiteCount;
+        const float x0 = (float) pz.getX(), y0 = (float) pz.getY(), h = (float) pz.getHeight();
+        static const int whitePc[7]    = { 0, 2, 4, 5, 7, 9, 11 };
+        static const int blackAfter[7] = { 1, 1, 0, 1, 1, 1, 0 };
+        static const int blackPc[7]    = { 1, 3, 0, 6, 8, 10, 0 };
+
+        for (int k = 0; k < whiteCount; ++k) {
+            juce::Rectangle<float> key(x0 + k * ww, y0, ww - 1.0f, h);
+            g.setColour(lit[(std::size_t) whitePc[k % 7]] ? CadenzaLookAndFeel::accent()
+                                                          : juce::Colour(0xffe9e6dd));
+            g.fillRoundedRectangle(key, 1.5f);
+            g.setColour(juce::Colours::black.withAlpha(0.35f));
+            g.drawRoundedRectangle(key, 1.5f, 0.6f);
+        }
+        const float bw = ww * 0.62f, bh = h * 0.62f;
+        for (int k = 0; k < whiteCount; ++k) {
+            if (! blackAfter[k % 7]) continue;
+            juce::Rectangle<float> key(x0 + (k + 1) * ww - bw * 0.5f, y0, bw, bh);
+            g.setColour(lit[(std::size_t) blackPc[k % 7]] ? CadenzaLookAndFeel::goldDeep()
+                                                          : juce::Colour(0xff15171c));
+            g.fillRoundedRectangle(key, 1.2f);
+        }
+    }
+
     // Left hardware-panel chrome: section captions + the glowing D-Beam sensor.
     if (! m_hwPanel.isEmpty())
     {
@@ -1174,19 +1221,20 @@ void NativePanel::resized()
 
     // Two-column upper band: a performance card (left) and a memory card (right).
     {
-        auto band = area.removeFromTop(190);
+        auto band = area.removeFromTop(206);
         auto bandL = band.removeFromLeft((band.getWidth() - gap) * 56 / 100);
         band.removeFromLeft(gap);
         auto bandR = band;
 
-        // LEFT card: style name + big chord LCD, transpose/octave, toggles.
+        // LEFT card: style name + chord LCD (name + mini-piano), transpose/octave, toggles.
         {
             m_cards.push_back(bandL);
             auto col = bandL.reduced(9, 9);
             m_styleName.setBounds(col.removeFromTop(18));
-            auto lcd = col.removeFromTop(56);
+            auto lcd = col.removeFromTop(72);
             m_chordCard = lcd.reduced(1, 1);
-            m_chord.setBounds(lcd);
+            m_chord.setBounds(lcd.removeFromTop(44));
+            m_chordPiano = lcd.reduced(10, 3);
             col.removeFromTop(8);
 
             auto tr = col.removeFromTop(28);
