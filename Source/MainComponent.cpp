@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <set>
 #include <sstream>
 #include <vector>
 
@@ -117,6 +118,7 @@ MainComponent::MainComponent()
     // Load persisted settings BEFORE starting audio so saved BPM / device take effect.
     m_settings = std::make_unique<cadenza::settings::SettingsStore>(settingsFilePath());
     loadSettings();
+    loadVoiceMap();
 
     // Start audio before installing hooks so noteOn arrivals have somewhere to go.
     // Restore the user's saved output-device choice (avoids a coloured virtual
@@ -696,6 +698,92 @@ void MainComponent::loadSettings()
     m_state.setChordSourceEnabled("memory", s.chordMemoryEnabled);
 
     juce::Logger::writeToLog("[Cadenza] Loaded settings from " + juce::String(m_settings->path()));
+}
+
+juce::File MainComponent::voiceMapFile() const
+{
+    return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+        .getChildFile("Cadenza").getChildFile("voicemap.json");
+}
+
+void MainComponent::loadVoiceMap()
+{
+    const auto f = voiceMapFile();
+    if (f.existsAsFile() && m_voiceMap.loadFromJson(f.loadFileAsString().toStdString()))
+        juce::Logger::writeToLog("[Cadenza] Loaded voice map from " + f.getFullPathName());
+}
+
+void MainComponent::applyVoiceMapToStyle()
+{
+    if (!m_settings || !m_settings->state().useProVoices || m_voiceMap.empty())
+        return;
+
+    // Per-style explicit plugin overrides win — collect them so we don't stomp them.
+    std::set<int> overridden;
+    const auto it = m_settings->state().styleMixes.find(m_settings->state().lastStyleId);
+    if (it != m_settings->state().styleMixes.end())
+        for (const auto& m : it->second)
+            if (!m.pluginPath.empty())
+                overridden.insert(m.channel);
+
+    for (const auto& c : m_mixer.channels()) {
+        const int ch = c.channel;
+        if (overridden.count(ch))
+            continue;
+        const bool drums = (ch == 9 || ch == 10);
+        const auto* entry = drums ? m_voiceMap.forDrums()
+                                  : m_voiceMap.forProgram(m_mixer.program(ch));
+        if (entry == nullptr)
+            continue;   // unmapped -> keep the GM SoundFont voice
+        std::string err;
+        if (m_audio.loadPartInstrument(ch, entry->pluginPath, entry->presetState, err)) {
+            if (entry->gain >= 0)
+                m_audio.controlChange(ch, 7, entry->gain);
+            if (m_panel)
+                m_panel->setMixerInstrumentName(ch, juce::String(m_audio.partInstrumentName(ch)));
+        } else {
+            juce::Logger::writeToLog("[Cadenza] VoiceMap voice missing/failed ch="
+                                     + juce::String(ch) + ": " + juce::String(err));   // GM fallback
+        }
+    }
+}
+
+void MainComponent::setDefaultVoice(int channel)
+{
+    const std::string path  = m_audio.partInstrumentPath(channel);
+    if (path.empty()) {
+        juce::NativeMessageBox::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+            "Set Default Voice", "Load a VST instrument (e.g. sforzando) on this part first.");
+        return;
+    }
+    const std::string state = m_audio.capturePartInstrumentState(channel);
+
+    juce::PopupMenu menu;
+    menu.addItem(1, "Drums");
+    menu.addItem(2, "Bass");
+    menu.addItem(3, "Piano / Comp");
+    juce::Component::SafePointer<MainComponent> safe(this);
+    menu.showMenuAsync(juce::PopupMenu::Options(),
+        [safe, channel, path, state](int choice) {
+            auto* self = safe.getComponent();
+            if (self == nullptr || choice == 0)
+                return;
+            cadenza::audio::VoiceMapEntry e;
+            e.pluginPath  = path;
+            e.presetState = state;
+            if (choice == 1)      self->m_voiceMap.setDrums(e);
+            else if (choice == 2) self->m_voiceMap.setFamily(4, e);   // GM 32..39 bass
+            else if (choice == 3) self->m_voiceMap.setFamily(0, e);   // GM 0..7 piano
+            const auto f = self->voiceMapFile();
+            f.getParentDirectory().createDirectory();
+            f.replaceWithText(juce::String(self->m_voiceMap.toJson()));
+            if (self->m_settings) {
+                self->m_settings->state().useProVoices = true;
+                self->saveSettings();
+            }
+            juce::Logger::writeToLog("[Cadenza] Saved default voice ch=" + juce::String(channel)
+                                     + " slot=" + juce::String(choice));
+        });
 }
 
 void MainComponent::saveSettings()
@@ -2469,6 +2557,7 @@ void MainComponent::updateNativePanelStyle()
                 m_audio.clearPartInstrument(ch);   // changed or no longer wanted
         }
         applyStyleMix(m_settings->state().lastStyleId);
+        applyVoiceMapToStyle();   // auto-SFZ voices on channels with no per-style override
     } else {
         m_audio.clearAllPartInstruments();
     }

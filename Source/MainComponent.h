@@ -4,6 +4,7 @@
 #include "BridgeRouter.h"
 #include "Audio/AudioEngine.h"
 #include "Audio/MixerModel.h"
+#include "Audio/VoiceMap.h"
 #include "Midi/MidiRouter.h"
 #include "Arranger/StyleEngine.h"
 #include "Arranger/Style.h"
@@ -65,6 +66,15 @@ private:
     void applyMixerState();          // send each channel's effective volume (CC7) to the synth
     void applyStyleMix(const std::string& styleId);  // apply saved per-style mixer overrides
     void persistStyleMix();          // save current mixer strips for the current style
+
+    // Auto-SFZ voices (sforzando-hosting via the VoiceMap). loadVoiceMap reads
+    // voicemap.json; applyVoiceMapToStyle loads mapped voices on style channels
+    // that have no per-style override (gated by useProVoices, GM fallback);
+    // setDefaultVoice captures a part's current plugin into voicemap.json.
+    juce::File voiceMapFile() const;
+    void loadVoiceMap();
+    void applyVoiceMapToStyle();
+    void setDefaultVoice(int channel);
     void captureRegistration(int slot);   // snapshot the live setup into a registration
     void recallRegistration(int slot);    // restore a saved registration
     void applyOts(int slot);                                // recall one One Touch Setting slot
@@ -138,6 +148,7 @@ private:
     std::string m_lastLinkedMain;
 
     cadenza::audio::MixerModel m_mixer;
+    cadenza::audio::VoiceMap m_voiceMap;   // GM program/family -> SFZ voice (sforzando)
     int m_midiRescanTicks = 0;   // timer ticks since last MIDI hot-plug rescan
 
     // Persistent settings.
