@@ -105,11 +105,30 @@ void reloadReplaces()
     const auto* e = m.forProgram(1);
     expect(e && e->pluginPath == "B.vst3", "new entry present after reload");
 }
+
+void setAndSerializeRoundTrips()
+{
+    VoiceMap m;
+    cadenza::audio::VoiceMapEntry drums; drums.pluginPath = "sforzando.vst3"; drums.presetState = "BLOB1"; drums.gain = 100;
+    cadenza::audio::VoiceMapEntry bass;  bass.pluginPath  = "sforzando.vst3"; bass.presetState  = "BLOB2";
+    m.setDrums(drums);
+    m.setFamily(4, bass);
+    expect(!m.empty(), "map non-empty after setters");
+
+    const std::string json = m.toJson();
+    VoiceMap m2;
+    expect(m2.loadFromJson(json), "serialized json re-parses");
+    expect(m2.forDrums() && m2.forDrums()->pluginPath == "sforzando.vst3", "drums round-trip plugin");
+    expect(m2.forDrums() && m2.forDrums()->presetState == "BLOB1", "drums round-trip state");
+    expect(m2.forDrums() && m2.forDrums()->gain == 100, "drums round-trip gain");
+    expect(m2.forProgram(33) && m2.forProgram(33)->presetState == "BLOB2", "bass family round-trip (prog 33 -> family 4)");
+}
 }
 
 int main()
 {
     emptyByDefault();
+    setAndSerializeRoundTrips();
     exactProgramLookup();
     familyFallback();
     exactBeatsFamily();

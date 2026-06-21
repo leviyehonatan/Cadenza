@@ -75,4 +75,51 @@ const VoiceMapEntry* VoiceMap::forDrums() const noexcept
 {
     return m_drums.has_value() ? &m_drums.value() : nullptr;
 }
+
+void VoiceMap::setProgram(int gmProgram, const VoiceMapEntry& entry)
+{
+    if (gmProgram >= 0 && gmProgram <= 127)
+        m_byProgram[gmProgram] = entry;
+}
+
+void VoiceMap::setFamily(int family, const VoiceMapEntry& entry)
+{
+    if (family >= 0 && family <= 15)
+        m_byFamily[family] = entry;
+}
+
+void VoiceMap::setDrums(const VoiceMapEntry& entry)
+{
+    m_drums = entry;
+}
+
+std::string VoiceMap::toJson() const
+{
+    using cadenza::json::Value;
+    using cadenza::json::Object;
+    auto entryObj = [](const VoiceMapEntry& e) {
+        Object o;
+        o["plugin"] = Value::string(e.pluginPath);
+        if (!e.presetState.empty()) o["state"] = Value::string(e.presetState);
+        if (e.gain >= 0)            o["gain"]  = Value::number(e.gain);
+        return Value::object(std::move(o));
+    };
+
+    Object root;
+    if (m_drums.has_value())
+        root["drums"] = entryObj(*m_drums);
+    if (!m_byProgram.empty()) {
+        Object programs;
+        for (const auto& [k, v] : m_byProgram)
+            programs[std::to_string(k)] = entryObj(v);
+        root["programs"] = Value::object(std::move(programs));
+    }
+    if (!m_byFamily.empty()) {
+        Object families;
+        for (const auto& [k, v] : m_byFamily)
+            families[std::to_string(k)] = entryObj(v);
+        root["families"] = Value::object(std::move(families));
+    }
+    return cadenza::json::serialize(Value::object(std::move(root)));
+}
 }

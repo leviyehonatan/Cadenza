@@ -47,6 +47,13 @@ public:
     // Instrument for the drum/percussion channel, or nullptr.
     const VoiceMapEntry* forDrums() const noexcept;
 
+    // Build/update the map in memory (used by the in-app "set default voice"
+    // capture), then serialize to the same JSON shape loadFromJson() accepts.
+    void setProgram(int gmProgram, const VoiceMapEntry& entry);   // 0..127
+    void setFamily(int family, const VoiceMapEntry& entry);       // 0..15
+    void setDrums(const VoiceMapEntry& entry);
+    std::string toJson() const;
+
 private:
     std::map<int, VoiceMapEntry> m_byProgram;   // key 0..127
     std::map<int, VoiceMapEntry> m_byFamily;    // key 0..15
