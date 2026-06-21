@@ -61,9 +61,18 @@ pointing at a good sampler (Decent Sampler / sforzando / Kontakt) and a sample
 library, Cadenza does the same thing: every style automatically plays great voices,
 with per-style overrides and the GM SoundFont as the safety net.
 
-## Status
+## Status (wired 2026-06-21)
 - [x] `VoiceMap` core type + JSON format + unit tests (`cadenza_voicemap_tests`).
-- [ ] `PluginHost` state-blob restore.
-- [ ] `AudioEngine` load-with-state.
-- [ ] `MainComponent` wiring + `voicemap.json` + settings toggle.
-- [ ] UI to edit the map (later; hand-editing JSON works first).
+- [x] `VoiceMap` in-memory setters + `toJson()` (for the capture flow).
+- [x] `PluginHost` state-blob get/set (`getStateBlob`/`setStateBlob`).
+- [x] `AudioEngine` load-with-state (base64 VST3 state) + `capturePartInstrumentState`.
+- [x] `MainComponent` wiring: loads `%APPDATA%/Cadenza/voicemap.json`, applies on
+      style load to channels without a per-style override (gated by `useProVoices`,
+      GM SoundFont fallback).
+- [x] Curation UX: "Set as default voice..." in each part's instrument menu →
+      captures the loaded sforzando+SFZ state and writes `voicemap.json`
+      (Drums / Bass=family 4 / Piano=family 0).
+- [x] Settings toggle "Use pro voices (SFZ)" in the MIDI Settings panel (live A/B
+      against the GM SoundFont).
+- [ ] Full visual voice-map editor (future; the capture flow + JSON suffice).
+- [ ] More voices (guitar/strings/brass/organ) + the VCSL all-in-one library (future).
