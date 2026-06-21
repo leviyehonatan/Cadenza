@@ -37,3 +37,7 @@ lib/
 
 # Logs
 *.log
+
+# Generated diagnostics + tooling artifacts (regenerated on demand)
+diagnostics/
+.superpowers/
