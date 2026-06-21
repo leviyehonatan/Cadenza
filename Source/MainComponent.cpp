@@ -33,6 +33,25 @@ juce::File importedStylesDir()
         .getChildFile("imported-styles");
 }
 
+// Section to start a freshly-loaded style on. Yamaha styles run sparse (Main A)
+// to full (Main D) by design, so loading on Main A makes a rich style sound
+// empty when auditioning a library (e.g. a Bossa whose Main A is drums-only).
+// Pick the fullest Main A..D variation so each style is heard at its best; the
+// player can still step down to Main A for a sparser feel.
+std::string bestStartSection(const cadenza::arranger::Style& style)
+{
+    const char* mains[] = { "mainA", "mainB", "mainC", "mainD" };
+    const cadenza::arranger::Section* best = nullptr;
+    for (const char* m : mains) {
+        const auto* s = style.findSection(m);
+        if (s != nullptr && (best == nullptr || s->parts.size() > best->parts.size()))
+            best = s;
+    }
+    if (best != nullptr)
+        return best->name;
+    return style.sections.empty() ? std::string() : style.sections.front().name;
+}
+
 std::string lowercase(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
@@ -1251,9 +1270,7 @@ bool MainComponent::loadAndApplyStyleFile(const juce::File& file)
         return false;
     }
 
-    const auto initialSection = loaded.style.findSection("mainA") != nullptr
-        ? std::string("mainA")
-        : (loaded.style.sections.empty() ? std::string() : loaded.style.sections.front().name);
+    const auto initialSection = bestStartSection(loaded.style);
     const bool editableCadenzaStyle = file.hasFileExtension("cstyle")
         && m_recorder.loadSession(loaded.style, initialSection);
     if (!editableCadenzaStyle)
@@ -1270,8 +1287,11 @@ bool MainComponent::loadAndApplyStyleFile(const juce::File& file)
     }
     m_styleEngine.allNotesOff();
     m_styleEngine.setStyle(sharedStyle);
-    if (!initialSection.empty())
+    if (!initialSection.empty()) {
         m_styleEngine.setSection(initialSection);
+        if (initialSection.rfind("main", 0) == 0)
+            m_currentMain = initialSection;   // fills return to the loaded Main
+    }
 
     // Refresh the native panel's style name + sections + mixer, and (re)assign the
     // live-melody channel/program so it never collides with this style's channels.
