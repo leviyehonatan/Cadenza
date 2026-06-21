@@ -52,6 +52,7 @@ void saveAndReload()
         s.state().chordArrangerEnabled = false;
         s.state().chordMemoryEnabled = true;
         s.state().syncroStopOnRelease = false;
+        s.state().useProVoices = true;
         s.state().autoFillEnabled = false;
         s.state().eqLowDb = 6;
         s.state().eqMidDb = -2;
@@ -76,6 +77,7 @@ void saveAndReload()
         expect(!s.state().chordArrangerEnabled, "chordArrangerEnabled round-trip");
         expect(s.state().chordMemoryEnabled, "chordMemoryEnabled round-trip");
         expect(!s.state().syncroStopOnRelease, "syncroStopOnRelease round-trip");
+        expect(s.state().useProVoices, "useProVoices round-trip");
         expect(!s.state().autoFillEnabled, "autoFillEnabled round-trip");
         expect(s.state().eqLowDb == 6 && s.state().eqMidDb == -2 && s.state().eqHighDb == 3,
                "EQ gains round-trip");

@@ -76,6 +76,7 @@ struct Settings
     std::string lastSoundFontPath;
     std::string midiInputDevice;     // empty = auto (main keyboard port, skip aux ports)
     std::string midiChordMode = "fingered";  // fingered|single|multi|onbass|full
+    bool useProVoices = false;       // auto-load VoiceMap SFZ voices (off = GM SoundFont)
     int crossfade = 50;
     bool chordBassEnabled = true;
     bool chordArrangerEnabled = true;

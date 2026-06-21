@@ -38,6 +38,7 @@ bool SettingsStore::load()
     m_state.lastSoundFontPath = root.get("lastSoundFontPath").asString(m_state.lastSoundFontPath);
     m_state.midiInputDevice = root.get("midiInputDevice").asString(m_state.midiInputDevice);
     m_state.midiChordMode = root.get("midiChordMode").asString(m_state.midiChordMode);
+    m_state.useProVoices = root.get("useProVoices").asBool(m_state.useProVoices);
     m_state.crossfade = root.get("crossfade").asInt(m_state.crossfade);
     m_state.chordBassEnabled = root.get("chordBassEnabled").asBool(m_state.chordBassEnabled);
     m_state.chordArrangerEnabled = root.get("chordArrangerEnabled").asBool(m_state.chordArrangerEnabled);
@@ -167,6 +168,7 @@ bool SettingsStore::save() const
     root["lastSoundFontPath"] = J::Value::string(m_state.lastSoundFontPath);
     root["midiInputDevice"]   = J::Value::string(m_state.midiInputDevice);
     root["midiChordMode"]     = J::Value::string(m_state.midiChordMode);
+    root["useProVoices"]      = J::Value::boolean(m_state.useProVoices);
     root["crossfade"]         = J::Value::number(m_state.crossfade);
     root["chordBassEnabled"] = J::Value::boolean(m_state.chordBassEnabled);
     root["chordArrangerEnabled"] = J::Value::boolean(m_state.chordArrangerEnabled);
