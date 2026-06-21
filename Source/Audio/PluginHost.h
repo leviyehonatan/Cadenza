@@ -27,6 +27,12 @@ public:
     void clear();
     void prepare(double sampleRate, int blockSize);
 
+    // VST3 state capture/restore (message thread). getStateBlob() returns the
+    // plugin's saved state (e.g. which SFZ a sforzando instance has loaded), or
+    // an empty block if nothing is loaded; setStateBlob() restores it.
+    juce::MemoryBlock getStateBlob() const;
+    void setStateBlob(const juce::MemoryBlock& blob);
+
     bool        isLoaded() const;
     juce::String name() const;
 

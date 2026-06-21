@@ -382,9 +382,48 @@ bool AudioEngine::loadPartInstrument(int channel, const std::string& path, std::
         return false;
     }
     m_partPath[channel] = path;
+    m_partState[channel].clear();
     if (!m_partLoaded[channel].exchange(true))
         m_partInstrumentCount.fetch_add(1);
     return true;
+}
+
+bool AudioEngine::loadPartInstrument(int channel, const std::string& path,
+                                     const std::string& stateBase64, std::string& error)
+{
+    if (channel <= 0 || channel >= kNumChannels) { error = "invalid channel"; return false; }
+    // Idempotent on (path, state): re-applying the same voice+state is a no-op.
+    if (m_partLoaded[channel].load() && m_partPath[channel] == path && m_partState[channel] == stateBase64)
+        return true;
+    m_partInstrument[channel].prepare(m_currentSampleRate, m_currentBlockSize);
+    juce::String err;
+    if (!m_partInstrument[channel].loadFromFile(juce::String(path), err)) {
+        error = err.toStdString();
+        return false;
+    }
+    if (!stateBase64.empty()) {
+        juce::MemoryBlock block;
+        juce::MemoryOutputStream out(block, false);
+        if (juce::Base64::convertFromBase64(out, juce::String(stateBase64))) {
+            out.flush();
+            m_partInstrument[channel].setStateBlob(block);
+        }
+    }
+    m_partPath[channel]  = path;
+    m_partState[channel] = stateBase64;
+    if (!m_partLoaded[channel].exchange(true))
+        m_partInstrumentCount.fetch_add(1);
+    return true;
+}
+
+std::string AudioEngine::capturePartInstrumentState(int channel) const
+{
+    if (channel <= 0 || channel >= kNumChannels || !m_partLoaded[channel].load())
+        return {};
+    const juce::MemoryBlock block = m_partInstrument[channel].getStateBlob();
+    if (block.getSize() == 0)
+        return {};
+    return juce::Base64::toBase64(block.getData(), block.getSize()).toStdString();
 }
 
 void AudioEngine::clearPartInstrument(int channel)
@@ -394,6 +433,7 @@ void AudioEngine::clearPartInstrument(int channel)
         m_partInstrumentCount.fetch_sub(1);
     m_partInstrument[channel].clear();
     m_partPath[channel].clear();
+    m_partState[channel].clear();
 }
 
 void AudioEngine::clearAllPartInstruments()

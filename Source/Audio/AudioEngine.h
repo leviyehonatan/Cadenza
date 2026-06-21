@@ -86,6 +86,12 @@ public:
     // its notes routed to that plugin (and its audio summed into the mix) instead
     // of the FluidSynth SoundFont. When none are loaded there is zero overhead.
     bool loadPartInstrument(int channel, const std::string& path, std::string& error);
+    // Load a part instrument and restore a base64-encoded VST3 state (e.g. a
+    // sforzando instance with an SFZ loaded). Idempotent on (path, state).
+    bool loadPartInstrument(int channel, const std::string& path,
+                            const std::string& stateBase64, std::string& error);
+    // Capture the channel's current plugin state as base64 ("" if none loaded).
+    std::string capturePartInstrumentState(int channel) const;
     void clearPartInstrument(int channel);
     void clearAllPartInstruments();
     bool hasPartInstrument(int channel) const;
@@ -136,6 +142,7 @@ private:
     juce::AudioBuffer<float> m_partScratch;
     juce::MidiBuffer         m_partMidiScratch;
     std::string              m_partPath[kNumChannels];   // message-thread only
+    std::string              m_partState[kNumChannels];  // base64 VST3 state (message-thread only)
     double m_currentSampleRate = 48000.0;
     int    m_currentBlockSize  = 512;
     juce::MidiBuffer m_effectMidi;   // scratch (empty) MIDI for effect processing

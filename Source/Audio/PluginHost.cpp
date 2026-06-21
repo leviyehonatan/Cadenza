@@ -72,6 +72,22 @@ bool PluginHost::loadFromFile(const juce::String& path, juce::String& error)
     return true;
 }
 
+juce::MemoryBlock PluginHost::getStateBlob() const
+{
+    const juce::ScopedLock sl(m_lock);
+    juce::MemoryBlock block;
+    if (m_plugin)
+        m_plugin->getStateInformation(block);
+    return block;
+}
+
+void PluginHost::setStateBlob(const juce::MemoryBlock& blob)
+{
+    const juce::ScopedLock sl(m_lock);
+    if (m_plugin && blob.getSize() > 0)
+        m_plugin->setStateInformation(blob.getData(), static_cast<int>(blob.getSize()));
+}
+
 void PluginHost::showEditor(const juce::String& title)
 {
     if (m_editorWindow != nullptr) {        // already open — just bring it forward
