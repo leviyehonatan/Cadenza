@@ -533,6 +533,29 @@ void humanizeProfileScalesAndDiffersByRole()
     expect(half.velocityJitter < d.velocityJitter && half.velocityJitter > 0, "amount scales the profile down");
 }
 
+void yamahaXgOutOfRangeDrumNotesFoldIntoGmRange()
+{
+    Part p; p.name = "drums"; p.midiChannel = 10; p.percussion = true; p.bankMsb = 127;
+    bool allInRange = true;
+    for (int n : { 13, 15, 19, 20, 24, 30, 33, 86, 90, 95 }) {
+        const auto r = drumNoteForPlayback(p, n);
+        if (r.playbackNote < 35 || r.playbackNote > 81) allInRange = false;
+    }
+    expect(allInRange, "out-of-range Yamaha/XG drum notes fold into GM 35..81 (no SFX garbage)");
+    expect(drumNoteForPlayback(p, 50).playbackNote == 50, "in-range Yamaha/XG drum note still passes through");
+}
+
+void percussionKitProgramSnapsToValidGmKit()
+{
+    Part p; p.name = "drums"; p.midiChannel = 10; p.percussion = true; p.program = 82;
+    const auto s = playbackSetupForPart(p);
+    expect(s.program && *s.program == 0, "invalid Genos kit program snaps to Standard Kit (0)");
+
+    Part p2; p2.name = "drums"; p2.midiChannel = 10; p2.percussion = true; p2.program = 16;
+    const auto s2 = playbackSetupForPart(p2);
+    expect(s2.program && *s2.program == 16, "valid GM kit (Power=16) passes through unchanged");
+}
+
 std::string readText(const std::filesystem::path& path)
 {
     std::ifstream in(path);
@@ -774,6 +797,8 @@ int main()
     humanizeVelocityClampsExtremes();
     humanizeLateTicksStayWithinBound();
     humanizeProfileScalesAndDiffersByRole();
+    yamahaXgOutOfRangeDrumNotesFoldIntoGmRange();
+    percussionKitProgramSnapsToValidGmKit();
     playbackDiagnosticsExportCsvMidiAndSummary();
     playbackDiagnosticsMidiSetupPrefersMainDrumsOnSharedChannel();
     playbackDiagnosticsRoutesPercussionEventsToDrumChannel();

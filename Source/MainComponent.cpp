@@ -23,6 +23,16 @@ namespace
 // constructor can restore the saved chord-detection mode.
 arranger::ChordDetectionMode chordModeFromId(const std::string& id) noexcept;
 
+// User "Imported" style library: %APPDATA%/Cadenza/imported-styles, organized in
+// genre subfolders. Bundled "Factory" styles live in resources/factory/styles;
+// this is the separate, user-side library (Genos imports, etc.).
+juce::File importedStylesDir()
+{
+    return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+        .getChildFile("Cadenza")
+        .getChildFile("imported-styles");
+}
+
 std::string lowercase(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
@@ -1049,13 +1059,18 @@ void MainComponent::tryLoadFactorySoundFont()
 
 void MainComponent::openStyleFileChooser()
 {
-    const auto stylesDir = findResourcesRoot()
-        .getChildFile("factory")
-        .getChildFile("styles");
+    // Prefer the user's Imported library (genre folders) when it exists, so the
+    // chooser lands on the full style collection; fall back to the bundled
+    // Factory styles, then Documents.
+    const auto imported = importedStylesDir();
+    const auto factory  = findResourcesRoot().getChildFile("factory").getChildFile("styles");
+    const auto startDir = imported.isDirectory() ? imported
+                        : (factory.isDirectory() ? factory
+                        : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory));
 
     m_styleChooser = std::make_unique<juce::FileChooser>(
         "Choose a Cadenza or Yamaha style",
-        stylesDir.isDirectory() ? stylesDir : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+        startDir,
         "*.cstyle;*.sty;*.prs;*.sst;*.fps;*.bcs");
 
     juce::Component::SafePointer<MainComponent> safe(this);

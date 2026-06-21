@@ -109,6 +109,15 @@ PartPlaybackSetup playbackSetupForPart(const Part& part)
     if (setup.percussion) {
         if (!setup.program)
             setup.program = 0;        // default GM drum kit
+        // Snap to a valid GM drum kit. Yamaha/Genos kit programs (e.g. 82, 117)
+        // don't exist on a GM SoundFont and render as silence or wrong sounds;
+        // standard XG kit numbers (Room/Power/Electronic/808/Jazz/Brush/Orchestra)
+        // line up with GM and pass through unchanged.
+        static const int kGmDrumKits[] = { 0, 8, 16, 24, 25, 32, 40, 48, 56 };
+        bool validKit = false;
+        for (int k : kGmDrumKits) validKit = validKit || (*setup.program == k);
+        if (!validKit)
+            setup.program = 0;        // unknown kit -> Standard Kit
     } else {
         // Preserve explicit Yamaha/XG variation banks when the style provides
         // them so XG-capable SoundFonts can use the richer preset. If a melodic
@@ -189,12 +198,28 @@ bool isYamahaXgDrumPart(const Part& part)
 
 int remapYamahaXgToGmDrumNote(int note) noexcept
 {
-    // Observed in local Yamaha .sty audit outside Cadenza's common GM range.
-    // Yamaha/XG note 31 is "sticks"; GM side stick is the closest safe target.
-    if (note == 31)
-        return 37;
+    // Yamaha/Genos kits use notes outside GM's percussion range (35..81). On a GM
+    // SoundFont those land on undefined slots and play garbage (whistle/dog-like
+    // SFX) or nothing. Map them to playable GM drums so imported styles groove.
 
-    return note;
+    // 1) Explicit known Yamaha/XG extensions -> closest GM drum.
+    switch (note) {
+        case 31: return 37;   // sticks      -> side stick
+        case 13: return 36;   // low kick    -> bass drum 1
+        case 14: return 37;   // rim         -> side stick
+        case 15: return 35;   // kick var    -> acoustic bass drum
+        default: break;
+    }
+
+    // 2) Anything else outside 35..81: fold by whole octaves into range. Low hits
+    //    (kicks/toms) land near the kick; high percussion folds down to cymbals.
+    if (note >= 35 && note <= 81)
+        return note;
+
+    int n = note;
+    while (n < 35) n += 12;
+    while (n > 81) n -= 12;
+    return std::clamp(n, 35, 81);
 }
 
 DrumNoteRemap drumNoteForPlayback(const Part& part, int note)

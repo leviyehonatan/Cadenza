@@ -64,6 +64,13 @@ public:
             fluid_settings_setint(m_settings, "synth.lock-memory", 0);
             fluid_settings_setint(m_settings, "synth.drums-channel.active", 1);
 
+            // Yamaha styles (and the Timbres of Heaven XGM SoundFont) are XG-based.
+            // FluidSynth defaults to GS bank-select, under which the styles' XG
+            // bank addresses (e.g. MSB 8 voice variations, MSB 127 drum kits) do
+            // not resolve and every voice collapses to GM bank 0 (piano). XG mode
+            // makes those banks resolve to the SoundFont's richer XG presets.
+            fluid_settings_setstr(m_settings, "synth.midi-bank-select", "xg");
+
             // Plenty of voices: drums + bass + chords + 3 right-hand layers on a
             // busy style can exceed the 256 default and steal/cut notes.
             fluid_settings_setint(m_settings, "synth.polyphony", 512);
