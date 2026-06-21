@@ -54,6 +54,7 @@ private:
     void openChordAnalysisChooser();
     void openPluginFileChooser();
     void choosePartInstrument(int channel);   // load a VST3 instrument onto a mixer channel
+    void chooseMasterInstrument();            // load/open/clear the master multitimbral instrument
     void chooseRightLayerInstrument(int layer); // load a VST3 instrument onto a Right 1/2/3 layer
     bool loadAndApplyPluginFile(const juce::File& file);
     void clearMasterEffect();
@@ -159,6 +160,7 @@ private:
     std::unique_ptr<juce::FileChooser> m_analysisChooser;
     std::unique_ptr<juce::FileChooser> m_pluginChooser;
     std::unique_ptr<juce::FileChooser> m_partPluginChooser;
+    std::unique_ptr<juce::FileChooser> m_masterPluginChooser;
     std::string m_learnCommand;        // command currently waiting for a MIDI-learn press
 
     std::unique_ptr<cadenza::ui::NativePanel> m_panel;

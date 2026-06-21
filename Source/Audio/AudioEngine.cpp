@@ -54,6 +54,8 @@ void AudioEngine::prepareToPlay(int samplesPerBlock, double sampleRate)
         m_partInstrument[ch].prepare(sampleRate, m_currentBlockSize);
         m_partGain[ch].store(1.0f);
     }
+    m_masterCollector.reset(sampleRate);
+    m_masterInstrument.prepare(sampleRate, m_currentBlockSize);
 }
 
 void AudioEngine::releaseResources()
@@ -85,6 +87,7 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             if (m_synth) m_synth->renderBlock(view);
             else view.clear();
             renderPartInstruments(view);   // sum any per-part VST instruments (no-op if none)
+            renderMasterInstrument(view);  // sum the master multitimbral instrument (no-op if none)
         },
         [&] {  // 3) metronome clicks on top
             m_metronome.renderBlock(view, m_transport);
@@ -235,8 +238,21 @@ void AudioEngine::consumeTransportCommands()
     }
 }
 
+// Cadenza channel -> a MIDI channel 1..16 for the master multitimbral plugin.
+static int masterMidiChannel(int cadenzaChannel) noexcept
+{
+    const auto sc = cadenza::audio::synthChannelFromCadenzaChannel(cadenzaChannel);
+    return juce::jlimit(1, 16, sc.value_or(cadenzaChannel));
+}
+
 void AudioEngine::noteOn(int channel, int note, int velocity)
 {
+    if (m_masterLoaded.load()) {
+        auto m = juce::MidiMessage::noteOn(masterMidiChannel(channel), note, (juce::uint8) velocity);
+        m.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
+        m_masterCollector.addMessageToQueue(m);
+        return;
+    }
     if (channel > 0 && channel < kNumChannels && m_partLoaded[channel].load()) {
         auto m = juce::MidiMessage::noteOn(1, note, (juce::uint8) velocity);
         m.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
@@ -251,6 +267,12 @@ void AudioEngine::noteOn(int channel, int note, int velocity)
 
 void AudioEngine::noteOff(int channel, int note)
 {
+    if (m_masterLoaded.load()) {
+        auto m = juce::MidiMessage::noteOff(masterMidiChannel(channel), note);
+        m.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
+        m_masterCollector.addMessageToQueue(m);
+        return;
+    }
     if (channel > 0 && channel < kNumChannels && m_partLoaded[channel].load()) {
         auto m = juce::MidiMessage::noteOff(1, note);
         m.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
@@ -265,6 +287,12 @@ void AudioEngine::noteOff(int channel, int note)
 
 void AudioEngine::programChange(int channel, int program)
 {
+    if (m_masterLoaded.load()) {
+        auto m = juce::MidiMessage::programChange(masterMidiChannel(channel), program);
+        m.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
+        m_masterCollector.addMessageToQueue(m);
+        return;
+    }
     if (m_synth) {
         if (auto synthChannel = synthChannelFromCadenzaChannel(channel))
             m_synth->programChange(*synthChannel, program);
@@ -278,6 +306,12 @@ void AudioEngine::controlChange(int channel, int cc, int value)
     if (cc == 7 && channel > 0 && channel < kNumChannels)
         m_partGain[channel].store(std::clamp(value, 0, 127) / 127.0f);
 
+    if (m_masterLoaded.load()) {
+        auto m = juce::MidiMessage::controllerEvent(masterMidiChannel(channel), cc, value);
+        m.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
+        m_masterCollector.addMessageToQueue(m);
+        return;
+    }
     if (m_synth) {
         if (auto synthChannel = synthChannelFromCadenzaChannel(channel))
             m_synth->controlChange(*synthChannel, cc, value);
@@ -286,6 +320,12 @@ void AudioEngine::controlChange(int channel, int cc, int value)
 
 void AudioEngine::pitchBend(int channel, int value14)
 {
+    if (m_masterLoaded.load()) {
+        auto m = juce::MidiMessage::pitchWheel(masterMidiChannel(channel), juce::jlimit(0, 16383, value14));
+        m.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
+        m_masterCollector.addMessageToQueue(m);
+        return;
+    }
     // Pitch bend goes to the internal synth only; VST-instrument parts would
     // need a MIDI pitch-bend in their collector (not wired yet — rare on the
     // accompaniment channels that use VSTs).
@@ -366,6 +406,49 @@ void AudioEngine::renderPartInstruments(juce::AudioBuffer<float>& view)
             view.addFrom(c, 0, scratch, c, 0, ns, gain);   // mixer fader / mute / solo
     }
 }
+
+void AudioEngine::renderMasterInstrument(juce::AudioBuffer<float>& view)
+{
+    if (!m_masterLoaded.load())
+        return;   // common case when not using a master instrument
+    const int ns = view.getNumSamples();
+    const int nc = juce::jmin(view.getNumChannels(), 2);
+
+    juce::AudioBuffer<float> scratch(m_partScratch.getArrayOfWritePointers(), 2, ns);
+    scratch.clear();
+    m_masterMidiScratch.clear();
+    m_masterCollector.removeNextBlockOfMessages(m_masterMidiScratch, ns);
+    m_masterInstrument.process(scratch, m_masterMidiScratch);   // multitimbral VST: MIDI -> audio
+    for (int c = 0; c < nc; ++c)
+        view.addFrom(c, 0, scratch, c, 0, ns);
+}
+
+bool AudioEngine::loadMasterInstrument(const std::string& path, std::string& error)
+{
+    if (m_masterLoaded.load() && m_masterPath == path)
+        return true;   // idempotent
+    m_masterInstrument.prepare(m_currentSampleRate, m_currentBlockSize);
+    juce::String err;
+    if (!m_masterInstrument.loadFromFile(juce::String(path), err)) {
+        error = err.toStdString();
+        return false;
+    }
+    m_masterPath = path;
+    m_masterLoaded.store(true);
+    return true;
+}
+
+void AudioEngine::clearMasterInstrument()
+{
+    m_masterLoaded.store(false);
+    m_masterInstrument.clear();
+    m_masterPath.clear();
+}
+
+bool AudioEngine::hasMasterInstrument() const { return m_masterLoaded.load(); }
+std::string AudioEngine::masterInstrumentName() const { return m_masterInstrument.name().toStdString(); }
+std::string AudioEngine::masterInstrumentPath() const { return m_masterPath; }
+void AudioEngine::showMasterInstrumentEditor() { m_masterInstrument.showEditor("Master Instrument (whole band)"); }
 
 bool AudioEngine::loadPartInstrument(int channel, const std::string& path, std::string& error)
 {

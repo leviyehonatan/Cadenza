@@ -99,6 +99,18 @@ public:
     std::string partInstrumentPath(int channel) const;   // path used to load (for persistence)
     void showPartInstrumentEditor(int channel);           // open the plugin's GUI (message thread)
 
+    // ---- Master multitimbral instrument (one plugin for the whole band) ----
+    // When loaded, EVERY part + the right hand routes to this single plugin on
+    // its own MIDI channel (1..16), instead of FluidSynth / per-part instruments.
+    // This is how a multitimbral module (SampleTank, Sound Canvas VA, Kontakt)
+    // plays all parts at once. Falls back to the normal path when not loaded.
+    bool loadMasterInstrument(const std::string& path, std::string& error);
+    void clearMasterInstrument();
+    bool hasMasterInstrument() const;
+    std::string masterInstrumentName() const;
+    std::string masterInstrumentPath() const;
+    void showMasterInstrumentEditor();
+
     // Block callback for the style engine to push notes on the audio thread.
     using TickCallback = std::function<void(int ticksAdvanced, Transport&)>;
     void setOnTick(TickCallback cb) { m_onTick = std::move(cb); }
@@ -134,6 +146,7 @@ private:
     static constexpr int kNumChannels = 17;
     void consumeTransportCommands();   // audio thread, before transport advance
     void renderPartInstruments(juce::AudioBuffer<float>& view);   // audio thread
+    void renderMasterInstrument(juce::AudioBuffer<float>& view);  // audio thread
     PluginHost               m_partInstrument[kNumChannels];
     juce::MidiMessageCollector m_partCollector[kNumChannels];
     std::atomic<bool>        m_partLoaded[kNumChannels] {};
@@ -143,6 +156,13 @@ private:
     juce::MidiBuffer         m_partMidiScratch;
     std::string              m_partPath[kNumChannels];   // message-thread only
     std::string              m_partState[kNumChannels];  // base64 VST3 state (message-thread only)
+
+    // Master multitimbral instrument (one plugin gets all 16 channels).
+    PluginHost                 m_masterInstrument;
+    juce::MidiMessageCollector m_masterCollector;
+    std::atomic<bool>          m_masterLoaded { false };
+    juce::MidiBuffer           m_masterMidiScratch;
+    std::string                m_masterPath;   // message-thread only
     double m_currentSampleRate = 48000.0;
     int    m_currentBlockSize  = 512;
     juce::MidiBuffer m_effectMidi;   // scratch (empty) MIDI for effect processing

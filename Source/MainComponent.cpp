@@ -426,10 +426,11 @@ public:
                           const juce::String& selectedDevice, const std::string& chordModeId, int splitNote,
                           int humanizeAmount, bool useProVoices,
                           SelectFn onSelectDevice, CommandFn onChordMode, SplitFn onSplit, SplitFn onHumanize,
-                          std::function<void(bool)> onProVoices)
+                          std::function<void(bool)> onProVoices, std::function<void()> onMasterInstrument)
         : m_mappingText(std::move(mappingText)), m_onLearn(std::move(onLearn)), m_onClear(std::move(onClear)),
           m_onSelectDevice(std::move(onSelectDevice)), m_onChordMode(std::move(onChordMode)), m_onSplit(std::move(onSplit)),
-          m_onHumanize(std::move(onHumanize)), m_onProVoices(std::move(onProVoices))
+          m_onHumanize(std::move(onHumanize)), m_onProVoices(std::move(onProVoices)),
+          m_onMasterInstrument(std::move(onMasterInstrument))
     {
         // --- Input port picker (item 1 = Auto, then each detected device) ---
         m_inputLabel.setText("Input", juce::dontSendNotification);
@@ -498,6 +499,12 @@ public:
         m_proVoices.onClick = [this] { if (m_onProVoices) m_onProVoices(m_proVoices.getToggleState()); };
         addAndMakeVisible(m_proVoices);
 
+        // --- Master instrument (one multitimbral plugin for the whole band) ---
+        m_masterInstrument.setButtonText("Master Instrument (whole band)...");
+        m_masterInstrument.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3a3320));
+        m_masterInstrument.onClick = [this] { if (m_onMasterInstrument) m_onMasterInstrument(); };
+        addAndMakeVisible(m_masterInstrument);
+
         m_devices.setText(devices.isEmpty() ? "No MIDI inputs detected"
                                             : juce::String(devices.size()) + " port(s) detected",
                           juce::dontSendNotification);
@@ -549,6 +556,7 @@ public:
         labelled(m_splitLabel,    m_split,     150);
         labelled(m_humanizeLabel, m_humanize,  a.getWidth() - 80);
         m_proVoices.setBounds(a.removeFromTop(26));
+        m_masterInstrument.setBounds(a.removeFromTop(26));
         a.removeFromTop(2);
 
         m_devices.setBounds(a.removeFromTop(20));
@@ -586,7 +594,7 @@ private:
 
     void timerCallback() override { refresh(); }
 
-    static constexpr int kHeaderHeight = 28 * 4 + 4 * 4 + 26 + 2 + 20 + 8;  // 4 control rows + toggle + device line
+    static constexpr int kHeaderHeight = 28 * 4 + 4 * 4 + 26 + 26 + 2 + 20 + 8;  // 4 rows + toggle + master btn + device line
 
     MappingTextFn m_mappingText;
     CommandFn m_onLearn, m_onClear;
@@ -595,11 +603,13 @@ private:
     SplitFn   m_onSplit;
     SplitFn   m_onHumanize;
     std::function<void(bool)> m_onProVoices;
+    std::function<void()> m_onMasterInstrument;
 
     juce::Label m_inputLabel, m_modeLabel, m_splitLabel, m_humanizeLabel, m_devices;
     juce::ComboBox m_inputBox, m_modeBox;
     juce::Slider m_split, m_humanize;
     juce::ToggleButton m_proVoices;
+    juce::TextButton m_masterInstrument;
 
     std::vector<std::unique_ptr<Row>> m_rows;
     std::string m_pending;
@@ -680,13 +690,18 @@ void MainComponent::showMidiSettings()
         self->updateNativePanelStyle();   // re-run the reconcile so voices load (on) or revert to GM (off)
     };
 
+    auto onMasterInstrument = [safe] {
+        if (auto* self = safe.getComponent()) self->chooseMasterInstrument();
+    };
+
     const auto& st = m_settings->state();
     auto* comp = new MidiSettingsComponent(m_midi.availableInputs(), actions,
                                            std::move(mappingText), std::move(onLearn), std::move(onClear),
                                            juce::String(st.midiInputDevice), st.midiChordMode, st.splitNote,
                                            st.humanizeAmount, st.useProVoices,
                                            std::move(onSelectDevice), std::move(onChordMode), std::move(onSplit),
-                                           std::move(onHumanize), std::move(onProVoices));
+                                           std::move(onHumanize), std::move(onProVoices),
+                                           std::move(onMasterInstrument));
     juce::DialogWindow::LaunchOptions opts;
     opts.content.setOwned(comp);
     opts.dialogTitle = "MIDI Settings & Button Mapping";
@@ -1233,6 +1248,50 @@ void MainComponent::openSoundFontFileChooser()
                 self->m_soundFontChooser.reset();
             }
         });
+}
+
+void MainComponent::chooseMasterInstrument()
+{
+    juce::PopupMenu menu;
+    const bool has = m_audio.hasMasterInstrument();
+    menu.addItem(1, "Load VST3 instrument (plays the WHOLE band)...");
+    menu.addItem(2, "Open instrument editor", has);
+    menu.addItem(3, "Turn off (back to built-in engine)", has);
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    menu.showMenuAsync(juce::PopupMenu::Options(), [safe](int choice) {
+        auto* self = safe.getComponent();
+        if (self == nullptr || choice == 0)
+            return;
+        if (choice == 2) { self->m_audio.showMasterInstrumentEditor(); return; }
+        if (choice == 3) { self->m_audio.clearMasterInstrument(); return; }
+
+        juce::File vst3Dir("C:\\Program Files\\Common Files\\VST3");
+        self->m_masterPluginChooser = std::make_unique<juce::FileChooser>(
+            "Choose a multitimbral instrument (SampleTank, Sound Canvas, Kontakt)",
+            vst3Dir.isDirectory() ? vst3Dir
+                                  : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+            "*.vst3");
+        self->m_masterPluginChooser->launchAsync(
+            juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                | juce::FileBrowserComponent::canSelectDirectories,
+            [safe](const juce::FileChooser& chooser) {
+                auto* s = safe.getComponent();
+                if (s == nullptr) return;
+                const auto file = chooser.getResult();
+                if (file.exists()) {
+                    std::string err;
+                    if (s->m_audio.loadMasterInstrument(file.getFullPathName().toStdString(), err)) {
+                        juce::Logger::writeToLog("[Cadenza] Master instrument loaded: "
+                                                 + juce::String(s->m_audio.masterInstrumentName()));
+                        s->m_audio.showMasterInstrumentEditor();   // so the user assigns sounds per part
+                    } else {
+                        juce::Logger::writeToLog("[Cadenza] Master instrument load failed: " + juce::String(err));
+                    }
+                }
+                s->m_masterPluginChooser.reset();
+            });
+    });
 }
 
 void MainComponent::choosePartInstrument(int channel)
