@@ -47,6 +47,8 @@ RegisterWindow registerWindowForPart(const Part& part) noexcept
     const auto role = destinationRoleForPart(part);
     if (role == "pad")     return { 48, 84 };   // C3..C6
     if (role == "harmony") return { 48, 84 };   // C3..C6  keys / guitar stabs
+    // Chord comp parts (chord1/chord2/...) sit in the mid keyboard like the keys.
+    if (role.rfind("chord", 0) == 0) return { 48, 84 };   // C3..C6
     if (role == "guitar")  return { 45, 81 };   // A2..A5
     if (role == "lead" || role == "melody") return { 55, 91 };  // G3..G6
     return { 40, 88 };                          // generous default, any pitched part
@@ -202,24 +204,34 @@ int remapYamahaXgToGmDrumNote(int note) noexcept
     // SoundFont those land on undefined slots and play garbage (whistle/dog-like
     // SFX) or nothing. Map them to playable GM drums so imported styles groove.
 
-    // 1) Explicit known Yamaha/XG extensions -> closest GM drum.
+    // 1) Explicit known Yamaha/XG extensions -> closest GM drum (by sound, not by
+    //    octave math). The high XG percussion (82..87) must NOT fold down into GM's
+    //    whistle/guiro/cuica slots (71..79) — cuica/guiro sound like animal SFX.
     switch (note) {
-        case 31: return 37;   // sticks      -> side stick
-        case 13: return 36;   // low kick    -> bass drum 1
-        case 14: return 37;   // rim         -> side stick
-        case 15: return 35;   // kick var    -> acoustic bass drum
+        case 31: return 37;   // sticks        -> side stick
+        case 13: return 36;   // low kick      -> bass drum 1
+        case 14: return 37;   // rim           -> side stick
+        case 15: return 35;   // kick var      -> acoustic bass drum
+        case 82: return 70;   // shaker        -> maracas
+        case 83: return 80;   // jingle bell   -> mute triangle
+        case 84: return 81;   // bell tree     -> open triangle
+        case 85: return 37;   // castanets     -> side stick
+        case 86: return 36;   // mute surdo    -> bass drum (keeps the low pulse)
+        case 87: return 47;   // open surdo    -> low-mid tom
         default: break;
     }
 
-    // 2) Anything else outside 35..81: fold by whole octaves into range. Low hits
-    //    (kicks/toms) land near the kick; high percussion folds down to cymbals.
+    // 2) In GM range already: keep as-is.
     if (note >= 35 && note <= 81)
         return note;
 
+    // 3) Anything still out of range: fold low hits up toward the kick/tom zone;
+    //    map remaining highs to a crash rather than into the SFX/animal slots.
+    if (note > 81)
+        return 49;            // unknown high percussion -> crash cymbal
     int n = note;
-    while (n < 35) n += 12;
-    while (n > 81) n -= 12;
-    return std::clamp(n, 35, 81);
+    while (n < 35) n += 12;   // low hits land in the kick/snare/tom zone (36..46)
+    return std::clamp(n, 35, 50);
 }
 
 DrumNoteRemap drumNoteForPlayback(const Part& part, int note)
@@ -259,11 +271,15 @@ std::optional<int> playbackNoteForPart(const Part& part,
     }
 
     // Register fence (Genos Note Limit): keep the part planted in its window.
-    // Skipped when an explicit Yamaha policy already carried note limits (the
-    // policy path applied them) and for absolute notes (FX/SFX keep their pitch).
-    const bool hasPolicyLimits = part.yamahaPolicy
-        && (part.yamahaPolicy->noteLowLimit || part.yamahaPolicy->noteHighLimit);
-    if (!hasPolicyLimits && note.role != NoteRole::Absolute)
+    // Skipped only when the Yamaha policy carries a *real* note limit (the policy
+    // path already applied it); a trivial 0..127 (which many imported styles set)
+    // is no constraint, so the engine window still applies. Absolute notes (FX)
+    // keep their pitch.
+    const auto& pol = part.yamahaPolicy;
+    const bool hasRealPolicyLimits = pol
+        && ((pol->noteLowLimit  && *pol->noteLowLimit  > 0)
+         || (pol->noteHighLimit && *pol->noteHighLimit < 127));
+    if (!hasRealPolicyLimits && note.role != NoteRole::Absolute)
         played = foldIntoWindow(*played, registerWindowForPart(part));
 
     // Per-part octave placement (e.g. the pad dropped an octave for a fuller body).
