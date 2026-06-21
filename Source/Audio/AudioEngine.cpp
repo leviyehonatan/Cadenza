@@ -238,11 +238,13 @@ void AudioEngine::consumeTransportCommands()
     }
 }
 
-// Cadenza channel -> a MIDI channel 1..16 for the master multitimbral plugin.
+// Cadenza channel -> a 1-based MIDI channel 1..16 for the master multitimbral
+// plugin. Cadenza channels are already the GM-style 1-based channels (drums=10),
+// which is exactly what a multitimbral plugin expects per part — so pass them
+// straight through (NOT the 0-based internal synth channel).
 static int masterMidiChannel(int cadenzaChannel) noexcept
 {
-    const auto sc = cadenza::audio::synthChannelFromCadenzaChannel(cadenzaChannel);
-    return juce::jlimit(1, 16, sc.value_or(cadenzaChannel));
+    return juce::jlimit(1, 16, cadenzaChannel);
 }
 
 void AudioEngine::noteOn(int channel, int note, int velocity)
