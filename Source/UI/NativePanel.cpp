@@ -11,6 +11,7 @@ namespace
 constexpr int kMenuLoadPlugin = 900001;
 constexpr int kMenuUseGm       = 900002;
 constexpr int kMenuEditPlugin  = 900003;
+constexpr int kMenuSetDefault  = 900004;
 
 // Keyboard split point (middle C). Must match MidiRouter's default splitNote so
 // the on-screen tint lines up with where the host actually routes chord notes.
@@ -21,11 +22,13 @@ void showInstrumentMenu(juce::Component* anchor, int channel,
                         std::function<void()> onLoadPlugin,
                         std::function<void()> onClearPlugin,
                         std::function<void()> onOpenEditor,
+                        std::function<void()> onSetDefault,
                         bool hasPlugin)
 {
     juce::PopupMenu menu;
     menu.addItem(kMenuLoadPlugin, "Load VST3 Instrument...");
     menu.addItem(kMenuEditPlugin, "Open Plugin Editor...", hasPlugin);
+    menu.addItem(kMenuSetDefault, "Set as default voice...", hasPlugin);
     menu.addItem(kMenuUseGm, "Use GM SoundFont");
     menu.addSeparator();
     if (channel == 10) {
@@ -47,9 +50,10 @@ void showInstrumentMenu(juce::Component* anchor, int channel,
         }
     }
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(anchor),
-                       [onPick, onLoadPlugin, onClearPlugin, onOpenEditor](int result) {
+                       [onPick, onLoadPlugin, onClearPlugin, onOpenEditor, onSetDefault](int result) {
         if (result == kMenuLoadPlugin) { if (onLoadPlugin)  onLoadPlugin();  return; }
         if (result == kMenuEditPlugin) { if (onOpenEditor)  onOpenEditor();  return; }
+        if (result == kMenuSetDefault) { if (onSetDefault)  onSetDefault();  return; }
         if (result == kMenuUseGm)      { if (onClearPlugin) onClearPlugin(); return; }
         if (result > 0) onPick(result - 1);
     });
@@ -609,6 +613,7 @@ void NativePanel::setMixerChannels(const std::vector<std::pair<int, std::string>
                 [this, ch] { if (m_cb.onLoadInstrumentPlugin)  m_cb.onLoadInstrumentPlugin(ch); },
                 [this, ch] { if (m_cb.onClearInstrumentPlugin) m_cb.onClearInstrumentPlugin(ch); },
                 [this, ch] { if (m_cb.onOpenInstrumentEditor)  m_cb.onOpenInstrumentEditor(ch); },
+                [this, ch] { if (m_cb.onSetDefaultVoice)       m_cb.onSetDefaultVoice(ch); },
                 /*hasPlugin*/ true);
         };
         addAndMakeVisible(*strip.instrument);

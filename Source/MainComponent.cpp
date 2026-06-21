@@ -2200,6 +2200,7 @@ void MainComponent::buildNativePanel()
 
     cb.onLoadInstrumentPlugin = [this](int channel) { choosePartInstrument(channel); };
     cb.onOpenInstrumentEditor = [this](int channel) { m_audio.showPartInstrumentEditor(channel); };
+    cb.onSetDefaultVoice      = [this](int channel) { setDefaultVoice(channel); };
     cb.onClearInstrumentPlugin = [this](int channel) {
         m_audio.clearPartInstrument(channel);   // back to the GM SoundFont
         if (m_panel) {
