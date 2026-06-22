@@ -9,6 +9,8 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include "StylePartEditor.h"
+
 #include <array>
 #include <functional>
 #include <memory>
@@ -164,6 +166,23 @@ public:
         std::function<void()>     onRecClear;                 // clear the target part
         std::function<void()>     onRecSave;                  // save the style (.cstyle)
         std::function<void()>     onRecExit;                  // abandon the session
+        std::function<void()>     onMakeEditable;             // convert loaded Yamaha style -> editable
+        // Style Editor page (embedded piano roll).
+        std::function<void(std::vector<cadenza::arranger::PatternNote>)> onEditorNotesEdited;
+        std::function<void(int, int)> onEditorAudition;       // note, velocity
+        std::function<void()>         onEditorTogglePlay;
+        std::function<void()>         onEditorToggleRecord;
+        std::function<void(std::string)> onEditorPickSection; // section id
+        std::function<void(int)>      onEditorPickPart;       // slot 0..6
+        std::function<void()>         onEditorSave;
+        // Pitch / mod wheels.
+        std::function<void(int)> onPitchBend;     // 14-bit 0..16383, 8192 = centre
+        std::function<void(int)> onModulation;    // 0..127
+        // Left-hand split voice.
+        std::function<void(bool)> onLeftEnabled;
+        std::function<void(int)>  onLeftInstrument;   // GM program 0..127
+        std::function<void(int)>  onLeftVolume;       // 0..127
+        std::function<void(int)>  onLeftOctave;       // delta -1/+1
     };
 
     NativePanel();
@@ -199,6 +218,8 @@ public:
     void setRightVoice(int layer, bool enabled, int program, int volume, int octave);
     // Show a layer's loaded VST3 name (isPlugin=true) or a GM voice name.
     void setRightVoiceName(int layer, const juce::String& name, bool isPlugin);
+    // Init the Left split-voice strip (no callback).
+    void setLeftVoice(bool enabled, int program, int volume, int octave);
     // Mark a registration slot as used (saved) so its button is highlighted.
     void setRegistrationUsed(int slot, bool used);
     // Enable/dim the four OTS buttons to match the loaded style's OTS slots.
@@ -207,8 +228,20 @@ public:
     void setOtsLinkEnabled(bool enabled);
     // Reflect the Style Recorder session state (enables/dims its buttons).
     void setRecorderState(bool sessionActive, bool armed, const juce::String& status);
+    // Enable/dim the "Make Editable" button (shown when a Yamaha style is loaded).
+    void setMakeEditableAvailable(bool available);
     void setRecorderBarCount(int bars);
     void setRecorderPart(int partIndex);
+
+    // Style Editor page (page index 7). Drive the embedded piano-roll editor.
+    static constexpr int kEditorPage = 7;
+    void editorSetPart(const std::vector<cadenza::arranger::PatternNote>& notes,
+                       int sectionTicks, int ticksPerBeat, int beatsPerBar, bool percussion);
+    void editorSetTransport(int tickInSection, bool playing, bool recordArmed);
+    void editorSetSections(const std::vector<std::pair<std::string, std::string>>& idAndLabel);
+    void editorSetActiveSection(const std::string& sectionId);
+    void editorSetActivePart(int slot);
+    void editorSetEnabled(bool enabled, const juce::String& hint = {});
 
     void resized() override;
     void paint(juce::Graphics&) override;
@@ -340,6 +373,13 @@ private:
     std::array<RightVoiceStrip, 3> m_rightVoices;
     std::array<bool, 3> m_rightHasPlugin { false, false, false };
 
+    // Left-hand split voice (same strip shape as a Right voice).
+    juce::Label       m_leftCaption;
+    RightVoiceStrip   m_leftStrip;
+
+    // Pitch-bend + modulation wheels (real controls over the painted wheel zone).
+    juce::Slider m_pitchWheel, m_modWheel;
+
     // Registrations (one-button performance snapshots).
     juce::Label        m_regCaption;
     juce::TextButton   m_regStore { "Store" };   // armed = next slot click saves
@@ -363,6 +403,10 @@ private:
     juce::TextButton m_recClear { "Clear Part" };
     juce::TextButton m_recSave  { "Save..." };
     juce::TextButton m_recExit  { "Exit" };
+    juce::TextButton m_recMakeEditable { "Make Editable" };
+
+    // Style Editor page: embedded piano-roll editor (shown only on kEditorPage).
+    std::unique_ptr<StylePartEditorView> m_editor;
     juce::Label      m_recStatus;
     bool m_recArmed = false;
 

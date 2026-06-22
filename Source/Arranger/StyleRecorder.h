@@ -46,6 +46,15 @@ const RecorderPartInfo& recorderPartInfo(RecorderPart part) noexcept;
 const RecorderPartInfo& recorderPartInfo(int index) noexcept;   // 0..6
 bool isEditableCadenzaStyle(const Style& style) noexcept;
 
+// Convert an imported Yamaha style into an editable native Cadenza style:
+// clears the Yamaha flag and remaps each section's parts onto the recorder's
+// channels (all drum/percussion channels merged onto ch10; melodic parts onto
+// ch11..16 in ascending-channel order; parts beyond the 7 slots are dropped).
+// Names of any dropped parts are appended to `droppedParts` when provided.
+// After this returns, isEditableCadenzaStyle(style) is true and loadSession
+// accepts the style. No-op (safe) if the style is already editable.
+void makeStyleEditable(Style& style, std::vector<std::string>* droppedParts = nullptr);
+
 struct RecorderConfig
 {
     std::string name = "My Style";
@@ -65,6 +74,10 @@ public:
     // Resume editing a native Cadenza style. Yamaha-derived styles remain
     // read-only because their imported multi-section semantics are not recorder-owned.
     bool loadSession(const Style& style, const std::string& sectionName = {});
+    // Switch which section of the loaded multi-section style is being edited.
+    // Returns false if there is no such section. Keeps the current target part and
+    // updates the active bar count to the new section's length.
+    bool setEditSection(const std::string& sectionName);
     void endSession();
     bool sessionActive() const;
     RecorderConfig config() const;

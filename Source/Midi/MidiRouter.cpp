@@ -60,6 +60,7 @@ void MidiRouter::closeInputs()
     m_openIdentifiers.clear();
     m_router.reset();
     m_rightHand.reset();
+    m_leftVoice.reset();
 }
 
 int MidiRouter::refreshInputs()
@@ -154,6 +155,7 @@ void MidiRouter::injectNote(int note, int velocity, bool isOn)
 
     std::optional<arranger::ChordRecognitionResult> currentChord;
     std::vector<LiveMelodyEvent> events;
+    std::optional<LiveMelodyEvent> leftEv;
     std::string chordName;
     bool chordChanged = false;
     {
@@ -166,14 +168,20 @@ void MidiRouter::injectNote(int note, int velocity, bool isOn)
         currentChord = m_router.detectChord();
         const auto target = routed.empty() ? arranger::RouteTarget::Ignored : routed.front().target;
         events = m_rightHand.handleNote(note, velocity, isOn, target == arranger::RouteTarget::MelodySide);
+        if (m_leftEnabled.load() || !isOn)
+            leftEv = m_leftVoice.handleNote(note, velocity, isOn,
+                                            target == arranger::RouteTarget::ChordSide);
 
         chordName = currentChord.has_value() ? currentChord->displayName : std::string{};
         if (chordName != m_lastChordName) { m_lastChordName = chordName; chordChanged = true; }
     }
 
-    if (m_onNote)
+    if (m_onNote) {
         for (const auto& ev : events)
             m_onNote(ev.channel, ev.note, ev.velocity, ev.isOn);
+        if (leftEv)
+            m_onNote(leftEv->channel, leftEv->note, leftEv->velocity, leftEv->isOn);
+    }
     if (chordChanged && m_onChord)
         m_onChord(toCadenzaChord(currentChord), chordName);
 }
@@ -247,6 +255,13 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
         }
     }
 
+    // Pitch-bend + modulation wheels -> forward to the app (manual voice channels).
+    if (msg.isPitchWheel()) {
+        if (m_onPitchBend) m_onPitchBend(msg.getPitchWheelValue());
+    } else if (msg.isController() && msg.getControllerNumber() == 1) {
+        if (m_onModulation) m_onModulation(msg.getControllerValue());
+    }
+
     if (msg.isNoteOnOrOff()) {
         const int channel  = msg.getChannel();
         const int note     = msg.getNoteNumber();
@@ -270,6 +285,7 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
         std::vector<arranger::RoutedMidiMessage> routed;
         arranger::RouteTarget target = arranger::RouteTarget::Ignored;
         std::vector<LiveMelodyEvent> events;
+        std::optional<LiveMelodyEvent> leftEv;
         {
             std::lock_guard<std::mutex> lk(m_publishMutex);
             const auto wrapped = isOn
@@ -286,6 +302,13 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
             //    layer) under the same lock as routing so per-note state stays
             //    consistent. Octave never reaches the chord recogniser.
             events = m_rightHand.handleNote(note, velocity, isOn, target == arranger::RouteTarget::MelodySide);
+
+            // Left split voice: sound below-split (chord-zone) notes on its own
+            // channel. Skip new note-ons while disabled, but always offer note-offs
+            // so disabling it mid-hold never strands a note.
+            if (m_leftEnabled.load() || !isOn)
+                leftEv = m_leftVoice.handleNote(note, velocity, isOn,
+                                                target == arranger::RouteTarget::ChordSide);
         }
 
         switch (target) {
@@ -305,6 +328,10 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
                 + " ch=" + juce::String(ev.channel)
                 + " vel=" + juce::String(ev.velocity));
         }
+
+        // Left split voice output (below-split notes).
+        if (leftEv && m_onNote)
+            m_onNote(leftEv->channel, leftEv->note, leftEv->velocity, leftEv->isOn);
 
         // 3. Fire ChordCallback when the displayed chord changes (m_lastChordName
         //    is shared with injectNote, so guard the compare/update).

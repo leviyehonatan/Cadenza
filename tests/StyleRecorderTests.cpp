@@ -220,6 +220,116 @@ void importedYamahaStyleIsNotRecorderEditable()
            "read-only imported style does not activate recorder controls");
 }
 
+void makeStyleEditableUnlocksYamahaStyle()
+{
+    // A synthetic imported Yamaha style: two drum channels (9 sub + 10 main) and
+    // seven melodic channels (2..8) across two sections. After makeStyleEditable
+    // the drums merge onto ch10, melodic parts map to ch11..16, and the 7th
+    // melodic channel is dropped (only 6 melodic slots exist).
+    auto buildSection = [](const std::string& name) {
+        Section sec;
+        sec.name = name;
+        sec.barCount = 2;
+        auto addPart = [&](const std::string& pn, int ch, bool perc, int pitch) {
+            Part p;
+            p.name = pn;
+            p.midiChannel = ch;
+            p.percussion = perc;
+            p.instrument = pn;
+            PatternNote n;
+            n.tick = 0; n.duration = 240; n.pitch = pitch; n.velocity = 100;
+            n.role = perc ? NoteRole::Absolute : NoteRole::ChordRoot;
+            p.notes.push_back(n);
+            sec.parts.push_back(std::move(p));
+        };
+        addPart("rhythm-sub",  9, true, 36);
+        addPart("rhythm-main", 10, true, 38);
+        addPart("bass",        2, false, 36);
+        addPart("chord1",      3, false, 60);
+        addPart("chord2",      4, false, 64);
+        addPart("pad",         5, false, 67);
+        addPart("phrase1",     6, false, 72);
+        addPart("phrase2",     7, false, 74);
+        addPart("extra",       8, false, 76);   // 7th melodic source -> dropped
+        return sec;
+    };
+
+    Style imported;
+    imported.schema = "cadenza.style.v1";
+    imported.yamahaFormat = YamahaStyleFormat::SFF2;
+    imported.name = "Yamaha Test";
+    imported.sections.push_back(buildSection("mainA"));
+    imported.sections.push_back(buildSection("mainB"));
+
+    expect(!isEditableCadenzaStyle(imported), "starts read-only (Yamaha-flagged)");
+
+    std::vector<std::string> dropped;
+    makeStyleEditable(imported, &dropped);
+
+    expect(isEditableCadenzaStyle(imported), "becomes recorder-editable after convert");
+    expect(imported.yamahaFormat == YamahaStyleFormat::Unknown, "Yamaha flag is cleared");
+    expect(dropped.size() == 1, "one extra melodic part dropped (7 melodic, 6 slots)");
+
+    for (const auto& sec : imported.sections) {
+        expect(sec.parts.size() == 7, "section normalized to 7 parts (drums + 6 melodic)");
+        const Part* drums = nullptr;
+        bool channelsOk = true;
+        for (const auto& p : sec.parts) {
+            if (p.midiChannel < 10 || p.midiChannel > 16) channelsOk = false;
+            if (p.midiChannel == 10) drums = &p;
+        }
+        expect(channelsOk, "all parts mapped onto channels 10..16");
+        expect(drums != nullptr && drums->percussion, "drums land on ch10, percussive");
+        expect(drums != nullptr && drums->notes.size() == 2,
+               "the two drum channels merge into one part");
+    }
+
+    StyleRecorder rec;
+    expect(rec.loadSession(imported, "mainA") && rec.sessionActive(),
+           "converted style opens an editable recorder session");
+
+    const std::string path = "test-made-editable.cstyle";
+    expect(rec.save(path), "converted style saves as .cstyle");
+    const auto loaded = loadStyleFromFile(path);
+    expect(loaded.ok && isEditableCadenzaStyle(loaded.style)
+               && loaded.style.sections.size() == 2,
+           "saved converted style reloads as editable, both sections intact");
+    std::remove(path.c_str());
+}
+
+void setEditSectionSwitchesSectionAndBars()
+{
+    // Two sections with different bar counts and a distinguishing bass note each.
+    auto makeSec = [](const std::string& name, int bars, int bassTick) {
+        Section s; s.name = name; s.barCount = bars;
+        Part bass; bass.name = "bass"; bass.midiChannel = 11; bass.percussion = false;
+        bass.notes.push_back(PatternNote{ bassTick, 240, 36, 100, NoteRole::ChordRoot, 0 });
+        s.parts.push_back(std::move(bass));
+        return s;
+    };
+
+    Style style;
+    style.schema = "cadenza.style.v1";
+    style.name = "Switcher";
+    style.sections.push_back(makeSec("mainA", 2, 0));
+    style.sections.push_back(makeSec("mainB", 4, 960));
+
+    StyleRecorder rec;
+    expect(rec.loadSession(style, "mainA"), "loads editable multi-section style");
+    rec.setTargetPart(RecorderPart::Bass);
+    expect(rec.config().bars == 2, "mainA is 2 bars");
+    expect(rec.targetPartNotes().size() == 1 && rec.targetPartNotes()[0].tick == 0,
+           "mainA bass note sits at tick 0");
+
+    expect(rec.setEditSection("mainB"), "switches to mainB");
+    expect(rec.config().bars == 4, "mainB bar count is applied");
+    expect(rec.sectionLengthTicks() == 4 * 3840, "section length follows the new bar count");
+    expect(rec.targetPartNotes().size() == 1 && rec.targetPartNotes()[0].tick == 960,
+           "now editing mainB's own content (note at tick 960)");
+
+    expect(!rec.setEditSection("does-not-exist"), "unknown section is rejected");
+}
+
 void barLengthChangesResizeSectionAndNotes()
 {
     StyleRecorder recorder;
@@ -428,6 +538,8 @@ int main()
     savedStyleRoundTrips();
     savedCadenzaStyleReloadsAsEditableSession();
     importedYamahaStyleIsNotRecorderEditable();
+    makeStyleEditableUnlocksYamahaStyle();
+    setEditSectionSwitchesSectionAndBars();
     barLengthChangesResizeSectionAndNotes();
     changedBarLengthSurvivesSaveReload();
     replacePartNotesRebakesRoles();

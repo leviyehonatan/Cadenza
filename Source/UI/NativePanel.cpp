@@ -204,8 +204,8 @@ NativePanel::NativePanel()
         m_regMemButtons.push_back(std::move(b));
     }
 
-    const char* navNames[] = { "Home", "Song", "Style", "Sound", "Mixer", "Effect", "Setting" };
-    for (int i = 0; i < 7; ++i) {
+    const char* navNames[] = { "Home", "Song", "Style", "Sound", "Mixer", "Effect", "Setting", "Editor" };
+    for (int i = 0; i < 8; ++i) {
         auto b = std::make_unique<juce::TextButton>(navNames[i]);
         b->setToggleState(i == 0, juce::dontSendNotification);
         b->onClick = [this, i] {
@@ -382,7 +382,7 @@ NativePanel::NativePanel()
     eqLabel(m_reverbCap, "Reverb");
 
     // --- Right 1/2/3 layered right-hand voices ---
-    styleCaption(m_rightCaption, "Right Voices");
+    styleCaption(m_rightCaption, "Voices (Left + Right 1-3)");
     addAndMakeVisible(m_rightCaption);
     for (int i = 0; i < 3; ++i) {
         auto& s = m_rightVoices[static_cast<std::size_t>(i)];
@@ -430,6 +430,84 @@ NativePanel::NativePanel()
         s.octUp->onClick = [this, layer] { if (m_cb.onRightOctave) m_cb.onRightOctave(layer, +1); };
         addAndMakeVisible(*s.octUp);
     }
+
+    // --- Left split voice: sounds the keys BELOW the split point ---
+    {
+        auto& s = m_leftStrip;
+        s.enable = std::make_unique<juce::ToggleButton>("Left");
+        s.enable->setColour(juce::ToggleButton::textColourId, CadenzaLookAndFeel::textDim());
+        s.enable->setTooltip("Play an instrument with your left hand (keys below the split point)");
+        s.enable->onClick = [this] {
+            if (m_cb.onLeftEnabled) m_cb.onLeftEnabled(m_leftStrip.enable->getToggleState());
+        };
+        addAndMakeVisible(*s.enable);
+
+        s.instrument = std::make_unique<juce::TextButton>("Fingered Bass");
+        s.instrument->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff333a47));
+        s.instrument->onClick = [this] {
+            juce::PopupMenu menu;
+            for (int fam = 0; fam < 16; ++fam) {
+                juce::PopupMenu sub;
+                for (int i = 0; i < 8; ++i) {
+                    const int prog = fam * 8 + i;
+                    sub.addItem(prog + 1, juce::String(prog) + "  " + cadenza::midi::gmInstrumentName(prog));
+                }
+                menu.addSubMenu(cadenza::midi::gmFamilyName(fam), sub);
+            }
+            menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(m_leftStrip.instrument.get()),
+                [this](int result) {
+                    if (result > 0 && m_cb.onLeftInstrument) m_cb.onLeftInstrument(result - 1);
+                });
+        };
+        addAndMakeVisible(*s.instrument);
+
+        s.volume = std::make_unique<juce::Slider>(juce::Slider::LinearHorizontal, juce::Slider::NoTextBox);
+        s.volume->setRange(0.0, 127.0, 1.0);
+        s.volume->setValue(100.0, juce::dontSendNotification);
+        s.volume->onValueChange = [this] {
+            if (m_cb.onLeftVolume) m_cb.onLeftVolume(static_cast<int>(m_leftStrip.volume->getValue()));
+        };
+        addAndMakeVisible(*s.volume);
+
+        s.octDown = std::make_unique<juce::TextButton>("-");
+        s.octDown->onClick = [this] { if (m_cb.onLeftOctave) m_cb.onLeftOctave(-1); };
+        addAndMakeVisible(*s.octDown);
+
+        s.octVal = std::make_unique<juce::Label>();
+        s.octVal->setText("0", juce::dontSendNotification);
+        s.octVal->setJustificationType(juce::Justification::centred);
+        s.octVal->setColour(juce::Label::textColourId, CadenzaLookAndFeel::textDim());
+        addAndMakeVisible(*s.octVal);
+
+        s.octUp = std::make_unique<juce::TextButton>("+");
+        s.octUp->onClick = [this] { if (m_cb.onLeftOctave) m_cb.onLeftOctave(+1); };
+        addAndMakeVisible(*s.octUp);
+    }
+
+    // --- Pitch / Mod wheels (real controls over the painted wheel zone) ---
+    m_pitchWheel.setSliderStyle(juce::Slider::LinearVertical);
+    m_pitchWheel.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    m_pitchWheel.setRange(0.0, 16383.0, 1.0);
+    m_pitchWheel.setValue(8192.0, juce::dontSendNotification);
+    m_pitchWheel.setDoubleClickReturnValue(true, 8192.0);
+    m_pitchWheel.setTooltip("Pitch bend (springs back to centre)");
+    m_pitchWheel.onValueChange = [this] {
+        if (m_cb.onPitchBend) m_cb.onPitchBend(static_cast<int>(m_pitchWheel.getValue()));
+    };
+    m_pitchWheel.onDragEnd = [this] {
+        m_pitchWheel.setValue(8192.0, juce::sendNotificationSync);   // spring back to centre
+    };
+    addAndMakeVisible(m_pitchWheel);
+
+    m_modWheel.setSliderStyle(juce::Slider::LinearVertical);
+    m_modWheel.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    m_modWheel.setRange(0.0, 127.0, 1.0);
+    m_modWheel.setValue(0.0, juce::dontSendNotification);
+    m_modWheel.setTooltip("Modulation (CC1)");
+    m_modWheel.onValueChange = [this] {
+        if (m_cb.onModulation) m_cb.onModulation(static_cast<int>(m_modWheel.getValue()));
+    };
+    addAndMakeVisible(m_modWheel);
 
     // --- Registrations (one-button performance snapshots) ---
     styleCaption(m_regCaption, "Registrations");
@@ -534,10 +612,42 @@ NativePanel::NativePanel()
     m_recExit.onClick = [this] { if (m_cb.onRecExit) m_cb.onRecExit(); };
     addAndMakeVisible(m_recExit);
 
+    m_recMakeEditable.setTooltip("Turn the loaded Yamaha style into an editable copy "
+                                 "you can change in the piano roll and save as .cstyle");
+    m_recMakeEditable.onClick = [this] { if (m_cb.onMakeEditable) m_cb.onMakeEditable(); };
+    addAndMakeVisible(m_recMakeEditable);
+
     m_recStatus.setColour(juce::Label::textColourId, CadenzaLookAndFeel::textDim());
     m_recStatus.setFont(juce::Font(juce::FontOptions(12.0f)));
     addAndMakeVisible(m_recStatus);
     setRecorderState(false, false, "Press New to record your own style");
+    setMakeEditableAvailable(false);
+
+    // --- Style Editor page: embedded piano-roll editor (hidden until page 7) ---
+    {
+        StylePartEditorView::Callbacks ecb;
+        ecb.onNotesEdited = [this](std::vector<cadenza::arranger::PatternNote> notes) {
+            if (m_cb.onEditorNotesEdited) m_cb.onEditorNotesEdited(std::move(notes));
+        };
+        ecb.onAudition = [this](int note, int vel) {
+            if (m_cb.onEditorAudition) m_cb.onEditorAudition(note, vel);
+        };
+        ecb.onTogglePlayback = [this] { if (m_cb.onEditorTogglePlay) m_cb.onEditorTogglePlay(); };
+        ecb.onToggleRecord   = [this] { if (m_cb.onEditorToggleRecord) m_cb.onEditorToggleRecord(); };
+        ecb.onPickSection = [this](std::string id) {
+            if (m_cb.onEditorPickSection) m_cb.onEditorPickSection(std::move(id));
+        };
+        ecb.onPickPart = [this](int slot) {
+            if (m_cb.onEditorPickPart) m_cb.onEditorPickPart(slot);
+        };
+        ecb.onSave = [this] { if (m_cb.onEditorSave) m_cb.onEditorSave(); };
+
+        m_editor = std::make_unique<StylePartEditorView>(std::move(ecb));
+        m_editor->setStyleControlsVisible(true);
+        m_editor->setEditorEnabled(false,
+            "Open a style - for Yamaha press Make Editable - then edit it here.");
+        addChildComponent(*m_editor);
+    }
 
     // --- wire control callbacks (message thread) ---
     m_play.onClick          = [this] { if (m_cb.togglePlay)    m_cb.togglePlay(); };
@@ -730,7 +840,7 @@ void NativePanel::setPlaying(bool playing)
 
 void NativePanel::setActivePage(int page)
 {
-    m_navActive = juce::jlimit(0, 6, page);
+    m_navActive = juce::jlimit(0, 7, page);
     for (std::size_t k = 0; k < m_navButtons.size(); ++k)
         m_navButtons[k]->setToggleState(static_cast<int>(k) == m_navActive, juce::dontSendNotification);
     resized();
@@ -764,6 +874,43 @@ void NativePanel::setRecorderState(bool sessionActive, bool armed, const juce::S
     m_recPart.setEnabled(sessionActive && !armed);
     m_recBars.setEnabled(!armed);
     m_recStatus.setText(status, juce::dontSendNotification);
+}
+
+void NativePanel::setMakeEditableAvailable(bool available)
+{
+    m_recMakeEditable.setEnabled(available);
+}
+
+void NativePanel::editorSetPart(const std::vector<cadenza::arranger::PatternNote>& notes,
+                                int sectionTicks, int ticksPerBeat, int beatsPerBar, bool percussion)
+{
+    if (m_editor) m_editor->setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, percussion);
+}
+
+void NativePanel::editorSetTransport(int tickInSection, bool playing, bool recordArmed)
+{
+    if (m_editor) m_editor->setTransportState(tickInSection, playing, recordArmed);
+}
+
+void NativePanel::editorSetSections(
+    const std::vector<std::pair<std::string, std::string>>& idAndLabel)
+{
+    if (m_editor) m_editor->setSections(idAndLabel);
+}
+
+void NativePanel::editorSetActiveSection(const std::string& sectionId)
+{
+    if (m_editor) m_editor->setActiveSection(sectionId);
+}
+
+void NativePanel::editorSetActivePart(int slot)
+{
+    if (m_editor) m_editor->setActivePart(slot);
+}
+
+void NativePanel::editorSetEnabled(bool enabled, const juce::String& hint)
+{
+    if (m_editor) m_editor->setEditorEnabled(enabled, hint);
 }
 
 void NativePanel::setRecorderBarCount(int bars)
@@ -826,6 +973,15 @@ void NativePanel::setRightVoiceName(int layer, const juce::String& name, bool is
     m_rightHasPlugin[static_cast<std::size_t>(layer)] = isPlugin;
     if (auto& b = m_rightVoices[static_cast<std::size_t>(layer)].instrument)
         b->setButtonText(name);
+}
+
+void NativePanel::setLeftVoice(bool enabled, int program, int volume, int octave)
+{
+    auto& s = m_leftStrip;
+    if (s.enable)     s.enable->setToggleState(enabled, juce::dontSendNotification);
+    if (s.volume)     s.volume->setValue(volume, juce::dontSendNotification);
+    if (s.octVal)     s.octVal->setText(juce::String(octave), juce::dontSendNotification);
+    if (s.instrument) s.instrument->setButtonText(juce::String(cadenza::midi::gmInstrumentName(program)));
 }
 
 void NativePanel::setRegistrationUsed(int slot, bool used)
@@ -1002,30 +1158,10 @@ void NativePanel::paint(juce::Graphics& g)
         cap(m_exitCap,   "EXIT");   cap(m_menuCap, "MENU");   cap(m_xfaderCap, "X-FADER");
     }
 
-    // Pitch-bend + modulation wheels at the keyboard's left.
+    // Pitch-bend + modulation wheel labels (the real sliders render above them).
     if (! m_wheelsZone.isEmpty())
     {
-        auto wz = m_wheelsZone.reduced(10, 10);
         const int labelH = 12;
-        auto wheels = wz; wheels.removeFromBottom(labelH);
-        auto w1 = wheels.removeFromLeft(wheels.getWidth() / 2 - 3);
-        wheels.removeFromLeft(6);
-        auto w2 = wheels;
-
-        auto drawWheel = [&g](juce::Rectangle<float> r) {
-            g.setColour(juce::Colour(0xff0a0b0e));
-            g.fillRoundedRectangle(r, 5.0f);
-            g.setColour(juce::Colours::black.withAlpha(0.6f));
-            g.drawRoundedRectangle(r, 5.0f, 1.0f);
-            for (float y = r.getY() + 4.0f; y < r.getBottom() - 3.0f; y += 4.0f) {
-                const float d = (y > r.getCentreY()) ? (y - r.getCentreY()) : (r.getCentreY() - y);
-                g.setColour(juce::Colours::white.withAlpha(juce::jmax(0.02f, 0.16f - d * 0.006f)));
-                g.drawLine(r.getX() + 2.0f, y, r.getRight() - 2.0f, y, 1.0f);
-            }
-        };
-        drawWheel(w1.toFloat());
-        drawWheel(w2.toFloat());
-
         g.setColour(CadenzaLookAndFeel::textDim());
         g.setFont(juce::Font(juce::FontOptions(7.0f, juce::Font::bold)));
         auto lab = juce::Rectangle<int>(m_wheelsZone.getX(), m_wheelsZone.getBottom() - labelH,
@@ -1095,6 +1231,14 @@ void NativePanel::resized()
     if (m_keyboard) {
         auto kbRow = full.removeFromBottom(126);
         m_wheelsZone = kbRow.removeFromLeft(96);
+        {
+            auto wz = m_wheelsZone.reduced(10, 10);
+            wz.removeFromBottom(12);   // room for the PITCH / MOD labels
+            auto w1 = wz.removeFromLeft(wz.getWidth() / 2 - 3);
+            wz.removeFromLeft(6);
+            m_pitchWheel.setBounds(w1);
+            m_modWheel.setBounds(wz);
+        }
         auto kb = kbRow.reduced(0, 4);
         auto bar = kb.removeFromTop(16);
         if (m_splitBar) m_splitBar->setBounds(bar);
@@ -1253,7 +1397,7 @@ void NativePanel::resized()
 
     auto area = full;   // content area, right of the nav rail
 
-    // Nav paging: nav order = Home, Song, Style, Sound, Mixer, Effect, Setting.
+    // Nav paging: nav order = Home, Song, Style, Sound, Mixer, Effect, Setting, Editor.
     // The upper card band is always shown; full-width groups switch per page.
     const int page = m_navActive;
     auto onPage = [page](std::initializer_list<int> ps) {
@@ -1269,7 +1413,19 @@ void NativePanel::resized()
     const bool showEQ       = onPage({ 3, 5 });      // Sound, Effect
     const bool showMixer    = onPage({ 0, 4 });      // Home, Mixer
     const bool showSettings = onPage({ 6 });         // Setting (file/device actions)
+    const bool showEditor   = onPage({ kEditorPage });   // Editor (full-area piano roll)
     setVis(showSettings, { &m_fade, &m_openStyle, &m_openSf, &m_openAudio, &m_openMidi, &m_openAnalyze });
+
+    // On the Editor page the embedded piano roll owns the whole content area, so the
+    // always-on upper band (chord LCD, transpose, registrations, OTS, pads) is hidden.
+    setVis(!showEditor, { &m_styleName, &m_chord,
+        &m_transposeCaption, &m_transposeDown, &m_transposeVal, &m_transposeUp,
+        &m_octaveCaption, &m_octaveDown, &m_octaveVal, &m_octaveUp,
+        &m_arranger, &m_chordMemory, &m_syncroStop, &m_autoFill, &m_fingeredOnBass,
+        &m_regCaption, &m_regStore, &m_otsCaption, &m_otsLink, &m_padsCaption });
+    for (auto& b : m_regButtons) if (b) b->setVisible(!showEditor);
+    for (auto& b : m_otsButtons) if (b) b->setVisible(!showEditor);
+    for (auto& p : m_pads)       if (p) p->setVisible(!showEditor);
 
     // Mixer band above the keyboard (inside the content area).
     if (showMixer) {
@@ -1296,7 +1452,7 @@ void NativePanel::resized()
         setVis(showMixer, { s.name.get(), s.instrument.get(), s.volume.get(), s.mute.get(), s.solo.get() });
 
     // Two-column upper band: a performance card (left) and a memory card (right).
-    {
+    if (!showEditor) {
         auto band = area.removeFromTop(222);
         auto bandL = band.removeFromLeft((band.getWidth() - gap) * 56 / 100);
         band.removeFromLeft(gap);
@@ -1362,8 +1518,8 @@ void NativePanel::resized()
                 for (auto& p : m_pads) { p->setBounds(r.removeFromLeft(pw)); r.removeFromLeft(6); }
             }
         }
+        area.removeFromTop(gap);
     }
-    area.removeFromTop(gap);
 
     // Setting page: file / device actions as a row (keeps the top bar clean).
     if (showSettings) {
@@ -1407,7 +1563,9 @@ void NativePanel::resized()
     // Right Voices row: three layer columns (enable + instrument / volume + octave).
     {
         auto& v0 = m_rightVoices[0]; auto& v1 = m_rightVoices[1]; auto& v2 = m_rightVoices[2];
+        auto& vL = m_leftStrip;
         setVis(showVoices, { &m_rightCaption,
+            vL.enable.get(), vL.instrument.get(), vL.volume.get(), vL.octDown.get(), vL.octUp.get(), vL.octVal.get(),
             v0.enable.get(), v0.instrument.get(), v0.volume.get(), v0.octDown.get(), v0.octUp.get(), v0.octVal.get(),
             v1.enable.get(), v1.instrument.get(), v1.volume.get(), v1.octDown.get(), v1.octUp.get(), v1.octVal.get(),
             v2.enable.get(), v2.instrument.get(), v2.volume.get(), v2.octDown.get(), v2.octUp.get(), v2.octVal.get() });
@@ -1417,21 +1575,23 @@ void NativePanel::resized()
         m_rightCaption.setBounds(area.removeFromTop(18));
         auto r = area.removeFromTop(50);
         const int colGap = 10;
-        const int colW = (r.getWidth() - 2 * colGap) / 3;
-        for (int i = 0; i < 3; ++i) {
-            auto& s = m_rightVoices[static_cast<std::size_t>(i)];
+        // Four columns: Left, Right 1, Right 2, Right 3.
+        RightVoiceStrip* strips[4] = { &m_leftStrip, &m_rightVoices[0], &m_rightVoices[1], &m_rightVoices[2] };
+        const int colW = (r.getWidth() - 3 * colGap) / 4;
+        for (int i = 0; i < 4; ++i) {
+            auto& s = *strips[i];
             auto col = r.removeFromLeft(colW);
-            if (i < 2) r.removeFromLeft(colGap);
+            if (i < 3) r.removeFromLeft(colGap);
 
             auto top = col.removeFromTop(24);
-            if (s.enable)     s.enable->setBounds(top.removeFromLeft(88));
+            if (s.enable)     s.enable->setBounds(top.removeFromLeft(74));
             if (s.instrument) s.instrument->setBounds(top.reduced(2, 1));
 
             auto bot = col;
-            auto oct = bot.removeFromRight(94);
-            if (s.octDown) s.octDown->setBounds(oct.removeFromLeft(26));
-            if (s.octVal)  s.octVal->setBounds(oct.removeFromLeft(40));
-            if (s.octUp)   s.octUp->setBounds(oct.removeFromLeft(26));
+            auto oct = bot.removeFromRight(84);
+            if (s.octDown) s.octDown->setBounds(oct.removeFromLeft(24));
+            if (s.octVal)  s.octVal->setBounds(oct.removeFromLeft(36));
+            if (s.octUp)   s.octUp->setBounds(oct.removeFromLeft(24));
             if (s.volume)  s.volume->setBounds(bot.reduced(2, 4));
         }
         cardHere(area, y0);
@@ -1440,10 +1600,13 @@ void NativePanel::resized()
 
     // Style Recorder row: bars + part pickers, transport-style buttons, status.
     setVis(showRec, { &m_recCaption, &m_recNew, &m_recBars, &m_recPart, &m_recArm, &m_recClick,
-                      &m_recEdit, &m_recClear, &m_recSave, &m_recExit, &m_recStatus });
+                      &m_recEdit, &m_recClear, &m_recSave, &m_recExit, &m_recStatus,
+                      &m_recMakeEditable });
     if (showRec) {
         const int y0 = area.getY();
-        m_recCaption.setBounds(area.removeFromTop(18));
+        auto capRow = area.removeFromTop(20);
+        m_recMakeEditable.setBounds(capRow.removeFromRight(120));
+        m_recCaption.setBounds(capRow);
         auto r = area.removeFromTop(28);
         m_recNew.setBounds(r.removeFromLeft(54));    r.removeFromLeft(6);
         m_recBars.setBounds(r.removeFromLeft(76));   r.removeFromLeft(6);
@@ -1484,6 +1647,14 @@ void NativePanel::resized()
             s.button->setBounds(x, y, bw, bh);
             x += bw + bgap;
         }
+    }
+
+    // Editor page: the embedded piano-roll editor fills the whole content area
+    // (nothing else above consumed it on this page).
+    if (m_editor) {
+        m_editor->setVisible(showEditor);
+        if (showEditor)
+            m_editor->setBounds(area);
     }
 }
 }

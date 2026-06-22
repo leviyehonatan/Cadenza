@@ -205,6 +205,9 @@ MainComponent::MainComponent()
                        + juce::String(note) + ");";
         pushToWeb(js);
     });
+    // Hardware pitch-bend / mod wheels -> the manual voice channels (Right + Left).
+    m_midi.setPitchBendCallback([this](int v14) { sendPitchBendToManual(v14); });
+    m_midi.setModulationCallback([this](int v)  { sendModToManual(v); });
     m_midi.setChordCallback([this](const std::optional<cadenza::midi::Chord>& chord,
                                    const std::string& chordName) {
         // 1) Push display name to the web UI (empty string when no chord held).
@@ -1837,6 +1840,48 @@ void MainComponent::recorderArm(bool on)
     }
 }
 
+void MainComponent::makeLoadedStyleEditable()
+{
+    auto current = m_styleEngine.currentStyle();
+    if (!current || current->yamahaFormat == cadenza::arranger::YamahaStyleFormat::Unknown)
+        return;   // nothing loaded, or already an editable native style
+
+    cadenza::arranger::Style editable = *current;   // edit a copy; the .sty is untouched
+    std::vector<std::string> dropped;
+    cadenza::arranger::makeStyleEditable(editable, &dropped);
+
+    const auto section = bestStartSection(editable);
+    if (!m_recorder.loadSession(editable, section)) {
+        juce::Logger::writeToLog("[Cadenza] Make Editable failed: style not acceptable");
+        return;
+    }
+    m_recordArmed.store(false);
+
+    recorderRefreshStyle();   // push the editable style to the engine + refresh the panel
+    if (!section.empty()) {
+        m_styleEngine.setSection(section);
+        if (section.rfind("main", 0) == 0)
+            m_currentMain = section;
+    }
+    recorderReloadEditor();
+
+    juce::String status = "Editable - edit parts in the piano roll, then Save as .cstyle";
+    if (!dropped.empty()) {
+        juce::String list;
+        for (const auto& d : dropped) { if (list.isNotEmpty()) list += ", "; list += juce::String(d); }
+        juce::Logger::writeToLog("[Cadenza] Make Editable dropped " + juce::String((int) dropped.size())
+                                 + " extra part(s): " + list);
+        status = "Editable (dropped " + juce::String((int) dropped.size())
+               + " extra part(s)) - Save as .cstyle";
+    }
+    if (m_panel) {
+        m_panel->setRecorderState(true, false, status);
+        m_panel->setMakeEditableAvailable(false);
+    }
+    juce::Logger::writeToLog("[Cadenza] Make Editable: \"" + juce::String(editable.name)
+                             + "\" is now editable (section " + juce::String(section) + ")");
+}
+
 void MainComponent::recorderRefreshStyle()
 {
     if (!m_recorder.sessionActive()) return;
@@ -1966,21 +2011,65 @@ void MainComponent::recorderOpenEditor()
 
 void MainComponent::recorderReloadEditor()
 {
-    if (!m_partEditor || !m_recorder.sessionActive()) return;
-    const auto& info = cadenza::arranger::recorderPartInfo(m_recorder.targetPart());
+    // Legacy pop-up window (still works if it happens to be open).
+    if (m_partEditor && m_recorder.sessionActive()) {
+        const auto& info = cadenza::arranger::recorderPartInfo(m_recorder.targetPart());
+        const auto cfg = m_recorder.config();
+        m_partEditor->setPart(info.label,
+                              m_recorder.targetPartNotes(),
+                              m_recorder.sectionLengthTicks(),
+                              cfg.ticksPerBeat,
+                              cfg.beatsPerBar,
+                              info.percussion);
+        const int len = m_recorder.sectionLengthTicks();
+        const bool playing = m_audio.transport().playing();
+        const int tick = (playing && len > 0)
+            ? m_audio.transport().positionTickInt() % len
+            : 0;
+        m_partEditor->setTransportState(tick, playing, m_recordArmed.load());
+    }
+
+    // Embedded Editor page (primary home).
+    refreshStyleEditorPage();
+}
+
+void MainComponent::refreshStyleEditorPage()
+{
+    if (!m_panel) return;
+
+    if (!m_recorder.sessionActive()) {
+        m_panel->editorSetEnabled(false,
+            "Open a style - for Yamaha press Make Editable - then edit it here.");
+        return;
+    }
+    m_panel->editorSetEnabled(true);
+
+    auto style = m_recorder.snapshotStyle();
+    std::vector<std::pair<std::string, std::string>> pairs;
+    if (style)
+        for (const auto& b : cadenza::arranger::sectionButtonsForStyle(*style))
+            pairs.emplace_back(b.sectionId, b.label);
+    m_panel->editorSetSections(pairs);
+
     const auto cfg = m_recorder.config();
-    m_partEditor->setPart(info.label,
-                          m_recorder.targetPartNotes(),
-                          m_recorder.sectionLengthTicks(),
-                          cfg.ticksPerBeat,
-                          cfg.beatsPerBar,
-                          info.percussion);
+    m_panel->editorSetActiveSection(cfg.section);
+
+    int slot = 0;
+    for (int i = 0; i < cadenza::arranger::kNumRecorderParts; ++i)
+        if (cadenza::arranger::recorderPartInfo(i).part == m_recorder.targetPart()) { slot = i; break; }
+    m_panel->editorSetActivePart(slot);
+
+    const auto& info = cadenza::arranger::recorderPartInfo(m_recorder.targetPart());
+    m_panel->editorSetPart(m_recorder.targetPartNotes(),
+                           m_recorder.sectionLengthTicks(),
+                           cfg.ticksPerBeat, cfg.beatsPerBar, info.percussion);
+
     const int len = m_recorder.sectionLengthTicks();
     const bool playing = m_audio.transport().playing();
     const int tick = (playing && len > 0)
         ? m_audio.transport().positionTickInt() % len
         : 0;
-    m_partEditor->setTransportState(tick, playing, m_recordArmed.load());
+    m_panel->editorSetTransport(tick, playing, m_recordArmed.load());
 }
 
 void MainComponent::recorderPrepareTargetChannel()
@@ -2132,14 +2221,18 @@ void MainComponent::timerCallback()
     // Section one-shot returns / ending stops are now handled sample-tight in the
     // StyleEngine (audio thread) via its section-changed / stop callbacks.
 
-    // Piano-roll editor: sweep the playback marker across the looping section.
-    if (m_partEditor && m_recorder.sessionActive()) {
+    // Piano-roll editor: sweep the playback marker across the looping section
+    // (both the legacy pop-up and the embedded Editor page).
+    if (m_recorder.sessionActive()) {
         const int len = m_recorder.sectionLengthTicks();
         const bool playing = m_audio.transport().playing();
         const int tick = (playing && len > 0)
             ? m_audio.transport().positionTickInt() % len
             : 0;
-        m_partEditor->setTransportState(tick, playing, m_recordArmed.load());
+        if (m_partEditor)
+            m_partEditor->setTransportState(tick, playing, m_recordArmed.load());
+        if (m_panel)
+            m_panel->editorSetTransport(tick, playing, m_recordArmed.load());
     }
 
     // A fade-out that reached silence stopped the transport on the audio thread;
@@ -2260,6 +2353,32 @@ void MainComponent::applyRightHand()
             + " oct=" + juce::String(layer.octave)
             + " ch=" + juce::String(channel));
     }
+}
+
+void MainComponent::applyLeftVoice()
+{
+    m_midi.setLeftEnabled(m_leftEnabled);
+    m_midi.setLeftOctave(m_leftOctave);
+    const int ch = m_midi.leftChannel();
+    m_audio.clearPartInstrument(ch);                 // GM SoundFont voice
+    m_audio.controlChange(ch, 0, 0);                 // bank MSB 0 (GM)
+    m_audio.controlChange(ch, 32, 0);                // bank LSB 0
+    m_audio.programChange(ch, m_leftProgram);
+    m_audio.controlChange(ch, 7 /*volume*/, m_leftVolume);
+}
+
+void MainComponent::sendPitchBendToManual(int value14)
+{
+    for (int i = 0; i < cadenza::midi::MidiRouter::kNumRightLayers; ++i)
+        m_audio.pitchBend(m_midi.rightLayerChannel(i), value14);
+    m_audio.pitchBend(m_midi.leftChannel(), value14);
+}
+
+void MainComponent::sendModToManual(int value)
+{
+    for (int i = 0; i < cadenza::midi::MidiRouter::kNumRightLayers; ++i)
+        m_audio.controlChange(m_midi.rightLayerChannel(i), 1 /*mod*/, value);
+    m_audio.controlChange(m_midi.leftChannel(), 1 /*mod*/, value);
 }
 
 void MainComponent::buildNativePanel()
@@ -2427,6 +2546,29 @@ void MainComponent::buildNativePanel()
         saveSettings();
     };
 
+    // --- Left split voice + pitch/mod wheels ---
+    cb.onLeftEnabled = [this](bool on) {
+        m_leftEnabled = on;
+        applyLeftVoice();
+        if (!on) m_audio.allNotesOff();   // release anything the left voice was holding
+    };
+    cb.onLeftInstrument = [this](int program) {
+        m_leftProgram = program;
+        applyLeftVoice();
+        if (m_panel) m_panel->setLeftVoice(m_leftEnabled, m_leftProgram, m_leftVolume, m_leftOctave);
+    };
+    cb.onLeftVolume = [this](int volume) {
+        m_leftVolume = volume;
+        applyLeftVoice();
+    };
+    cb.onLeftOctave = [this](int delta) {
+        m_leftOctave = juce::jlimit(-2, 2, m_leftOctave + delta);
+        m_midi.setLeftOctave(m_leftOctave);
+        if (m_panel) m_panel->setLeftVoice(m_leftEnabled, m_leftProgram, m_leftVolume, m_leftOctave);
+    };
+    cb.onPitchBend  = [this](int v14) { sendPitchBendToManual(v14); };
+    cb.onModulation = [this](int v)   { sendModToManual(v); };
+
     cb.onStoreRegistration  = [this](int slot) { captureRegistration(slot); };
     cb.onRecallRegistration = [this](int slot) { recallRegistration(slot); };
 
@@ -2438,10 +2580,42 @@ void MainComponent::buildNativePanel()
         if (m_recorder.sessionActive()) m_audio.setMetronomeEnabled(on);
     };
     cb.onRecArm   = [this](bool on)  { recorderArm(on); };
-    cb.onRecEdit  = [this] { recorderOpenEditor(); };
+    cb.onRecEdit  = [this] {
+        recorderReloadEditor();   // make sure the page reflects the current part/section
+        if (m_panel) m_panel->setActivePage(cadenza::ui::NativePanel::kEditorPage);
+    };
     cb.onRecClear = [this] { recorderClearPart(); };
     cb.onRecSave  = [this] { recorderSave(); };
     cb.onRecExit  = [this] { recorderExit(); };
+    cb.onMakeEditable = [this] { makeLoadedStyleEditable(); };
+
+    // --- Style Editor page ---
+    cb.onEditorNotesEdited = [this](std::vector<cadenza::arranger::PatternNote> notes) {
+        m_recorder.replacePartNotes(std::move(notes));
+        recorderRefreshStyle();   // hear the edit immediately while looping
+    };
+    cb.onEditorAudition = [this](int note, int velocity) {
+        const auto& info = cadenza::arranger::recorderPartInfo(m_recorder.targetPart());
+        const int channel = info.midiChannel;
+        if (velocity > 0) {
+            m_audio.noteOn(channel, note, velocity);
+            juce::Component::SafePointer<MainComponent> safe(this);
+            juce::Timer::callAfterDelay(220, [safe, channel, note] {
+                if (auto* self = safe.getComponent())
+                    self->m_audio.noteOff(channel, note);
+            });
+        } else {
+            m_audio.noteOff(channel, note);
+        }
+    };
+    cb.onEditorTogglePlay   = [this] { togglePlayback(); };
+    cb.onEditorToggleRecord = [this] { recorderArm(!m_recordArmed.load()); };
+    cb.onEditorPickSection = [this](std::string id) {
+        if (m_recorder.setEditSection(id))
+            recorderReloadEditor();
+    };
+    cb.onEditorPickPart = [this](int slot) { recorderSetPart(slot); };
+    cb.onEditorSave = [this] { recorderSave(); };
 
     cb.onOts = [this](int slot) { applyOts(slot); };
     cb.setOtsLink = [this](bool on) {
@@ -2523,6 +2697,7 @@ void MainComponent::buildNativePanel()
             const auto& L = st.rightLayers[i];
             m_panel->setRightVoice(i, L.enabled, L.program, L.volume, L.octave);
         }
+        m_panel->setLeftVoice(m_leftEnabled, m_leftProgram, m_leftVolume, m_leftOctave);
         for (int i = 0; i < cadenza::settings::Settings::kNumRegistrations; ++i)
             m_panel->setRegistrationUsed(i, st.registrations[i].used);
         m_panel->setOtsLinkEnabled(st.otsLinkEnabled);
@@ -2536,13 +2711,29 @@ void MainComponent::updateNativePanelStyle()
     if (!m_panel) return;
 
     auto style = m_styleEngine.currentStyle();
+    const juce::String editorHint =
+        "Open a style - for Yamaha press Make Editable - then edit it here.";
+
     if (!style) {
         m_panel->setStyleName({});
         m_panel->setSections({});
+        m_panel->setMakeEditableAvailable(false);
+        m_panel->editorSetEnabled(false, editorHint);
         refreshOtsAvailability();
         m_lastLinkedMain.clear();
         return;
     }
+
+    // Offer "Make Editable" only for an imported Yamaha style with no editor session yet.
+    m_panel->setMakeEditableAvailable(
+        style->yamahaFormat != cadenza::arranger::YamahaStyleFormat::Unknown
+        && !m_recorder.sessionActive());
+
+    // Disable the Editor page when nothing editable is loaded. (When a session is
+    // active, the page is reloaded via recorderReloadEditor, not here, so live note
+    // edits don't reset the piano-roll view.)
+    if (!m_recorder.sessionActive())
+        m_panel->editorSetEnabled(false, editorHint);
 
     m_panel->setStyleName(juce::String(style->name.empty() ? style->id : style->name));
     m_panel->setBpm(m_state.bpm());   // reflect the style's tempo (set in loadAndApplyStyleFile)
@@ -2588,6 +2779,20 @@ void MainComponent::updateNativePanelStyle()
             m_audio.clearPartInstrument(oldRightCh[i]);
     const int melodyChannel = layerChannel[0];   // Right 1 = the primary "Melody" strip
     applyRightHand();   // assert each layer's enable/program/volume/octave on its channel
+
+    // Left split voice gets its own free channel too (never a style/drum channel).
+    {
+        int leftCh = lastFree;
+        for (int c = lastFree; c <= 16; ++c) {
+            if (c == 9 || c == 10 || used[c]) continue;
+            leftCh = c; break;
+        }
+        used[leftCh] = true;
+        const int oldLeft = m_midi.leftChannel();
+        if (oldLeft != leftCh) m_audio.clearPartInstrument(oldLeft);
+        m_midi.setLeftChannel(leftCh);
+        applyLeftVoice();
+    }
 
     // --- Mixer: live melody + one strip per distinct style channel ---
     struct StripSeed { int channel; int volume; int program; };

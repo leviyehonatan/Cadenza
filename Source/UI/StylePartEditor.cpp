@@ -23,6 +23,12 @@ constexpr int kPatternEdm = 202;
 constexpr int kPatternHipHop = 203;
 constexpr int kPasteMidiPattern = 204;
 
+// Instrument-slot labels match the StyleRecorder's 7 parts (Drums..Phrase2).
+const char* const kInstrumentLabels[] = {
+    "Drums", "Bass", "Chord 1", "Chord 2", "Pad", "Phrase 1", "Phrase 2"
+};
+constexpr int kNumInstrumentSlots = 7;
+
 bar_workflow::ShortcutKey shortcutKey(const juce::KeyPress& key)
 {
     const int code = key.getKeyCode();
@@ -45,7 +51,7 @@ bar_workflow::ShortcutKey shortcutKey(const juce::KeyPress& key)
 }
 }
 
-class StylePartEditorWindow::Content final : public juce::Component
+class StylePartEditorView::Impl final : public juce::Component
 {
 public:
     class VelocityLane final : public juce::Component
@@ -122,19 +128,19 @@ public:
         int selectedNote = -1;
     };
 
-    explicit Content(StylePartEditorWindow::Callbacks& cb)
-        : callbacks(cb), velocityLane(roll)
+    explicit Impl(StylePartEditorView::Callbacks cb)
+        : callbacks(std::move(cb)), velocityLane(roll)
     {
         setWantsKeyboardFocus(true);
         setMouseClickGrabsKeyboardFocus(true);
         roll.setWantsKeyboardFocus(true);
 
         addAndMakeVisible(roll);
-        roll.onNotesEdited = [&cb](std::vector<cadenza::arranger::PatternNote> notes) {
-            if (cb.onNotesEdited) cb.onNotesEdited(std::move(notes));
+        roll.onNotesEdited = [this](std::vector<cadenza::arranger::PatternNote> notes) {
+            if (callbacks.onNotesEdited) callbacks.onNotesEdited(std::move(notes));
         };
-        roll.onAudition = [&cb](int note, int velocity) {
-            if (cb.onAudition) cb.onAudition(note, velocity);
+        roll.onAudition = [this](int note, int velocity) {
+            if (callbacks.onAudition) callbacks.onAudition(note, velocity);
         };
         roll.onBarSelectionChanged = [this](const bar_workflow::BarSelection&) {
             updateSelectionStatus();
@@ -219,15 +225,103 @@ public:
         addAndMakeVisible(rec);
         updateRecColour(false);
 
+        // --- Style chrome (Section / Instrument / Bars / Save) -------------------
+        sectionBox.setTextWhenNothingSelected("Section");
+        sectionBox.onChange = [this] {
+            const int id = sectionBox.getSelectedId();
+            if (id >= 1 && id <= (int) sections.size() && callbacks.onPickSection)
+                callbacks.onPickSection(sections[(std::size_t) (id - 1)].first);
+        };
+        addChildComponent(sectionBox);
+
+        for (int i = 0; i < kNumInstrumentSlots; ++i)
+            instrumentBox.addItem(kInstrumentLabels[i], i + 1);
+        instrumentBox.setSelectedId(1, juce::dontSendNotification);
+        instrumentBox.onChange = [this] {
+            const int id = instrumentBox.getSelectedId();
+            if (id >= 1 && callbacks.onPickPart)
+                callbacks.onPickPart(id - 1);
+        };
+        addChildComponent(instrumentBox);
+
+        barsLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaeb8c7));
+        barsLabel.setJustificationType(juce::Justification::centredLeft);
+        barsLabel.setFont(juce::Font(juce::FontOptions(12.0f)));
+        addChildComponent(barsLabel);
+
+        configureButton(saveButton, "Save .cstyle", [this] {
+            if (callbacks.onSave) callbacks.onSave();
+        });
+        saveButton.setVisible(false);   // shown only with style chrome
+
+        hintLabel.setJustificationType(juce::Justification::centred);
+        hintLabel.setColour(juce::Label::textColourId, juce::Colour(0xff9aa5b5));
+        hintLabel.setFont(juce::Font(juce::FontOptions(15.0f)));
+        addChildComponent(hintLabel);
+
         paste.setEnabled(false);
         addAndMakeVisible(velocityLane);
         updateSelectionStatus();
-        setSize(1160, 680);
+    }
+
+    // --- style-chrome API ----------------------------------------------------
+
+    void setStyleControlsVisible(bool visible)
+    {
+        styleControls = visible;
+        applyVisibility();
+        resized();
+    }
+
+    void setSections(const std::vector<std::pair<std::string, std::string>>& idAndLabel)
+    {
+        sections = idAndLabel;
+        sectionBox.clear(juce::dontSendNotification);
+        for (int i = 0; i < (int) sections.size(); ++i)
+            sectionBox.addItem(sections[(std::size_t) i].second, i + 1);
+    }
+
+    void setActiveSection(const std::string& sectionId)
+    {
+        for (int i = 0; i < (int) sections.size(); ++i) {
+            if (sections[(std::size_t) i].first == sectionId) {
+                sectionBox.setSelectedId(i + 1, juce::dontSendNotification);
+                return;
+            }
+        }
+    }
+
+    void setActivePart(int slot)
+    {
+        if (slot >= 0 && slot < kNumInstrumentSlots)
+            instrumentBox.setSelectedId(slot + 1, juce::dontSendNotification);
+    }
+
+    void setEditorEnabled(bool enabled, const juce::String& hint)
+    {
+        editorEnabled = enabled;
+        hintLabel.setText(hint, juce::dontSendNotification);
+        applyVisibility();
+        resized();
     }
 
     void resized() override
     {
         auto area = getLocalBounds();
+
+        if (!editorEnabled) {
+            hintLabel.setBounds(area.reduced(24));
+            return;
+        }
+
+        if (styleControls) {
+            auto styleRow = area.removeFromTop(32);
+            sectionBox.setBounds(styleRow.removeFromLeft(160).reduced(3));
+            instrumentBox.setBounds(styleRow.removeFromLeft(130).reduced(3));
+            barsLabel.setBounds(styleRow.removeFromLeft(90).reduced(3, 0));
+            saveButton.setBounds(styleRow.removeFromRight(110).reduced(3));
+        }
+
         auto bar = area.removeFromTop(36);
         play.setBounds(bar.removeFromLeft(56).reduced(3));
         record.setBounds(bar.removeFromLeft(68).reduced(3));
@@ -260,6 +354,10 @@ public:
     {
         percussionPart = percussion;
         roll.setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, percussion);
+        const int barTicks = std::max(1, ticksPerBeat * std::max(1, beatsPerBar));
+        const int bars = std::max(1, sectionTicks / barTicks);
+        barsLabel.setText(juce::String(bars) + (bars == 1 ? " bar" : " bars"),
+                          juce::dontSendNotification);
         updateSelectionStatus();
         velocityLane.repaint();
     }
@@ -284,8 +382,10 @@ public:
         velocityLane.repaint();
     }
 
-    bool keyPressed(const juce::KeyPress& key) override
+    bool handleKeyPress(const juce::KeyPress& key)
     {
+        if (!editorEnabled)
+            return false;
         const auto command = bar_workflow::commandForShortcut(
             shortcutKey(key), key.getModifiers().isCtrlDown());
         if (command == bar_workflow::EditorCommand::None)
@@ -295,6 +395,36 @@ public:
     }
 
 private:
+    // Show/hide children to match the current style-chrome + enabled state.
+    void applyVisibility()
+    {
+        const bool ed = editorEnabled;
+        roll.setVisible(ed);
+        velocityLane.setVisible(ed);
+        play.setVisible(ed);
+        record.setVisible(ed);
+        copy.setVisible(ed);
+        paste.setVisible(ed);
+        duplicate.setVisible(ed);
+        clear.setVisible(ed);
+        importMidi.setVisible(ed);
+        patterns.setVisible(ed);
+        help.setVisible(ed);
+        mode.setVisible(ed);
+        snap.setVisible(ed);
+        snapLabel.setVisible(ed);
+        selectionStatus.setVisible(ed);
+        position.setVisible(ed);
+        rec.setVisible(ed);
+
+        sectionBox.setVisible(ed && styleControls);
+        instrumentBox.setVisible(ed && styleControls);
+        barsLabel.setVisible(ed && styleControls);
+        saveButton.setVisible(ed && styleControls);
+
+        hintLabel.setVisible(!ed);
+    }
+
     void configureButton(juce::TextButton& button, const juce::String& text,
                          std::function<void()> onClick)
     {
@@ -357,7 +487,7 @@ private:
         menu.addSeparator();
         menu.addItem(kHelpAbout, "About editor");
 
-        juce::Component::SafePointer<Content> safe(this);
+        juce::Component::SafePointer<Impl> safe(this);
         menu.showMenuAsync(
             juce::PopupMenu::Options().withTargetComponent(&help),
             [safe](int result) {
@@ -408,7 +538,7 @@ private:
         menu.addSeparator();
         menu.addItem(kPasteMidiPattern, "Paste MIDI Pattern");
 
-        juce::Component::SafePointer<Content> safe(this);
+        juce::Component::SafePointer<Impl> safe(this);
         menu.showMenuAsync(
             juce::PopupMenu::Options().withTargetComponent(&patterns),
             [safe](int result) {
@@ -436,7 +566,7 @@ private:
                 juce::File::userDocumentsDirectory),
             "*.mid;*.midi");
 
-        juce::Component::SafePointer<Content> safe(this);
+        juce::Component::SafePointer<Impl> safe(this);
         midiChooser->launchAsync(
             juce::FileBrowserComponent::openMode
                 | juce::FileBrowserComponent::canSelectFiles,
@@ -534,7 +664,7 @@ private:
         menu.addSeparator();
         menu.addItem(kContextClear, "Clear", roll.barSelection().valid());
 
-        juce::Component::SafePointer<Content> safe(this);
+        juce::Component::SafePointer<Impl> safe(this);
         const auto screenPoint = roll.localPointToGlobal(position);
         menu.showMenuAsync(
             juce::PopupMenu::Options()
@@ -640,13 +770,22 @@ private:
         grabKeyboardFocus();
     }
 
-    StylePartEditorWindow::Callbacks& callbacks;
+    StylePartEditorView::Callbacks callbacks;
     StylePartPianoRoll roll;
     VelocityLane velocityLane;
     juce::TextButton play, record, copy, paste, duplicate, clear;
     juce::TextButton importMidi, patterns, help;
     juce::ComboBox mode, snap;
     juce::Label snapLabel, selectionStatus, position, rec;
+
+    // Style chrome.
+    juce::ComboBox sectionBox, instrumentBox;
+    juce::TextButton saveButton;
+    juce::Label barsLabel, hintLabel;
+    std::vector<std::pair<std::string, std::string>> sections;
+    bool styleControls = false;
+    bool editorEnabled = true;
+
     bar_workflow::BarClipboard clipboard;
     note_workflow::NoteClipboard noteClipboard;
     enum class ClipboardKind { None, Bars, Notes };
@@ -658,6 +797,72 @@ private:
     std::unique_ptr<juce::FileChooser> midiChooser;
 };
 
+// ===================== StylePartEditorView (public wrapper) =====================
+
+StylePartEditorView::StylePartEditorView(Callbacks callbacks)
+    : m_impl(std::make_unique<Impl>(std::move(callbacks)))
+{
+    setWantsKeyboardFocus(true);
+    addAndMakeVisible(*m_impl);
+}
+
+StylePartEditorView::~StylePartEditorView() = default;
+
+void StylePartEditorView::setPart(
+    const std::vector<cadenza::arranger::PatternNote>& notes,
+    int sectionTicks, int ticksPerBeat, int beatsPerBar, bool percussion)
+{
+    m_impl->setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, percussion);
+}
+
+void StylePartEditorView::setTransportState(int tickInSection, bool playing, bool recordArmed)
+{
+    m_impl->setTransportState(tickInSection, playing, recordArmed);
+}
+
+void StylePartEditorView::setStyleControlsVisible(bool visible)
+{
+    m_impl->setStyleControlsVisible(visible);
+}
+
+void StylePartEditorView::setSections(
+    const std::vector<std::pair<std::string, std::string>>& idAndLabel)
+{
+    m_impl->setSections(idAndLabel);
+}
+
+void StylePartEditorView::setActiveSection(const std::string& sectionId)
+{
+    m_impl->setActiveSection(sectionId);
+}
+
+void StylePartEditorView::setActivePart(int slot)
+{
+    m_impl->setActivePart(slot);
+}
+
+void StylePartEditorView::setEditorEnabled(bool enabled, const juce::String& hint)
+{
+    m_impl->setEditorEnabled(enabled, hint);
+}
+
+void StylePartEditorView::resized()
+{
+    m_impl->setBounds(getLocalBounds());
+}
+
+void StylePartEditorView::paint(juce::Graphics& g)
+{
+    g.fillAll(juce::Colour(0xff1c1f26));
+}
+
+bool StylePartEditorView::keyPressed(const juce::KeyPress& key)
+{
+    return m_impl->handleKeyPress(key);
+}
+
+// ===================== StylePartEditorWindow (legacy wrapper) ===================
+
 StylePartEditorWindow::StylePartEditorWindow(Callbacks callbacks)
     : juce::DocumentWindow("Part Editor",
                            juce::Colour(0xff1c1f26),
@@ -668,8 +873,20 @@ StylePartEditorWindow::StylePartEditorWindow(Callbacks callbacks)
 {
     setUsingNativeTitleBar(true);
     setResizable(true, true);
-    m_content = std::make_unique<Content>(m_cb);
-    setContentNonOwned(m_content.get(), true);
+
+    StylePartEditorView::Callbacks viewCb;
+    viewCb.onNotesEdited    = [this](std::vector<cadenza::arranger::PatternNote> n) {
+        if (m_cb.onNotesEdited) m_cb.onNotesEdited(std::move(n));
+    };
+    viewCb.onAudition       = [this](int note, int vel) {
+        if (m_cb.onAudition) m_cb.onAudition(note, vel);
+    };
+    viewCb.onTogglePlayback = [this] { if (m_cb.onTogglePlayback) m_cb.onTogglePlayback(); };
+    viewCb.onToggleRecord   = [this] { if (m_cb.onToggleRecord) m_cb.onToggleRecord(); };
+
+    m_view = std::make_unique<StylePartEditorView>(std::move(viewCb));
+    m_view->setSize(1160, 680);
+    setContentNonOwned(m_view.get(), true);
     centreWithSize(1180, 720);
 }
 
@@ -684,14 +901,14 @@ void StylePartEditorWindow::setPart(
     int sectionTicks, int ticksPerBeat, int beatsPerBar, bool percussion)
 {
     setName("Part Editor - " + partLabel);
-    m_content->setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, percussion);
+    m_view->setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, percussion);
 }
 
 void StylePartEditorWindow::setTransportState(int tickInSection,
                                               bool playing,
                                               bool recordArmed)
 {
-    m_content->setTransportState(tickInSection, playing, recordArmed);
+    m_view->setTransportState(tickInSection, playing, recordArmed);
 }
 
 void StylePartEditorWindow::closeButtonPressed()
@@ -702,6 +919,6 @@ void StylePartEditorWindow::closeButtonPressed()
 
 bool StylePartEditorWindow::keyPressed(const juce::KeyPress& key)
 {
-    return m_content && m_content->keyPressed(key);
+    return m_view && m_view->keyPressed(key);
 }
 }

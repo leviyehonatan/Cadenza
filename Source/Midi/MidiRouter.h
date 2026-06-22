@@ -85,8 +85,17 @@ public:
 
     // Global transpose: shifts every right-hand layer by N semitones, matching the
     // accompaniment transpose. Chord detection is unaffected.
-    void setLiveTranspose(int semitones) noexcept { m_rightHand.setTranspose(semitones); }
+    void setLiveTranspose(int semitones) noexcept { m_rightHand.setTranspose(semitones); m_leftVoice.setTranspose(semitones); }
     int  liveTranspose() const noexcept { return m_rightHand.transpose(); }
+
+    // Left-hand split voice: sounds the keys BELOW the split point (chord zone) on
+    // its own channel, alongside chord detection. Off by default.
+    void setLeftEnabled(bool on) noexcept { m_leftEnabled.store(on); }
+    bool leftEnabled() const noexcept { return m_leftEnabled.load(); }
+    void setLeftChannel(int channel) noexcept { m_leftVoice.setChannel(channel); }
+    int  leftChannel() const noexcept { return m_leftVoice.channel(); }
+    void setLeftOctave(int octaves) noexcept { m_leftVoice.setOctave(octaves); }
+    int  leftOctave() const noexcept { return m_leftVoice.octave(); }
 
     // Dedicated Cadenza channel the primary right-hand voice (Right 1) plays on.
     int  melodyChannel() const noexcept { return m_rightHand.layerChannel(0); }
@@ -133,6 +142,12 @@ public:
     // Thread-safe; acquires the internal publish mutex.
     std::string currentChordDisplayName() const;
 
+    // Pitch-bend / modulation wheels from the hardware keyboard (forwarded so the
+    // app can apply them to the manual voice channels). Fire on the MIDI thread.
+    using WheelCallback = std::function<void(int)>;
+    void setPitchBendCallback(WheelCallback cb)  { m_onPitchBend  = std::move(cb); }
+    void setModulationCallback(WheelCallback cb) { m_onModulation = std::move(cb); }
+
     void setNoteCallback(NoteCallback cb)   { m_onNote  = std::move(cb); }
     void setChordCallback(ChordCallback cb) { m_onChord = std::move(cb); }
     void setSyncCallback(SyncCallback cb)   { m_onSync  = std::move(cb); }
@@ -172,6 +187,10 @@ private:
 
     std::string  m_lastChordName;
     RightHand    m_rightHand;
+    LiveMelodyVoice   m_leftVoice;             // left-hand split voice (chord zone)
+    std::atomic<bool> m_leftEnabled { false };
+    WheelCallback m_onPitchBend;
+    WheelCallback m_onModulation;
     NoteCallback  m_onNote;
     ChordCallback m_onChord;
     SyncCallback  m_onSync;

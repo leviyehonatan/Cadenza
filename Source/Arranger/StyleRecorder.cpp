@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <map>
 
 namespace cadenza::arranger
 {
@@ -129,6 +130,94 @@ bool isEditableCadenzaStyle(const Style& style) noexcept
         && !style.sections.empty();
 }
 
+void makeStyleEditable(Style& style, std::vector<std::string>* droppedParts)
+{
+    if (isEditableCadenzaStyle(style))
+        return;   // already a native editable style
+
+    style.schema = "cadenza.style.v1";
+    style.yamahaFormat = YamahaStyleFormat::Unknown;
+
+    // Classify every original channel as drum or melodic, consistently across all
+    // sections, so the same source channel always lands on the same editor slot.
+    std::map<int, bool> isDrumChannel;        // origChannel -> drum?
+    std::map<int, std::string> channelLabel;  // origChannel -> instrument (for drop notes)
+    for (const auto& sec : style.sections) {
+        for (const auto& part : sec.parts) {
+            const int ch = part.midiChannel;
+            const bool drum = part.percussion || ch == 10;
+            auto it = isDrumChannel.find(ch);
+            if (it == isDrumChannel.end()) {
+                isDrumChannel[ch] = drum;
+                channelLabel[ch] = part.instrument.empty() ? part.name : part.instrument;
+            } else {
+                it->second = it->second || drum;   // any drum part marks the channel
+            }
+        }
+    }
+
+    // Build the remap: drums -> slot 0 (ch10), melodic -> slots 1..6 (ch11..16) in
+    // ascending source-channel order; anything past the 6 melodic slots is dropped.
+    std::vector<int> melodic;
+    for (const auto& [ch, drum] : isDrumChannel)
+        if (!drum)
+            melodic.push_back(ch);
+    std::sort(melodic.begin(), melodic.end());
+
+    std::map<int, int> slotForChannel;   // origChannel -> slot index, or -1 to drop
+    for (const auto& [ch, drum] : isDrumChannel)
+        if (drum)
+            slotForChannel[ch] = 0;
+    for (std::size_t i = 0; i < melodic.size(); ++i)
+        slotForChannel[melodic[i]] =
+            (i + 1 < static_cast<std::size_t>(kNumRecorderParts)) ? static_cast<int>(i + 1) : -1;
+
+    if (droppedParts != nullptr) {
+        for (const auto& [ch, slot] : slotForChannel)
+            if (slot < 0)
+                droppedParts->push_back(channelLabel[ch]);
+    }
+
+    // Rebuild each section's parts onto their assigned slots, merging any parts
+    // that share a slot (notably multiple drum channels collapsing onto ch10).
+    for (auto& sec : style.sections) {
+        std::array<Part, kNumRecorderParts> slots;
+        std::array<bool, kNumRecorderParts> used{};
+        for (auto& part : sec.parts) {
+            const auto it = slotForChannel.find(part.midiChannel);
+            if (it == slotForChannel.end() || it->second < 0)
+                continue;   // dropped
+            const int slot = it->second;
+            const auto& info = kParts[slot];
+            Part& dst = slots[static_cast<std::size_t>(slot)];
+            if (!used[static_cast<std::size_t>(slot)]) {
+                dst = part;                       // first part keeps program/instrument
+                dst.name = info.partName;
+                dst.midiChannel = info.midiChannel;
+                dst.percussion = info.percussion;
+                dst.yamahaPolicy = recorderPolicy(info);   // Cadenza-standard transposition
+                used[static_cast<std::size_t>(slot)] = true;
+            } else {
+                dst.notes.insert(dst.notes.end(), part.notes.begin(), part.notes.end());
+                dst.automation.insert(dst.automation.end(),
+                                      part.automation.begin(), part.automation.end());
+            }
+        }
+        std::vector<Part> rebuilt;
+        for (int slot = 0; slot < kNumRecorderParts; ++slot) {
+            if (!used[static_cast<std::size_t>(slot)])
+                continue;
+            Part& p = slots[static_cast<std::size_t>(slot)];
+            std::sort(p.notes.begin(), p.notes.end(),
+                      [](const PatternNote& a, const PatternNote& b) { return a.tick < b.tick; });
+            std::sort(p.automation.begin(), p.automation.end(),
+                      [](const AutomationEvent& a, const AutomationEvent& b) { return a.tick < b.tick; });
+            rebuilt.push_back(std::move(p));
+        }
+        sec.parts = std::move(rebuilt);
+    }
+}
+
 void StyleRecorder::startSession(const RecorderConfig& config)
 {
     std::lock_guard<std::mutex> lk(m_mutex);
@@ -199,6 +288,22 @@ bool StyleRecorder::loadSession(const Style& style,
     m_take.clear();
     std::fill(std::begin(m_openActive), std::end(m_openActive), false);
     m_active = true;
+    return true;
+}
+
+bool StyleRecorder::setEditSection(const std::string& sectionName)
+{
+    std::lock_guard<std::mutex> lk(m_mutex);
+    if (!m_active)
+        return false;
+    const Section* sec = m_style.findSection(sectionName);
+    if (sec == nullptr)
+        return false;
+    m_sectionName = sec->name;
+    m_config.section = sec->name;
+    m_config.bars = std::max(1, sec->barCount);
+    m_take.clear();
+    std::fill(std::begin(m_openActive), std::end(m_openActive), false);
     return true;
 }
 

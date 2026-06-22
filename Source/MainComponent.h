@@ -60,6 +60,9 @@ private:
     void clearMasterEffect();
     void pushPluginStateToWeb();
     void applyRightHand();       // (re)assert Right 1/2/3 enable + program + volume + octave
+    void applyLeftVoice();       // (re)assert the left split voice on its channel
+    void sendPitchBendToManual(int value14);  // pitch wheel -> Right 1/2/3 + Left channels
+    void sendModToManual(int value);          // mod wheel (CC1) -> the same channels
 
     // Native control panel (source of truth for live performance controls).
     void buildNativePanel();
@@ -100,11 +103,13 @@ private:
     void recorderClearPart();
     void recorderSave();
     void recorderExit();
+    void makeLoadedStyleEditable();       // convert the loaded Yamaha style into an editable .cstyle session
     void recorderRefreshStyle();          // republish the in-progress style + UI
     void recorderPrepareTargetChannel();  // give the target part channel an audible voice
     juce::String recorderStatusText() const;
     void recorderOpenEditor();            // piano-roll editor for the target part
     void recorderReloadEditor();          // refresh the editor contents (if open)
+    void refreshStyleEditorPage();        // push current style/section/part to the Editor page
     void recorderCloseEditor();
     void applySongStepForBar(int bar, bool applySection = true);
     void queueSongSectionForBar(int bar);
@@ -137,6 +142,13 @@ private:
     cadenza::arranger::StyleRecorder m_recorder;
     std::atomic<bool> m_recordArmed { false };
     bool m_metronomeOn = true;   // recorder click track on/off (message thread)
+
+    // Left-hand split voice (sounds below-split notes). Not persisted in v1.
+    bool m_leftEnabled = false;
+    int  m_leftProgram = 33;     // GM Electric Bass (finger)
+    int  m_leftVolume  = 100;
+    int  m_leftOctave  = 0;
+
     std::unique_ptr<juce::FileChooser> m_recSaveChooser;
     std::unique_ptr<cadenza::ui::StylePartEditorWindow> m_partEditor;
 
