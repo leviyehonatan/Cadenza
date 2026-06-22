@@ -9,6 +9,7 @@
 #include "Arranger/SectionButtons.h"
 #include "UI/NativePanel.h"
 #include "UI/StylePartEditor.h"
+#include "Ai/StyleGenerator.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
@@ -16,6 +17,7 @@
 #include <cctype>
 #include <set>
 #include <sstream>
+#include <thread>
 #include <vector>
 
 namespace
@@ -2009,6 +2011,147 @@ void MainComponent::recorderOpenEditor()
     m_partEditor->grabKeyboardFocus();
 }
 
+void MainComponent::showAiSettingsDialog()
+{
+    auto aw = std::make_unique<juce::AlertWindow>(
+        "AI Settings",
+        "Paste your Anthropic API key and choose a model. The key is stored locally on this PC.",
+        juce::MessageBoxIconType::NoIcon);
+
+    aw->addTextEditor("key", m_settings ? juce::String(m_settings->state().anthropicApiKey) : juce::String(),
+                      "Anthropic API key");
+    if (auto* ed = aw->getTextEditor("key"))
+        ed->setPasswordCharacter((juce::juce_wchar) 0x2022);
+
+    const juce::StringArray models { "claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8" };
+    aw->addComboBox("model", models, "Model (cheapest -> best)");
+    if (auto* cb = aw->getComboBoxComponent("model")) {
+        const juce::String cur = m_settings ? juce::String(m_settings->state().aiModel) : juce::String("claude-haiku-4-5");
+        const int idx = models.indexOf(cur);
+        cb->setSelectedItemIndex(idx >= 0 ? idx : 0, juce::dontSendNotification);
+    }
+
+    aw->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    aw->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    aw->enterModalState(true, juce::ModalCallbackFunction::create([safe](int r) {
+        auto* self = safe.getComponent();
+        if (self == nullptr) return;
+        if (r == 1 && self->m_aiWindow && self->m_settings) {
+            const juce::String key = self->m_aiWindow->getTextEditorContents("key").trim();
+            juce::String model = "claude-haiku-4-5";
+            if (auto* cb = self->m_aiWindow->getComboBoxComponent("model"))
+                model = cb->getText();
+            self->m_settings->state().anthropicApiKey = key.toStdString();
+            self->m_settings->state().aiModel = model.toStdString();
+            self->saveSettings();
+        }
+        self->m_aiWindow.reset();
+    }), false);
+    m_aiWindow = std::move(aw);
+}
+
+void MainComponent::showGenerateStyleDialog()
+{
+    if (!m_settings || m_settings->state().anthropicApiKey.empty()) {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon, "AI Style",
+            "First add your Anthropic API key in AI Settings (on the Setting page).");
+        return;
+    }
+
+    auto aw = std::make_unique<juce::AlertWindow>(
+        "AI Style",
+        "Describe a style or name a song, e.g.\n"
+        "\"reggae like UB40 Kingston Town, 75 bpm, add claps\".",
+        juce::MessageBoxIconType::NoIcon);
+
+    aw->addTextEditor("prompt", juce::String(), "Description");
+    if (auto* ed = aw->getTextEditor("prompt")) {
+        ed->setMultiLine(true);
+        ed->setReturnKeyStartsNewLine(true);
+        ed->setSize(380, 70);
+    }
+    aw->addButton("Generate", 1);
+    aw->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    aw->enterModalState(true, juce::ModalCallbackFunction::create([safe](int r) {
+        auto* self = safe.getComponent();
+        if (self == nullptr) return;
+        juce::String prompt;
+        if (r == 1 && self->m_aiWindow)
+            prompt = self->m_aiWindow->getTextEditorContents("prompt").trim();
+        self->m_aiWindow.reset();
+        if (prompt.isNotEmpty())
+            self->generateStyleFromText(prompt);
+    }), false);
+    m_aiWindow = std::move(aw);
+}
+
+void MainComponent::generateStyleFromText(const juce::String& prompt)
+{
+    if (!m_settings) return;
+    const juce::String key   = juce::String(m_settings->state().anthropicApiKey);
+    const juce::String model = juce::String(m_settings->state().aiModel);
+
+    if (m_panel)
+        m_panel->setRecorderState(m_recorder.sessionActive(), false,
+            "Generating style with AI (" + model + ")...");
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    std::thread([safe, key, model, prompt] {
+        auto result = cadenza::ai::generateStyle(key, model, prompt);
+        juce::MessageManager::callAsync([safe, result] {
+            if (auto* self = safe.getComponent())
+                self->applyGeneratedStyle(result);
+        });
+    }).detach();
+}
+
+void MainComponent::applyGeneratedStyle(const cadenza::ai::StyleGenResult& result)
+{
+    if (!result.ok) {
+        if (m_panel)
+            m_panel->setRecorderState(m_recorder.sessionActive(), false,
+                "AI failed: " + juce::String(result.error));
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "AI Style", juce::String(result.error));
+        return;
+    }
+
+    auto loaded = cadenza::arranger::loadStyleFromJson(result.cstyleJson);
+    if (!loaded.ok) {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "AI Style", "The AI returned an invalid style: " + juce::String(loaded.error));
+        return;
+    }
+
+    // Persist it as a real .cstyle and load it through the normal path (so it
+    // becomes an editable recorder session), then jump to the Editor page.
+    auto dir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                   .getChildFile("Cadenza AI Styles");
+    dir.createDirectory();
+    juce::String name = juce::String(loaded.style.name);
+    if (name.isEmpty()) name = "AI Style";
+    auto file = dir.getChildFile(juce::File::createLegalFileName(name) + ".cstyle");
+    file.replaceWithText(juce::String(result.cstyleJson));
+
+    const int tokens = result.inputTokens + result.outputTokens;
+    if (loadAndApplyStyleFile(file)) {
+        if (m_panel) {
+            m_panel->setActivePage(cadenza::ui::NativePanel::kEditorPage);
+            m_panel->setRecorderState(true, false,
+                "AI style \"" + name + "\" loaded (" + juce::String(tokens) + " tokens) - edit & Save");
+        }
+        juce::Logger::writeToLog("[Cadenza] AI style generated: " + name
+                                 + " (" + juce::String(tokens) + " tokens, saved " + file.getFullPathName() + ")");
+    } else {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "AI Style", "Could not load the generated style.");
+    }
+}
+
 void MainComponent::recorderReloadEditor()
 {
     // Legacy pop-up window (still works if it happens to be open).
@@ -2568,6 +2711,9 @@ void MainComponent::buildNativePanel()
     };
     cb.onPitchBend  = [this](int v14) { sendPitchBendToManual(v14); };
     cb.onModulation = [this](int v)   { sendModToManual(v); };
+
+    cb.onAiStyle    = [this] { showGenerateStyleDialog(); };
+    cb.onAiSettings = [this] { showAiSettingsDialog(); };
 
     cb.onStoreRegistration  = [this](int slot) { captureRegistration(slot); };
     cb.onRecallRegistration = [this](int slot) { recallRegistration(slot); };

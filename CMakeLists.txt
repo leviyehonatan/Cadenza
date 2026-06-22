@@ -261,6 +261,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
             Source/UI/StylePartEditor.cpp
             Source/UI/StylePartPatternImport.cpp
             Source/UI/StylePartPianoRoll.cpp
+            Source/Ai/StyleGenerator.cpp
     )
 
     target_compile_definitions(Cadenza

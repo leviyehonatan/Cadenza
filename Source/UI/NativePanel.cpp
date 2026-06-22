@@ -617,6 +617,14 @@ NativePanel::NativePanel()
     m_recMakeEditable.onClick = [this] { if (m_cb.onMakeEditable) m_cb.onMakeEditable(); };
     addAndMakeVisible(m_recMakeEditable);
 
+    m_aiStyle.setTooltip("Describe a style or name a song and let AI generate it (needs an API key in AI Settings)");
+    m_aiStyle.onClick = [this] { if (m_cb.onAiStyle) m_cb.onAiStyle(); };
+    addAndMakeVisible(m_aiStyle);
+
+    m_aiSettings.setTooltip("Set your Anthropic API key and choose the AI model");
+    m_aiSettings.onClick = [this] { if (m_cb.onAiSettings) m_cb.onAiSettings(); };
+    addAndMakeVisible(m_aiSettings);
+
     m_recStatus.setColour(juce::Label::textColourId, CadenzaLookAndFeel::textDim());
     m_recStatus.setFont(juce::Font(juce::FontOptions(12.0f)));
     addAndMakeVisible(m_recStatus);
@@ -1414,7 +1422,7 @@ void NativePanel::resized()
     const bool showMixer    = onPage({ 0, 4 });      // Home, Mixer
     const bool showSettings = onPage({ 6 });         // Setting (file/device actions)
     const bool showEditor   = onPage({ kEditorPage });   // Editor (full-area piano roll)
-    setVis(showSettings, { &m_fade, &m_openStyle, &m_openSf, &m_openAudio, &m_openMidi, &m_openAnalyze });
+    setVis(showSettings, { &m_fade, &m_openStyle, &m_openSf, &m_openAudio, &m_openMidi, &m_openAnalyze, &m_aiSettings });
 
     // On the Editor page the embedded piano roll owns the whole content area, so the
     // always-on upper band (chord LCD, transpose, registrations, OTS, pads) is hidden.
@@ -1529,7 +1537,8 @@ void NativePanel::resized()
         m_openSf.setBounds(r.removeFromLeft(140));    r.removeFromLeft(gap);
         m_openAudio.setBounds(r.removeFromLeft(90));  r.removeFromLeft(gap);
         m_openMidi.setBounds(r.removeFromLeft(80));   r.removeFromLeft(gap);
-        m_openAnalyze.setBounds(r.removeFromLeft(120));
+        m_openAnalyze.setBounds(r.removeFromLeft(120)); r.removeFromLeft(gap);
+        m_aiSettings.setBounds(r.removeFromLeft(120));
         area.removeFromTop(gap);
     }
 
@@ -1601,10 +1610,12 @@ void NativePanel::resized()
     // Style Recorder row: bars + part pickers, transport-style buttons, status.
     setVis(showRec, { &m_recCaption, &m_recNew, &m_recBars, &m_recPart, &m_recArm, &m_recClick,
                       &m_recEdit, &m_recClear, &m_recSave, &m_recExit, &m_recStatus,
-                      &m_recMakeEditable });
+                      &m_recMakeEditable, &m_aiStyle });
     if (showRec) {
         const int y0 = area.getY();
         auto capRow = area.removeFromTop(20);
+        m_aiStyle.setBounds(capRow.removeFromRight(90));
+        capRow.removeFromRight(6);
         m_recMakeEditable.setBounds(capRow.removeFromRight(120));
         m_recCaption.setBounds(capRow);
         auto r = area.removeFromTop(28);

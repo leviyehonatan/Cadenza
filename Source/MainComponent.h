@@ -20,6 +20,7 @@
 #include <string>
 
 namespace cadenza::ui { class NativePanel; class StylePartEditorWindow; }
+namespace cadenza::ai { struct StyleGenResult; }
 
 class MainComponent final : public juce::Component,
                             private juce::Timer,
@@ -110,6 +111,12 @@ private:
     void recorderOpenEditor();            // piano-roll editor for the target part
     void recorderReloadEditor();          // refresh the editor contents (if open)
     void refreshStyleEditorPage();        // push current style/section/part to the Editor page
+
+    // AI: make a style from text (Anthropic API, bring-your-own-key).
+    void showAiSettingsDialog();          // API key + model picker
+    void showGenerateStyleDialog();       // "describe a style" prompt
+    void generateStyleFromText(const juce::String& prompt);   // async API call
+    void applyGeneratedStyle(const cadenza::ai::StyleGenResult& result);
     void recorderCloseEditor();
     void applySongStepForBar(int bar, bool applySection = true);
     void queueSongSectionForBar(int bar);
@@ -151,6 +158,7 @@ private:
 
     std::unique_ptr<juce::FileChooser> m_recSaveChooser;
     std::unique_ptr<cadenza::ui::StylePartEditorWindow> m_partEditor;
+    std::unique_ptr<juce::AlertWindow> m_aiWindow;   // AI dialog (settings / prompt)
 
     // Live sections: one-shot returns / ending stops are sequenced inside the
     // StyleEngine (sample-tight); we only track the last Main as the return target.

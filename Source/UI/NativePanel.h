@@ -183,6 +183,9 @@ public:
         std::function<void(int)>  onLeftInstrument;   // GM program 0..127
         std::function<void(int)>  onLeftVolume;       // 0..127
         std::function<void(int)>  onLeftOctave;       // delta -1/+1
+        // AI: make a style from text.
+        std::function<void()> onAiStyle;       // open the "describe a style" dialog
+        std::function<void()> onAiSettings;    // open AI settings (API key + model)
     };
 
     NativePanel();
@@ -404,6 +407,8 @@ private:
     juce::TextButton m_recSave  { "Save..." };
     juce::TextButton m_recExit  { "Exit" };
     juce::TextButton m_recMakeEditable { "Make Editable" };
+    juce::TextButton m_aiStyle { "AI Style..." };
+    juce::TextButton m_aiSettings { "AI Settings..." };
 
     // Style Editor page: embedded piano-roll editor (shown only on kEditorPage).
     std::unique_ptr<StylePartEditorView> m_editor;

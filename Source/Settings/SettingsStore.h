@@ -96,6 +96,10 @@ struct Settings
     int splitNote = 60;              // keyboard split: notes < this drive chords, >= play melody
     int humanizeAmount = 35;         // 0..100 accompaniment velocity/timing variation (0 = off)
 
+    // AI "Make Style from Text": user's own Anthropic API key + chosen model.
+    std::string anthropicApiKey;                  // empty = AI generation disabled
+    std::string aiModel = "claude-haiku-4-5";     // claude-haiku-4-5 | claude-sonnet-4-6 | claude-opus-4-8
+
     // MIDI control mappings: trigger id (see MidiControlMap) -> command string
     // (section id or "play"). Lets hardware buttons drive the arranger.
     std::map<int, std::string> midiControlMap;
