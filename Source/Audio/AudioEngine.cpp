@@ -65,7 +65,13 @@ void AudioEngine::releaseResources()
 
 void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 {
+    const juce::ScopedNoDenormals noDenormals;
     auto* buffer = info.buffer;
+
+    if (info.numSamples > m_currentBlockSize) {
+        m_currentBlockSize = info.numSamples;
+        m_partScratch.setSize(2, m_currentBlockSize, false, false, true);
+    }
 
     // Convenience wrapper buffer over the requested slice.
     juce::AudioBuffer<float> view(buffer->getArrayOfWritePointers(),
@@ -96,7 +102,7 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             float* const* chans = view.getArrayOfWritePointers();
             const int nc = view.getNumChannels();
             const int ns = view.getNumSamples();
-            m_masterEq.process(chans, nc, ns);     // tone + tame peaks
+            m_masterEq.process(chans, nc, ns);     // 3-band EQ only
             m_masterComp.process(chans, nc, ns);   // gentle master glue/density
             m_masterGlue.process(chans, nc, ns);   // console glue (no-op: disabled by default)
             m_effectMidi.clear();
@@ -342,7 +348,18 @@ void AudioEngine::allNotesOff()
     if (m_synth) m_synth->allNotesOff();
 
     const double timestamp = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    const bool masterLoaded = m_masterLoaded.load();
     for (int channel = 1; channel < kNumChannels; ++channel) {
+        if (masterLoaded) {
+            auto masterNotesOff = juce::MidiMessage::allNotesOff(channel);
+            masterNotesOff.setTimeStamp(timestamp);
+            m_masterCollector.addMessageToQueue(masterNotesOff);
+
+            auto masterSoundOff = juce::MidiMessage::allSoundOff(channel);
+            masterSoundOff.setTimeStamp(timestamp);
+            m_masterCollector.addMessageToQueue(masterSoundOff);
+        }
+
         if (!m_partLoaded[channel].load())
             continue;
 

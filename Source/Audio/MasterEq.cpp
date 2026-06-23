@@ -51,19 +51,6 @@ void MasterEq::recompute() noexcept
     m_appliedLow = lo; m_appliedMid = mid; m_appliedHigh = hi;
 }
 
-namespace
-{
-// Smooth, symmetric soft clip — transparent below ~0.8, rounds peaks above so a
-// hot full-band mix never hard-clips into a "crunchy" digital distortion.
-inline float softClip(float x) noexcept
-{
-    constexpr float th = 0.8f;
-    if (x >  th) return  th + (1.0f - th) * std::tanh((x - th) / (1.0f - th));
-    if (x < -th) return -(th + (1.0f - th) * std::tanh((-x - th) / (1.0f - th)));
-    return x;
-}
-}
-
 void MasterEq::process(float* const* channels, int numChannels, int numSamples) noexcept
 {
     if (!m_enabled.load() || channels == nullptr || numSamples <= 0)
@@ -74,6 +61,9 @@ void MasterEq::process(float* const* channels, int numChannels, int numSamples) 
         recompute();
 
     const bool flatEq = std::abs(lo) < 0.01f && std::abs(mid) < 0.01f && std::abs(hi) < 0.01f;
+    if (flatEq)
+        return;
+
     const int n = std::min(numChannels, m_numChannels);
 
     for (int c = 0; c < n; ++c) {
@@ -84,9 +74,7 @@ void MasterEq::process(float* const* channels, int numChannels, int numSamples) 
         Biquad& high = m_high[c];
         for (int i = 0; i < numSamples; ++i) {
             float s = x[i];
-            if (!flatEq)
-                s = high.tick(peak.tick(low.tick(s)));  // 3-band EQ
-            x[i] = softClip(s);                          // always-on peak safety
+            x[i] = high.tick(peak.tick(low.tick(s)));  // 3-band EQ only
         }
     }
 }
