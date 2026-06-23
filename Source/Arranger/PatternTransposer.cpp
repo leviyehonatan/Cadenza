@@ -60,8 +60,7 @@ bool isUnknownPolicy(const YamahaChannelPolicy& policy) noexcept
     // A Fallback policy is honoured only when it carries an explicit role-based
     // NTR/NTT (set by fallbackYamahaPolicy for standard channels 9..16); without
     // those it still drops to the generic heuristic via the Unknown checks below.
-    return policy.source == YamahaPolicySource::CASM
-        || policy.ntr == YamahaNtr::Unknown
+    return policy.ntr == YamahaNtr::Unknown
         || policy.ntt == YamahaNtt::Unknown;
 }
 

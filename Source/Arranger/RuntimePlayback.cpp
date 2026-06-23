@@ -9,11 +9,6 @@ namespace cadenza::arranger
 {
 namespace
 {
-bool hasKnownYamahaPolicy(const Part& part)
-{
-    return part.yamahaPolicy && part.yamahaPolicy->source != YamahaPolicySource::Fallback;
-}
-
 std::string destinationRoleForPart(const Part& part)
 {
     if (part.yamahaPolicy && !part.yamahaPolicy->destinationPart.empty())
@@ -195,7 +190,7 @@ bool isYamahaXgDrumPart(const Part& part)
     if (!percussion)
         return false;
 
-    return (part.bankMsb && *part.bankMsb == 127) || hasKnownYamahaPolicy(part);
+    return part.bankMsb && *part.bankMsb == 127;
 }
 
 int remapYamahaXgToGmDrumNote(int note) noexcept

@@ -473,9 +473,9 @@ NoteRole assignRole(uint8_t channelZeroBased,
         return roleFromSourceChordPitch(pitch, sourceRootPc);
 
     if (policy->ntr == YamahaNtr::RootTransposition && policy->ntt == YamahaNtt::Melody)
-        return assignRole(channelZeroBased, pitch);
+        return roleFromSourceChordPitch(pitch, sourceRootPc);
 
-    return assignRole(channelZeroBased, pitch);
+    return roleFromSourceChordPitch(pitch, sourceRootPc);
 }
 
 struct DominantPresetKey
