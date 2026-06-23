@@ -24,6 +24,11 @@ inline float softLimit(float x) noexcept
 AudioEngine::AudioEngine()
     : m_synth(createSynthEngine())
 {
+    for (int ch = 0; ch < kNumChannels; ++ch) {
+        m_lastBankMsb[ch].store(-1);
+        m_lastBankLsb[ch].store(-1);
+        m_lastProgram[ch].store(-1);
+    }
 }
 
 AudioEngine::~AudioEngine()
@@ -295,6 +300,9 @@ void AudioEngine::noteOff(int channel, int note)
 
 void AudioEngine::programChange(int channel, int program)
 {
+    if (channel > 0 && channel < kNumChannels)
+        m_lastProgram[channel].store(std::clamp(program, 0, 127));
+
     if (m_masterLoaded.load()) {
         auto m = juce::MidiMessage::programChange(masterMidiChannel(channel), program);
         m.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
@@ -309,6 +317,13 @@ void AudioEngine::programChange(int channel, int program)
 
 void AudioEngine::controlChange(int channel, int cc, int value)
 {
+    if (channel > 0 && channel < kNumChannels) {
+        if (cc == 0)
+            m_lastBankMsb[channel].store(std::clamp(value, 0, 127));
+        else if (cc == 32)
+            m_lastBankLsb[channel].store(std::clamp(value, 0, 127));
+    }
+
     // CC7 (volume) doubles as the per-part gain for VST-instrument channels, so
     // the mixer fader / mute / solo (sent as effective CC7) affects them too.
     if (cc == 7 && channel > 0 && channel < kNumChannels)
@@ -375,7 +390,28 @@ void AudioEngine::allNotesOff()
 
 bool AudioEngine::loadSoundFont(const std::string& path)
 {
-    return m_synth ? m_synth->loadSoundFont(path) : false;
+    if (!m_synth || !m_synth->loadSoundFont(path))
+        return false;
+    reapplyRememberedChannelPrograms();
+    return true;
+}
+
+void AudioEngine::reapplyRememberedChannelPrograms()
+{
+    if (!m_synth)
+        return;
+
+    for (int channel = 1; channel < kNumChannels; ++channel) {
+        const int bankMsb = m_lastBankMsb[channel].load();
+        const int bankLsb = m_lastBankLsb[channel].load();
+        const int program = m_lastProgram[channel].load();
+        if (bankMsb >= 0)
+            m_synth->controlChange(channel - 1, 0, bankMsb);
+        if (bankLsb >= 0)
+            m_synth->controlChange(channel - 1, 32, bankLsb);
+        if (program >= 0)
+            m_synth->programChange(channel - 1, program);
+    }
 }
 
 const char* AudioEngine::synthEngineName() const noexcept

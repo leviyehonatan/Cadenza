@@ -190,11 +190,13 @@ bool isYamahaXgDrumPart(const Part& part)
     if (!percussion)
         return false;
 
-    return part.bankMsb && *part.bankMsb == 127;
+    return !isGmCompatibleDrumKeyMap(sourceDrumKeyMap(part.bankMsb, part.program));
 }
 
 int remapYamahaXgToGmDrumNote(int note) noexcept
 {
+    return remapDrumNoteToGm(DrumSourceKeyMap::YamahaXg, note);
+
     // Yamaha/Genos kits use notes outside GM's percussion range (35..81). On a GM
     // SoundFont those land on undefined slots and play garbage (whistle/dog-like
     // SFX) or nothing. Map them to playable GM drums so imported styles groove.
@@ -231,16 +233,11 @@ int remapYamahaXgToGmDrumNote(int note) noexcept
 
 DrumNoteRemap drumNoteForPlayback(const Part& part, int note)
 {
-    DrumNoteRemap result;
-    result.originalNote = note;
-    result.playbackNote = note;
-    result.yamahaXg = isYamahaXgDrumPart(part);
+    const bool percussion = part.percussion || cadenza::audio::isCadenzaDrumChannel(part.midiChannel);
+    if (!percussion)
+        return remapDrumNoteForPlayback(DrumSourceKeyMap::GmCompatible, note);
 
-    if (result.yamahaXg)
-        result.playbackNote = remapYamahaXgToGmDrumNote(note);
-
-    result.remapped = result.playbackNote != result.originalNote;
-    return result;
+    return remapDrumNoteForPlayback(sourceDrumKeyMap(part.bankMsb, part.program), note);
 }
 
 std::optional<int> playbackNoteForPart(const Part& part,

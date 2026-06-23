@@ -1,5 +1,6 @@
 #pragma once
 
+#include "DrumKeyMap.h"
 #include "PatternTransposer.h"
 #include "Style.h"
 
@@ -39,16 +40,7 @@ void applyStyleTimingToTransport(cadenza::audio::Transport& transport,
                                  const Style& style,
                                  bool applyTempo = true);
 
-struct DrumNoteRemap
-{
-    int originalNote = 0;
-    int playbackNote = 0;
-    bool yamahaXg = false;
-    bool remapped = false;
-};
-
 bool isYamahaXgDrumPart(const Part& part);
-int remapYamahaXgToGmDrumNote(int note) noexcept;
 DrumNoteRemap drumNoteForPlayback(const Part& part, int note);
 std::optional<int> playbackNoteForPart(const Part& part,
                                        const PatternNote& note,

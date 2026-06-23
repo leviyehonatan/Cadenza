@@ -100,7 +100,7 @@ public:
                 // channel the bank-128 kit select fails and FluidSynth silently
                 // falls back to a bank-0 melodic voice — sub-rhythm hits played
                 // an English Horn instead of a kit.
-                fluid_synth_set_channel_type(m_synth, kDrumChannel2, CHANNEL_TYPE_DRUM);
+                forceDrumChannelTypes();
             }
             juce::Logger::writeToLog("[Cadenza] FluidSynth drum channels active: synth channels 9 (RHY1) + 8 (RHY2); reverb+chorus on; interp=highest; poly=512");
         }
@@ -148,6 +148,7 @@ public:
         const std::lock_guard<std::mutex> lock(m_mutex);
 
         if (isDrumSynthChannel(channel)) {
+            forceDrumChannelType(channel);
             // Drum kits live on the GM percussion bank (128) in GM/GS/XG
             // SoundFonts. Yamaha/Genos styles move this channel to the XG drum
             // bank (CC0=127), which most SoundFonts don't have, so the kit lookup
@@ -219,8 +220,9 @@ public:
         }
         m_soundFontId = fluid_synth_sfload(m_synth, path.c_str(), 1);
         if (m_soundFontId >= 0) {
-            // sfload(reset=1) reprograms every channel; keep RHY2 a drum channel.
-            fluid_synth_set_channel_type(m_synth, kDrumChannel2, CHANNEL_TYPE_DRUM);
+            // sfload(reset=1) reprograms every channel; keep both playback drum
+            // channels explicitly percussive before callers re-issue programs.
+            forceDrumChannelTypes();
         }
         return m_soundFontId >= 0;
     }
@@ -240,6 +242,19 @@ private:
 
     static constexpr bool isDrumSynthChannel(int ch) noexcept {
         return ch == kDrumChannel || ch == kDrumChannel2;
+    }
+
+    void forceDrumChannelType(int channel) {
+        if (m_synth)
+            fluid_synth_set_channel_type(m_synth, channel, CHANNEL_TYPE_DRUM);
+    }
+
+    void forceDrumChannelTypes() {
+        // RHY1 (synth ch 9) is normally covered by synth.drums-channel.active,
+        // but FluidSynth resets can rebuild channel state. RHY2 (synth ch 8)
+        // is never automatic, so assert both through the same path.
+        forceDrumChannelType(kDrumChannel);
+        forceDrumChannelType(kDrumChannel2);
     }
 
     // Log which SoundFont preset a channel actually resolved to after a program

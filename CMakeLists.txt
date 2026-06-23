@@ -49,6 +49,7 @@ add_library(cadenza_core STATIC
     Source/Arranger/StyleLoader.cpp
     Source/Arranger/StyParser.cpp
     Source/Arranger/PatternTransposer.cpp
+    Source/Arranger/DrumKeyMap.cpp
     Source/Arranger/StyleRecorder.cpp
     Source/Arranger/RuntimePlayback.cpp
     Source/Arranger/PlaybackDiagnostics.cpp
@@ -98,6 +99,7 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_transport_tests   tests/TransportTests.cpp)
     cadenza_add_test(cadenza_audioblock_tests  tests/AudioBlockPipelineTests.cpp)
     cadenza_add_test(cadenza_runtime_tests     tests/RuntimePlaybackTests.cpp)
+    cadenza_add_test(cadenza_drum_keymap_tests tests/DrumKeyMapTests.cpp)
     cadenza_add_test(cadenza_octave_tests      tests/OctaveRoutingTests.cpp)
     cadenza_add_test(cadenza_livemelody_tests  tests/LiveMelodyVoiceTests.cpp)
     cadenza_add_test(cadenza_righthand_tests    tests/RightHandTests.cpp)

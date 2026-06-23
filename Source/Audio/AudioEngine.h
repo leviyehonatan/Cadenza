@@ -16,6 +16,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include <array>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -147,6 +148,7 @@ private:
     void consumeTransportCommands();   // audio thread, before transport advance
     void renderPartInstruments(juce::AudioBuffer<float>& view);   // audio thread
     void renderMasterInstrument(juce::AudioBuffer<float>& view);  // audio thread
+    void reapplyRememberedChannelPrograms();
     PluginHost               m_partInstrument[kNumChannels];
     juce::MidiMessageCollector m_partCollector[kNumChannels];
     std::atomic<bool>        m_partLoaded[kNumChannels] {};
@@ -166,6 +168,10 @@ private:
     double m_currentSampleRate = 48000.0;
     int    m_currentBlockSize  = 512;
     juce::MidiBuffer m_effectMidi;   // scratch (empty) MIDI for effect processing
+
+    std::array<std::atomic<int>, kNumChannels> m_lastBankMsb {};
+    std::array<std::atomic<int>, kNumChannels> m_lastBankLsb {};
+    std::array<std::atomic<int>, kNumChannels> m_lastProgram {};
 
     juce::AudioDeviceManager  m_deviceManager;
     juce::AudioSourcePlayer   m_sourcePlayer;

@@ -348,7 +348,7 @@ void yamahaXgKnownProblemNoteRemaps()
     expect(remap.yamahaXg, "bank MSB 127 marks Yamaha/XG drums");
     expect(remap.remapped, "known Yamaha/XG problem note remaps");
     expect(remap.originalNote == 31, "remap preserves original note");
-    expect(remap.playbackNote == 37, "Yamaha/XG sticks note maps to GM side stick");
+    expect(remap.playbackNote == 38, "Yamaha/XG soft snare maps to GM acoustic snare");
 }
 
 void unknownYamahaXgNotesStayUnchanged()
@@ -398,7 +398,7 @@ void drumPlaybackBypassesChordTranspositionAndThenRemaps()
     ctx.globalOctave = 0;
 
     const auto playback = playbackNoteForPart(p, note, ctx);
-    expect(playback && *playback == 37, "drum playback bypasses chord transposition and applies drum remap");
+    expect(playback && *playback == 38, "drum playback bypasses chord transposition and applies drum remap");
 }
 
 void percussionSubRhythmBypassesChordTransposition()
@@ -641,7 +641,7 @@ void playbackDiagnosticsExportCsvMidiAndSummary()
 
     const auto csv = readText(outDir / "cadenza_playback_events.csv");
     expect(csv.find("tick,channel,note,source_note") != std::string::npos, "CSV header present");
-    expect(csv.find("0,10,37,31,90,60,drums,absolute,127/0/0") != std::string::npos,
+    expect(csv.find("0,10,38,31,90,60,drums,absolute,127/0/0") != std::string::npos,
            "CSV includes remapped Yamaha/XG drum note");
     expect(csv.find("true") != std::string::npos, "CSV includes transposed/remapped flags");
 

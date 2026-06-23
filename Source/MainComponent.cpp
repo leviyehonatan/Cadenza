@@ -1409,6 +1409,9 @@ bool MainComponent::loadAndApplySoundFontFile(const juce::File& file, bool persi
     juce::Logger::writeToLog("[Cadenza] SoundFont loaded via " + juce::String(m_audio.synthEngineName())
                              + ": " + file.getFileName() + " (" + file.getFullPathName() + ")");
     m_styleEngine.reapplyCurrentSectionChannelSetup();
+    applyMixerState();
+    applyRightHand();
+    applyLeftVoice();
     pushRuntimeStateToWeb();
     return true;
 }
