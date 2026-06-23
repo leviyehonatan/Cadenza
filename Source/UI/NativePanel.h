@@ -172,6 +172,7 @@ public:
         std::function<void(int, int)> onEditorAudition;       // note, velocity
         std::function<void()>         onEditorTogglePlay;
         std::function<void()>         onEditorToggleRecord;
+        std::function<void(int)>      onEditorSnapDivisionChanged;
         std::function<void(std::string)> onEditorPickSection; // section id
         std::function<void(int)>      onEditorPickPart;       // slot 0..6
         std::function<void()>         onEditorSave;
@@ -239,7 +240,8 @@ public:
     // Style Editor page (page index 7). Drive the embedded piano-roll editor.
     static constexpr int kEditorPage = 7;
     void editorSetPart(const std::vector<cadenza::arranger::PatternNote>& notes,
-                       int sectionTicks, int ticksPerBeat, int beatsPerBar, bool percussion);
+                       int sectionTicks, int ticksPerBeat, int beatsPerBar, int beatUnit,
+                       bool percussion);
     void editorSetTransport(int tickInSection, bool playing, bool recordArmed);
     void editorSetSections(const std::vector<std::pair<std::string, std::string>>& idAndLabel);
     void editorSetActiveSection(const std::string& sectionId);

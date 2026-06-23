@@ -6,20 +6,26 @@
 
 namespace cadenza::ui::piano_roll
 {
-float tickToX(int tick, int sectionTicks, float gridLeft, float gridRight) noexcept
+float tickToX(int tick, int sectionTicks, float gridLeft, float gridRight,
+              float zoom, float scrollTick) noexcept
 {
     const int length = std::max(1, sectionTicks);
     const float width = std::max(1.0f, gridRight - gridLeft);
+    const float pixelsPerTick = (width / static_cast<float>(length))
+        * std::max(0.01f, zoom);
     const int clampedTick = std::clamp(tick, 0, length);
-    return gridLeft + (clampedTick / static_cast<float>(length)) * width;
+    return gridLeft + (clampedTick - std::max(0.0f, scrollTick)) * pixelsPerTick;
 }
 
-int xToTick(float x, int sectionTicks, float gridLeft, float gridRight) noexcept
+int xToTick(float x, int sectionTicks, float gridLeft, float gridRight,
+            float zoom, float scrollTick) noexcept
 {
     const int length = std::max(1, sectionTicks);
     const float width = std::max(1.0f, gridRight - gridLeft);
-    const float proportion = std::clamp((x - gridLeft) / width, 0.0f, 1.0f);
-    return std::clamp(static_cast<int>(std::lround(proportion * length)), 0, length);
+    const float pixelsPerTick = (width / static_cast<float>(length))
+        * std::max(0.01f, zoom);
+    const float tick = std::max(0.0f, scrollTick) + (x - gridLeft) / pixelsPerTick;
+    return std::clamp(static_cast<int>(std::lround(tick)), 0, length);
 }
 
 int wrapPlaybackTick(int tick, int sectionTicks) noexcept
@@ -29,10 +35,11 @@ int wrapPlaybackTick(int tick, int sectionTicks) noexcept
     return ((tick % sectionTicks) + sectionTicks) % sectionTicks;
 }
 
-float playheadX(int tick, int sectionTicks, float gridLeft, float gridRight) noexcept
+float playheadX(int tick, int sectionTicks, float gridLeft, float gridRight,
+                float zoom, float scrollTick) noexcept
 {
     return tickToX(wrapPlaybackTick(tick, sectionTicks),
-                   sectionTicks, gridLeft, gridRight);
+                   sectionTicks, gridLeft, gridRight, zoom, scrollTick);
 }
 
 GridLineKind classifyGridLine(int tick, int ticksPerBeat,

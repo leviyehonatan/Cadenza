@@ -46,6 +46,7 @@ void selectOnly(NoteSelection& selection, int index);
 void toggle(NoteSelection& selection, int index);
 NoteSelection selectIntersecting(const std::vector<NoteBounds>& bounds,
                                  Rectangle selectionRectangle);
+std::vector<int> selectedIndices(const NoteSelection& selection, int noteCount);
 
 std::vector<cadenza::arranger::PatternNote> moveSelected(
     const std::vector<cadenza::arranger::PatternNote>& notes,
@@ -54,6 +55,21 @@ std::vector<cadenza::arranger::PatternNote> moveSelected(
 std::vector<cadenza::arranger::PatternNote> resizeSelected(
     const std::vector<cadenza::arranger::PatternNote>& notes,
     const NoteSelection& selection, int durationDelta, int minimumDuration,
+    int sectionTicks);
+void moveSelectedInPlace(
+    std::vector<cadenza::arranger::PatternNote>& notes,
+    const std::vector<cadenza::arranger::PatternNote>& startNotes,
+    const std::vector<int>& selection, int tickDelta, int pitchDelta,
+    int sectionTicks);
+void resizeSelectedInPlace(
+    std::vector<cadenza::arranger::PatternNote>& notes,
+    const std::vector<cadenza::arranger::PatternNote>& startNotes,
+    const std::vector<int>& selection, int durationDelta, int minimumDuration,
+    int sectionTicks);
+void resizeSelectedLeftInPlace(
+    std::vector<cadenza::arranger::PatternNote>& notes,
+    const std::vector<cadenza::arranger::PatternNote>& startNotes,
+    const std::vector<int>& selection, int startDelta, int minimumDuration,
     int sectionTicks);
 NoteEditResult duplicateSelected(
     const std::vector<cadenza::arranger::PatternNote>& notes,

@@ -94,6 +94,7 @@ public:
 
         void mouseDown(const juce::MouseEvent& e) override
         {
+            roll.grabKeyboardFocus();
             selectNote(e.position.x);
             applyVelocity(e.position.y);
         }
@@ -101,6 +102,13 @@ public:
         void mouseDrag(const juce::MouseEvent& e) override
         {
             applyVelocity(e.position.y);
+        }
+
+        void mouseUp(const juce::MouseEvent&) override
+        {
+            if (selectedNote >= 0)
+                roll.commitNotes();
+            selectedNote = -1;
         }
 
     private:
@@ -118,14 +126,32 @@ public:
         {
             if (selectedNote < 0)
                 return;
+            const auto oldDirty = noteBounds(selectedNote);
             const int velocity = piano_roll::velocityAtY(
                 y - 20.0f, static_cast<float>(std::max(1, getHeight() - 24)));
             roll.setNoteVelocity(selectedNote, velocity);
-            repaint();
+            const auto dirty = oldDirty.getUnion(noteBounds(selectedNote));
+            if (!dirty.isEmpty())
+                repaint(dirty);
         }
 
         StylePartPianoRoll& roll;
         int selectedNote = -1;
+
+        juce::Rectangle<int> noteBounds(int index) const
+        {
+            if (index < 0 || index >= (int) roll.notes().size())
+                return {};
+            const auto& note = roll.notes()[(std::size_t) index];
+            const float x = roll.xForTick(note.tick);
+            const float baseline = static_cast<float>(getHeight() - 5);
+            const float usableHeight = static_cast<float>(std::max(1, getHeight() - 24));
+            const float height = usableHeight * (note.velocity / 127.0f);
+            return juce::Rectangle<float>(
+                x - 5.0f, baseline - height - 2.0f,
+                11.0f, height + 4.0f).getSmallestIntegerContainer();
+        }
+
     };
 
     explicit Impl(StylePartEditorView::Callbacks cb)
@@ -134,6 +160,9 @@ public:
         setWantsKeyboardFocus(true);
         setMouseClickGrabsKeyboardFocus(true);
         roll.setWantsKeyboardFocus(true);
+        roll.onKeyPressed = [this](const juce::KeyPress& key) {
+            return handleKeyPress(key);
+        };
 
         addAndMakeVisible(roll);
         roll.onNotesEdited = [this](std::vector<cadenza::arranger::PatternNote> notes) {
@@ -164,6 +193,12 @@ public:
         configureButton(record, "Record", [this] {
             executeCommand(bar_workflow::EditorCommand::ToggleRecord);
         });
+        configureButton(undoButton, "Undo", [this] {
+            performUndo();
+        });
+        configureButton(redoButton, "Redo", [this] {
+            performRedo();
+        });
         configureButton(copy, "Copy", [this] {
             executeCommand(bar_workflow::EditorCommand::Copy);
         });
@@ -187,9 +222,8 @@ public:
         });
 
         mode.addItem("Overdub", 1);
-        mode.addItem("Replace", 2);
         mode.setSelectedId(1, juce::dontSendNotification);
-        mode.setTooltip("Replace recording is not implemented; recording remains overdub");
+        mode.setTooltip("Recording adds to the selected part");
         addAndMakeVisible(mode);
 
         snapLabel.setText("Grid", juce::dontSendNotification);
@@ -205,7 +239,10 @@ public:
         snap.setSelectedId(16, juce::dontSendNotification);
         snap.onChange = [this] {
             const int id = snap.getSelectedId();
-            roll.setSnapDivision(id == 1 ? 0 : id);
+            const int division = id == 1 ? 0 : id;
+            roll.setSnapDivision(division);
+            if (callbacks.onSnapDivisionChanged)
+                callbacks.onSnapDivisionChanged(division);
         };
         addAndMakeVisible(snap);
 
@@ -303,6 +340,8 @@ public:
         hintLabel.setText(hint, juce::dontSendNotification);
         applyVisibility();
         resized();
+        if (editorEnabled)
+            roll.grabKeyboardFocus();
     }
 
     void resized() override
@@ -326,6 +365,8 @@ public:
         play.setBounds(bar.removeFromLeft(56).reduced(3));
         record.setBounds(bar.removeFromLeft(68).reduced(3));
         mode.setBounds(bar.removeFromLeft(92).reduced(3));
+        undoButton.setBounds(bar.removeFromLeft(54).reduced(3));
+        redoButton.setBounds(bar.removeFromLeft(54).reduced(3));
         copy.setBounds(bar.removeFromLeft(52).reduced(3));
         paste.setBounds(bar.removeFromLeft(54).reduced(3));
         duplicate.setBounds(bar.removeFromLeft(76).reduced(3));
@@ -350,16 +391,21 @@ public:
     }
 
     void setPart(const std::vector<cadenza::arranger::PatternNote>& notes,
-                 int sectionTicks, int ticksPerBeat, int beatsPerBar, bool percussion)
+                 int sectionTicks, int ticksPerBeat, int beatsPerBar, int beatUnit,
+                 bool percussion)
     {
         percussionPart = percussion;
-        roll.setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, percussion);
-        const int barTicks = std::max(1, ticksPerBeat * std::max(1, beatsPerBar));
+        roll.setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, beatUnit, percussion);
+        if (callbacks.onSnapDivisionChanged)
+            callbacks.onSnapDivisionChanged(roll.snapDivision());
+        const int barTicks = roll.ticksPerBar();
         const int bars = std::max(1, sectionTicks / barTicks);
         barsLabel.setText(juce::String(bars) + (bars == 1 ? " bar" : " bars"),
                           juce::dontSendNotification);
         updateSelectionStatus();
         velocityLane.repaint();
+        if (editorEnabled)
+            roll.grabKeyboardFocus();
     }
 
     void setTransportState(int tickInSection, bool playing, bool recordArmed)
@@ -370,7 +416,7 @@ public:
         record.setButtonText(recordArmed ? "Stop Rec" : "Record");
         updateRecColour(recordArmed);
 
-        const int beatTicks = std::max(1, roll.ticksPerBeat());
+        const int beatTicks = std::max(1, roll.ticksPerBeat() * 4 / roll.beatUnit());
         const int beatsPerBar = std::max(1, roll.beatsPerBar());
         const int wrappedTick = piano_roll::wrapPlaybackTick(
             tickInSection, roll.sectionTicks());
@@ -379,19 +425,45 @@ public:
         const int beat = totalBeats % beatsPerBar + 1;
         position.setText(juce::String(bar) + "." + juce::String(beat),
                          juce::dontSendNotification);
-        velocityLane.repaint();
     }
 
     bool handleKeyPress(const juce::KeyPress& key)
     {
         if (!editorEnabled)
             return false;
+        const auto character = juce::CharacterFunctions::toLowerCase(
+            key.getTextCharacter());
+        const auto codeCharacter = juce::CharacterFunctions::toLowerCase(
+            static_cast<juce::juce_wchar>(key.getKeyCode()));
+        const bool isZ = character == 'z' || codeCharacter == 'z';
+        const bool isY = character == 'y' || codeCharacter == 'y';
+        if (key.getModifiers().isCtrlDown() && isZ) {
+            if (key.getModifiers().isShiftDown())
+                performRedo();
+            else
+                performUndo();
+            return true;
+        }
+        if (key.getModifiers().isCtrlDown() && isY) {
+            performRedo();
+            return true;
+        }
         const auto command = bar_workflow::commandForShortcut(
             shortcutKey(key), key.getModifiers().isCtrlDown());
         if (command == bar_workflow::EditorCommand::None)
             return false;
         executeCommand(command);
         return true;
+    }
+
+    bool keyPressed(const juce::KeyPress& key) override
+    {
+        return handleKeyPress(key);
+    }
+
+    void mouseDown(const juce::MouseEvent&) override
+    {
+        grabKeyboardFocus();
     }
 
 private:
@@ -416,6 +488,8 @@ private:
         selectionStatus.setVisible(ed);
         position.setVisible(ed);
         rec.setVisible(ed);
+        undoButton.setVisible(ed);
+        redoButton.setVisible(ed);
 
         sectionBox.setVisible(ed && styleControls);
         instrumentBox.setVisible(ed && styleControls);
@@ -500,6 +574,7 @@ private:
                         "Keyboard shortcuts",
                         "Space  Play/Stop\nR  Record\nCtrl+C  Copy selection\n"
                         "Ctrl+V  Paste\nCtrl+D  Duplicate\nDelete  Delete selection\n"
+                        "Ctrl+Z  Undo\nCtrl+Y / Ctrl+Shift+Z  Redo\n"
                         "Esc  Clear selection");
                 } else if (result == kHelpMouse) {
                     juce::AlertWindow::showMessageBoxAsync(
@@ -508,7 +583,9 @@ private:
                         "Click note  Select\nCtrl+click note  Add/remove selection\n"
                         "Drag empty grid  Box select\nDrag selected notes  Move\n"
                         "Shift+drag selected notes  Duplicate and move\n"
-                        "Drag note right edge  Resize\nRight-click note  Delete");
+                        "Drag note right edge  Resize\nRight-click note  Delete\n"
+                        "Wheel  Scroll pitches\nCtrl+wheel  Horizontal zoom\n"
+                        "Shift+wheel  Horizontal pan");
                 } else if (result == kHelpPatterns) {
                     juce::AlertWindow::showMessageBoxAsync(
                         juce::MessageBoxIconType::InfoIcon,
@@ -770,10 +847,28 @@ private:
         grabKeyboardFocus();
     }
 
+    void performUndo()
+    {
+        if (roll.undo()) {
+            velocityLane.repaint();
+            updateSelectionStatus();
+        }
+        grabKeyboardFocus();
+    }
+
+    void performRedo()
+    {
+        if (roll.redo()) {
+            velocityLane.repaint();
+            updateSelectionStatus();
+        }
+        grabKeyboardFocus();
+    }
+
     StylePartEditorView::Callbacks callbacks;
     StylePartPianoRoll roll;
     VelocityLane velocityLane;
-    juce::TextButton play, record, copy, paste, duplicate, clear;
+    juce::TextButton play, record, undoButton, redoButton, copy, paste, duplicate, clear;
     juce::TextButton importMidi, patterns, help;
     juce::ComboBox mode, snap;
     juce::Label snapLabel, selectionStatus, position, rec;
@@ -810,9 +905,9 @@ StylePartEditorView::~StylePartEditorView() = default;
 
 void StylePartEditorView::setPart(
     const std::vector<cadenza::arranger::PatternNote>& notes,
-    int sectionTicks, int ticksPerBeat, int beatsPerBar, bool percussion)
+    int sectionTicks, int ticksPerBeat, int beatsPerBar, int beatUnit, bool percussion)
 {
-    m_impl->setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, percussion);
+    m_impl->setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, beatUnit, percussion);
 }
 
 void StylePartEditorView::setTransportState(int tickInSection, bool playing, bool recordArmed)
@@ -883,6 +978,9 @@ StylePartEditorWindow::StylePartEditorWindow(Callbacks callbacks)
     };
     viewCb.onTogglePlayback = [this] { if (m_cb.onTogglePlayback) m_cb.onTogglePlayback(); };
     viewCb.onToggleRecord   = [this] { if (m_cb.onToggleRecord) m_cb.onToggleRecord(); };
+    viewCb.onSnapDivisionChanged = [this](int division) {
+        if (m_cb.onSnapDivisionChanged) m_cb.onSnapDivisionChanged(division);
+    };
 
     m_view = std::make_unique<StylePartEditorView>(std::move(viewCb));
     m_view->setSize(1160, 680);
@@ -898,10 +996,10 @@ StylePartEditorWindow::~StylePartEditorWindow()
 void StylePartEditorWindow::setPart(
     const juce::String& partLabel,
     const std::vector<cadenza::arranger::PatternNote>& notes,
-    int sectionTicks, int ticksPerBeat, int beatsPerBar, bool percussion)
+    int sectionTicks, int ticksPerBeat, int beatsPerBar, int beatUnit, bool percussion)
 {
     setName("Part Editor - " + partLabel);
-    m_view->setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, percussion);
+    m_view->setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, beatUnit, percussion);
 }
 
 void StylePartEditorWindow::setTransportState(int tickInSection,

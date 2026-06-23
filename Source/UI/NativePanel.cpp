@@ -642,6 +642,10 @@ NativePanel::NativePanel()
         };
         ecb.onTogglePlayback = [this] { if (m_cb.onEditorTogglePlay) m_cb.onEditorTogglePlay(); };
         ecb.onToggleRecord   = [this] { if (m_cb.onEditorToggleRecord) m_cb.onEditorToggleRecord(); };
+        ecb.onSnapDivisionChanged = [this](int division) {
+            if (m_cb.onEditorSnapDivisionChanged)
+                m_cb.onEditorSnapDivisionChanged(division);
+        };
         ecb.onPickSection = [this](std::string id) {
             if (m_cb.onEditorPickSection) m_cb.onEditorPickSection(std::move(id));
         };
@@ -890,9 +894,11 @@ void NativePanel::setMakeEditableAvailable(bool available)
 }
 
 void NativePanel::editorSetPart(const std::vector<cadenza::arranger::PatternNote>& notes,
-                                int sectionTicks, int ticksPerBeat, int beatsPerBar, bool percussion)
+                                int sectionTicks, int ticksPerBeat, int beatsPerBar,
+                                int beatUnit, bool percussion)
 {
-    if (m_editor) m_editor->setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, percussion);
+    if (m_editor)
+        m_editor->setPart(notes, sectionTicks, ticksPerBeat, beatsPerBar, beatUnit, percussion);
 }
 
 void NativePanel::editorSetTransport(int tickInSection, bool playing, bool recordArmed)

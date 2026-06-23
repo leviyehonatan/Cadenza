@@ -150,9 +150,10 @@ void overdubMergesAndClearRemoves()
     expect(style->sections[0].parts[0].notes.size() == 2, "overdub merges takes");
     expect(rec.targetPartHasNotes(), "target part reports notes");
 
-    expect(rec.clearTargetPart(), "clear removes the part");
+    expect(rec.clearTargetPart(), "clear reports it had data");
     style = rec.snapshotStyle();
-    expect(style->sections[0].parts.empty(), "part gone after clear");
+    expect(!style->sections[0].parts.empty(), "part slot preserved after clear");
+    expect(style->sections[0].parts[0].notes.empty(), "notes cleared from part");
     expect(!rec.targetPartHasNotes(), "no notes after clear");
 }
 
@@ -411,10 +412,11 @@ void replacePartNotesRebakesRoles()
     expect(bass.notes[0].role == NoteRole::Chord3, "moved note re-bakes as 3rd");
     expect(bass.notes[1].role == NoteRole::Chord7, "added note bakes as 7th");
 
-    // Replacing with nothing removes the part.
+    // Replacing with nothing clears the notes but preserves the part slot + metadata.
     rec.replacePartNotes({});
     style = rec.snapshotStyle();
-    expect(style->sections[0].parts.empty(), "empty edit removes the part");
+    expect(!style->sections[0].parts.empty(), "part slot preserved on empty edit");
+    expect(style->sections[0].parts[0].notes.empty(), "empty edit clears notes");
 }
 
 // --- loop recording: wraparound + merge / dedup / overlap rules ---

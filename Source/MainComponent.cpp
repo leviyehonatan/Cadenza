@@ -1845,12 +1845,14 @@ void MainComponent::recorderArm(bool on)
 void MainComponent::makeLoadedStyleEditable()
 {
     auto current = m_styleEngine.currentStyle();
-    if (!current || current->yamahaFormat == cadenza::arranger::YamahaStyleFormat::Unknown)
-        return;   // nothing loaded, or already an editable native style
+    if (!current)
+        return;
 
-    cadenza::arranger::Style editable = *current;   // edit a copy; the .sty is untouched
+    cadenza::arranger::Style editable = *current;   // edit a copy; the loaded file is untouched
     std::vector<std::string> dropped;
-    cadenza::arranger::makeStyleEditable(editable, &dropped);
+    const bool alreadyEditable = cadenza::arranger::isEditableCadenzaStyle(editable);
+    if (!alreadyEditable)
+        cadenza::arranger::makeStyleEditable(editable, &dropped);
 
     const auto section = bestStartSection(editable);
     if (!m_recorder.loadSession(editable, section)) {
@@ -1867,7 +1869,9 @@ void MainComponent::makeLoadedStyleEditable()
     }
     recorderReloadEditor();
 
-    juce::String status = "Editable - edit parts in the piano roll, then Save as .cstyle";
+    juce::String status = alreadyEditable
+        ? "Editable session reopened - edit parts, Record, or Save as .cstyle"
+        : "Editable - edit parts in the piano roll, then Save as .cstyle";
     if (!dropped.empty()) {
         juce::String list;
         for (const auto& d : dropped) { if (list.isNotEmpty()) list += ", "; list += juce::String(d); }
@@ -1881,7 +1885,9 @@ void MainComponent::makeLoadedStyleEditable()
         m_panel->setMakeEditableAvailable(false);
     }
     juce::Logger::writeToLog("[Cadenza] Make Editable: \"" + juce::String(editable.name)
-                             + "\" is now editable (section " + juce::String(section) + ")");
+                             + (alreadyEditable ? "\" reopened for editing (section "
+                                                : "\" is now editable (section ")
+                             + juce::String(section) + ")");
 }
 
 void MainComponent::recorderRefreshStyle()
@@ -1973,6 +1979,7 @@ void MainComponent::recorderOpenEditor()
         cb.onNotesEdited = [this](std::vector<cadenza::arranger::PatternNote> notes) {
             m_recorder.replacePartNotes(std::move(notes));
             recorderRefreshStyle();   // hear the edit immediately while looping
+            recorderReloadEditor();   // reflect normalized quantize/merge result
         };
         cb.onAudition = [this](int note, int velocity) {
             const auto& info = cadenza::arranger::recorderPartInfo(m_recorder.targetPart());
@@ -1994,6 +2001,9 @@ void MainComponent::recorderOpenEditor()
         };
         cb.onToggleRecord = [this] {
             recorderArm(!m_recordArmed.load());
+        };
+        cb.onSnapDivisionChanged = [this](int division) {
+            m_recorder.setQuantizeDivision(division);
         };
         cb.onClosed = [this] {
             juce::Component::SafePointer<MainComponent> safe(this);
@@ -2060,13 +2070,18 @@ void MainComponent::showGenerateStyleDialog()
         return;
     }
 
-    auto aw = std::make_unique<juce::AlertWindow>(
-        "AI Style",
-        "Describe a style or name a song, e.g.\n"
-        "\"reggae like UB40 Kingston Town, 75 bpm, add claps\".",
-        juce::MessageBoxIconType::NoIcon);
+    const bool editing = m_recorder.sessionActive();
+    const juce::String title = editing ? "AI: Edit Style" : "AI Style";
+    const juce::String msg = editing
+        ? juce::String("Describe a change to the current style, e.g.\n"
+                       "\"make the bass busier in Main B\" or \"add a clap on beat 4\".\n"
+                       "(Or start with \"new \" to create a fresh style instead.)")
+        : juce::String("Describe a style or name a song, e.g.\n"
+                       "\"reggae like UB40 Kingston Town, 75 bpm, add claps\".");
 
-    aw->addTextEditor("prompt", juce::String(), "Description");
+    auto aw = std::make_unique<juce::AlertWindow>(title, msg, juce::MessageBoxIconType::NoIcon);
+
+    aw->addTextEditor("prompt", juce::String(), editing ? "Change" : "Description");
     if (auto* ed = aw->getTextEditor("prompt")) {
         ed->setMultiLine(true);
         ed->setReturnKeyStartsNewLine(true);
@@ -2095,13 +2110,22 @@ void MainComponent::generateStyleFromText(const juce::String& prompt)
     const juce::String key   = juce::String(m_settings->state().anthropicApiKey);
     const juce::String model = juce::String(m_settings->state().aiModel);
 
+    // If an editable style is loaded, the instruction EDITS it (unless it starts
+    // with "new ", which forces a fresh style). Otherwise it creates from scratch.
+    const bool wantsNew = prompt.trim().startsWithIgnoreCase("new ");
+    const bool editing = m_recorder.sessionActive() && !wantsNew;
+    juce::String currentStyleJson;
+    if (editing)
+        if (auto snap = m_recorder.snapshotStyle())
+            currentStyleJson = juce::String(cadenza::arranger::saveStyleToJson(*snap, true));
+
     if (m_panel)
         m_panel->setRecorderState(m_recorder.sessionActive(), false,
-            "Generating style with AI (" + model + ")...");
+            (editing ? "Editing style with AI (" : "Generating style with AI (") + model + ")...");
 
     juce::Component::SafePointer<MainComponent> safe(this);
-    std::thread([safe, key, model, prompt] {
-        auto result = cadenza::ai::generateStyle(key, model, prompt);
+    std::thread([safe, key, model, prompt, currentStyleJson] {
+        auto result = cadenza::ai::generateStyle(key, model, prompt, currentStyleJson);
         juce::MessageManager::callAsync([safe, result] {
             if (auto* self = safe.getComponent())
                 self->applyGeneratedStyle(result);
@@ -2163,6 +2187,7 @@ void MainComponent::recorderReloadEditor()
                               m_recorder.sectionLengthTicks(),
                               cfg.ticksPerBeat,
                               cfg.beatsPerBar,
+                              cfg.beatUnit,
                               info.percussion);
         const int len = m_recorder.sectionLengthTicks();
         const bool playing = m_audio.transport().playing();
@@ -2205,7 +2230,8 @@ void MainComponent::refreshStyleEditorPage()
     const auto& info = cadenza::arranger::recorderPartInfo(m_recorder.targetPart());
     m_panel->editorSetPart(m_recorder.targetPartNotes(),
                            m_recorder.sectionLengthTicks(),
-                           cfg.ticksPerBeat, cfg.beatsPerBar, info.percussion);
+                           cfg.ticksPerBeat, cfg.beatsPerBar, cfg.beatUnit,
+                           info.percussion);
 
     const int len = m_recorder.sectionLengthTicks();
     const bool playing = m_audio.transport().playing();
@@ -2242,6 +2268,11 @@ void MainComponent::recorderCloseEditor()
 
 void MainComponent::recorderExit()
 {
+    const bool hadEditableStyle = m_recorder.sessionActive();
+    std::shared_ptr<const cadenza::arranger::Style> editableStyle;
+    if (hadEditableStyle)
+        editableStyle = m_recorder.snapshotStyle();
+
     m_recordArmed.store(false);
     m_midi.setCaptureMode(false);
     m_audio.setMetronomeEnabled(false);
@@ -2249,15 +2280,31 @@ void MainComponent::recorderExit()
     recorderCloseEditor();
     m_recorder.endSession();
 
-    // Back to the regular arranger: reload the previous style.
-    if (!tryLoadLastStyle())
+    // Back to the regular arranger while keeping the in-progress style loaded,
+    // so Make Editable can reopen it without requiring a save/reload cycle.
+    if (editableStyle) {
+        m_styleEngine.setStyle(editableStyle);
+        if (editableStyle->findSection(m_currentMain) == nullptr) {
+            const auto section = bestStartSection(*editableStyle);
+            if (!section.empty()) {
+                m_styleEngine.setSection(section);
+                if (section.rfind("main", 0) == 0)
+                    m_currentMain = section;
+            }
+        }
+    } else if (!tryLoadLastStyle()) {
         tryLoadFactoryStyle();
-    m_recorder.endSession();
+    }
+
     m_midi.setCaptureMode(false);
     m_audio.setMetronomeEnabled(false);
     updateNativePanelStyle();
-    if (m_panel)
-        m_panel->setRecorderState(false, false, "Press New to record your own style");
+    if (m_panel) {
+        m_panel->setRecorderState(false, false,
+            editableStyle ? "Recorder closed - press Make Editable to keep editing this style"
+                          : "Press New to record your own style");
+        m_panel->setMakeEditableAvailable(editableStyle != nullptr);
+    }
     juce::Logger::writeToLog("[Cadenza] Style Recorder: session closed");
 }
 
@@ -2739,6 +2786,7 @@ void MainComponent::buildNativePanel()
     cb.onEditorNotesEdited = [this](std::vector<cadenza::arranger::PatternNote> notes) {
         m_recorder.replacePartNotes(std::move(notes));
         recorderRefreshStyle();   // hear the edit immediately while looping
+        recorderReloadEditor();   // reflect normalized quantize/merge result
     };
     cb.onEditorAudition = [this](int note, int velocity) {
         const auto& info = cadenza::arranger::recorderPartInfo(m_recorder.targetPart());
@@ -2756,6 +2804,9 @@ void MainComponent::buildNativePanel()
     };
     cb.onEditorTogglePlay   = [this] { togglePlayback(); };
     cb.onEditorToggleRecord = [this] { recorderArm(!m_recordArmed.load()); };
+    cb.onEditorSnapDivisionChanged = [this](int division) {
+        m_recorder.setQuantizeDivision(division);
+    };
     cb.onEditorPickSection = [this](std::string id) {
         if (m_recorder.setEditSection(id))
             recorderReloadEditor();
@@ -2870,9 +2921,11 @@ void MainComponent::updateNativePanelStyle()
         return;
     }
 
-    // Offer "Make Editable" only for an imported Yamaha style with no editor session yet.
+    // Offer "Make Editable" for an imported Yamaha style, or to reopen an
+    // inactive native Cadenza style that is still loaded after recorder Exit.
     m_panel->setMakeEditableAvailable(
-        style->yamahaFormat != cadenza::arranger::YamahaStyleFormat::Unknown
+        (style->yamahaFormat != cadenza::arranger::YamahaStyleFormat::Unknown
+         || cadenza::arranger::isEditableCadenzaStyle(*style))
         && !m_recorder.sessionActive());
 
     // Disable the Editor page when nothing editable is loaded. (When a session is

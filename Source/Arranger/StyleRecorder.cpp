@@ -545,36 +545,32 @@ bool StyleRecorder::clearTargetPart()
     std::lock_guard<std::mutex> lk(m_mutex);
     if (!m_active)
         return false;
-    const auto& info = recorderPartInfo(m_target);
-    auto* section = editableSection();
-    if (section == nullptr)
+    if (editableSection() == nullptr)
         return false;
-    auto& parts = section->parts;
-    const auto before = parts.size();
-    parts.erase(std::remove_if(parts.begin(), parts.end(),
-                               [&](const Part& p) { return p.midiChannel == info.midiChannel; }),
-                parts.end());
+    auto& part = findOrCreateTargetPart();
+    const bool hadData = !part.notes.empty() || !part.automation.empty();
+    part.notes.clear();
+    part.automation.clear();
     m_take.clear();
-    return parts.size() != before;
+    return hadData;
 }
 
-void StyleRecorder::replacePartNotes(std::vector<PatternNote> notes)
+std::vector<PatternNote> StyleRecorder::replacePartNotes(std::vector<PatternNote> notes)
 {
     std::lock_guard<std::mutex> lk(m_mutex);
     if (!m_active)
-        return;
+        return {};
 
     const auto& info = recorderPartInfo(m_target);
     auto* section = editableSection();
     if (section == nullptr)
-        return;
-    auto& parts = section->parts;
+        return {};
 
     if (notes.empty()) {
-        parts.erase(std::remove_if(parts.begin(), parts.end(),
-                                   [&](const Part& p) { return p.midiChannel == info.midiChannel; }),
-                    parts.end());
-        return;
+        auto& part = findOrCreateTargetPart();
+        part.notes.clear();
+        part.automation.clear();
+        return part.notes;
     }
 
     const int len = m_config.bars
@@ -590,6 +586,7 @@ void StyleRecorder::replacePartNotes(std::vector<PatternNote> notes)
 
     auto& part = findOrCreateTargetPart();
     part.notes.clear();
+    part.automation.clear();
     for (auto n : notes) {
         n.pitch = std::clamp(n.pitch, 0, 127);
         n.velocity = std::clamp(n.velocity, 1, 127);
@@ -600,6 +597,7 @@ void StyleRecorder::replacePartNotes(std::vector<PatternNote> notes)
     }
     std::sort(part.notes.begin(), part.notes.end(),
               [](const PatternNote& a, const PatternNote& b) { return a.tick < b.tick; });
+    return part.notes;
 }
 
 std::vector<PatternNote> StyleRecorder::targetPartNotes() const

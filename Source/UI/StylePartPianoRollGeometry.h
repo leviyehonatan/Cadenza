@@ -24,11 +24,14 @@ struct VelocityNote
     int duration = 1;
 };
 
-float tickToX(int tick, int sectionTicks, float gridLeft, float gridRight) noexcept;
-int xToTick(float x, int sectionTicks, float gridLeft, float gridRight) noexcept;
+float tickToX(int tick, int sectionTicks, float gridLeft, float gridRight,
+              float zoom = 1.0f, float scrollTick = 0.0f) noexcept;
+int xToTick(float x, int sectionTicks, float gridLeft, float gridRight,
+            float zoom = 1.0f, float scrollTick = 0.0f) noexcept;
 
 int wrapPlaybackTick(int tick, int sectionTicks) noexcept;
-float playheadX(int tick, int sectionTicks, float gridLeft, float gridRight) noexcept;
+float playheadX(int tick, int sectionTicks, float gridLeft, float gridRight,
+                float zoom = 1.0f, float scrollTick = 0.0f) noexcept;
 
 GridLineKind classifyGridLine(int tick, int ticksPerBeat,
                               int beatsPerBar, int subdivisionTicks) noexcept;

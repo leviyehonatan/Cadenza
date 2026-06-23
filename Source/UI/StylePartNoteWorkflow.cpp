@@ -47,6 +47,16 @@ NoteSelection selectIntersecting(const std::vector<NoteBounds>& bounds,
     return selection;
 }
 
+std::vector<int> selectedIndices(const NoteSelection& selection, int noteCount)
+{
+    std::vector<int> indices;
+    indices.reserve(selection.size());
+    for (const int index : selection)
+        if (validIndex(index, noteCount))
+            indices.push_back(index);
+    return indices;
+}
+
 std::vector<cadenza::arranger::PatternNote> moveSelected(
     const std::vector<cadenza::arranger::PatternNote>& notes,
     const NoteSelection& selection, int tickDelta, int pitchDelta,
@@ -82,6 +92,44 @@ std::vector<cadenza::arranger::PatternNote> moveSelected(
     return result;
 }
 
+void moveSelectedInPlace(
+    std::vector<cadenza::arranger::PatternNote>& notes,
+    const std::vector<cadenza::arranger::PatternNote>& startNotes,
+    const std::vector<int>& selection, int tickDelta, int pitchDelta,
+    int sectionTicks)
+{
+    if (selection.empty() || sectionTicks <= 0)
+        return;
+
+    int minimumTick = sectionTicks;
+    int maximumEnd = 0;
+    int minimumPitch = 127;
+    int maximumPitch = 0;
+    for (const int index : selection) {
+        if (!validIndex(index, (int) startNotes.size())
+            || !validIndex(index, (int) notes.size()))
+            continue;
+        minimumTick = std::min(minimumTick, startNotes[index].tick);
+        maximumEnd = std::max(maximumEnd,
+                              startNotes[index].tick + startNotes[index].duration);
+        minimumPitch = std::min(minimumPitch, startNotes[index].pitch);
+        maximumPitch = std::max(maximumPitch, startNotes[index].pitch);
+    }
+
+    const int clampedTickDelta = std::clamp(
+        tickDelta, -minimumTick, sectionTicks - maximumEnd);
+    const int clampedPitchDelta = std::clamp(
+        pitchDelta, -minimumPitch, 127 - maximumPitch);
+    for (const int index : selection) {
+        if (!validIndex(index, (int) startNotes.size())
+            || !validIndex(index, (int) notes.size()))
+            continue;
+        notes[index] = startNotes[index];
+        notes[index].tick += clampedTickDelta;
+        notes[index].pitch += clampedPitchDelta;
+    }
+}
+
 std::vector<cadenza::arranger::PatternNote> resizeSelected(
     const std::vector<cadenza::arranger::PatternNote>& notes,
     const NoteSelection& selection, int durationDelta, int minimumDuration,
@@ -97,6 +145,61 @@ std::vector<cadenza::arranger::PatternNote> resizeSelected(
             result[index].duration + durationDelta, minimum, maximum);
     }
     return result;
+}
+
+void resizeSelectedInPlace(
+    std::vector<cadenza::arranger::PatternNote>& notes,
+    const std::vector<cadenza::arranger::PatternNote>& startNotes,
+    const std::vector<int>& selection, int durationDelta, int minimumDuration,
+    int sectionTicks)
+{
+    const int minimum = std::max(1, minimumDuration);
+    for (const int index : selection) {
+        if (!validIndex(index, (int) startNotes.size())
+            || !validIndex(index, (int) notes.size()))
+            continue;
+        notes[index] = startNotes[index];
+        const int maximum = std::max(minimum, sectionTicks - notes[index].tick);
+        notes[index].duration = std::clamp(
+            notes[index].duration + durationDelta, minimum, maximum);
+    }
+}
+
+void resizeSelectedLeftInPlace(
+    std::vector<cadenza::arranger::PatternNote>& notes,
+    const std::vector<cadenza::arranger::PatternNote>& startNotes,
+    const std::vector<int>& selection, int startDelta, int minimumDuration,
+    int sectionTicks)
+{
+    if (selection.empty() || sectionTicks <= 0)
+        return;
+
+    const int minimum = std::max(1, minimumDuration);
+    int lowerDelta = -sectionTicks;
+    int upperDelta = sectionTicks;
+    for (const int index : selection) {
+        if (!validIndex(index, (int) startNotes.size())
+            || !validIndex(index, (int) notes.size()))
+            continue;
+        const auto& note = startNotes[index];
+        lowerDelta = std::max(lowerDelta, -note.tick);
+        upperDelta = std::min(upperDelta, note.duration - minimum);
+    }
+
+    if (lowerDelta > upperDelta)
+        lowerDelta = upperDelta = 0;
+
+    const int clampedDelta = std::clamp(startDelta, lowerDelta, upperDelta);
+    for (const int index : selection) {
+        if (!validIndex(index, (int) startNotes.size())
+            || !validIndex(index, (int) notes.size()))
+            continue;
+        notes[index] = startNotes[index];
+        const int end = notes[index].tick + notes[index].duration;
+        notes[index].tick = std::clamp(notes[index].tick + clampedDelta,
+                                       0, std::max(0, end - minimum));
+        notes[index].duration = std::max(minimum, end - notes[index].tick);
+    }
 }
 
 NoteEditResult duplicateSelected(

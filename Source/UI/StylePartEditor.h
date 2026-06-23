@@ -29,6 +29,7 @@ public:
         std::function<void(int note, int velocity)> onAudition;
         std::function<void()> onTogglePlayback;
         std::function<void()> onToggleRecord;
+        std::function<void(int division)> onSnapDivisionChanged;
         // Style-chrome callbacks (only fire when style controls are visible):
         std::function<void(std::string sectionId)> onPickSection;
         std::function<void(int slot)> onPickPart;   // 0..6 (Drums..Phrase2)
@@ -39,7 +40,8 @@ public:
     ~StylePartEditorView() override;
 
     void setPart(const std::vector<cadenza::arranger::PatternNote>& notes,
-                 int sectionTicks, int ticksPerBeat, int beatsPerBar, bool percussion);
+                 int sectionTicks, int ticksPerBeat, int beatsPerBar, int beatUnit,
+                 bool percussion);
     void setTransportState(int tickInSection, bool playing, bool recordArmed);
 
     // Style chrome (Section + Instrument + Bars + Save). Off by default (window mode).
@@ -70,6 +72,7 @@ public:
         std::function<void(int note, int velocity)> onAudition;
         std::function<void()> onTogglePlayback;
         std::function<void()> onToggleRecord;
+        std::function<void(int division)> onSnapDivisionChanged;
         std::function<void()> onClosed;
     };
 
@@ -81,6 +84,7 @@ public:
                  int sectionTicks,
                  int ticksPerBeat,
                  int beatsPerBar,
+                 int beatUnit,
                  bool percussion);
 
     void setTransportState(int tickInSection, bool playing, bool recordArmed);
