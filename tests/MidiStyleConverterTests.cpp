@@ -1,0 +1,371 @@
+#include "Arranger/MidiStyleConverter.h"
+#include "Arranger/StyleLoader.h"
+
+#include <juce_audio_basics/juce_audio_basics.h>
+#include <juce_core/juce_core.h>
+
+#include <cstdlib>
+#include <iostream>
+#include <string>
+
+namespace
+{
+using cadenza::arranger::NoteRole;
+using cadenza::arranger::Part;
+using cadenza::arranger::Style;
+
+void expect(bool condition, const std::string& message)
+{
+    if (!condition) {
+        std::cerr << "FAIL: " << message << '\n';
+        std::exit(1);
+    }
+}
+
+void addNote(juce::MidiMessageSequence& track, int channel, int tick, int duration,
+             int pitch, int velocity = 100)
+{
+    auto on = juce::MidiMessage::noteOn(channel, pitch, static_cast<juce::uint8>(velocity));
+    on.setTimeStamp(tick);
+    track.addEvent(on);
+    auto off = juce::MidiMessage::noteOff(channel, pitch);
+    off.setTimeStamp(tick + duration);
+    track.addEvent(off);
+}
+
+void addProgram(juce::MidiMessageSequence& track, int channel, int program)
+{
+    auto msg = juce::MidiMessage::programChange(channel, program + 1);
+    msg.setTimeStamp(0);
+    track.addEvent(msg);
+}
+
+juce::File writeMidi(const juce::String& name, juce::MidiFile& midi)
+{
+    auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
+        .getNonexistentChildFile(name, ".mid");
+    juce::FileOutputStream out(file);
+    expect(out.openedOk(), "temporary MIDI file opens for writing");
+    midi.writeTo(out);
+    out.flush();
+    return file;
+}
+
+const Part* findPart(const Style& style, const std::string& name)
+{
+    if (style.sections.empty())
+        return nullptr;
+    for (const auto& part : style.sections.front().parts)
+        if (part.name == name)
+            return &part;
+    return nullptr;
+}
+
+void makeCmajorFixture(juce::MidiFile& midi)
+{
+    constexpr int ppq = 480;
+    constexpr int bar = ppq * 4;
+
+    juce::MidiMessageSequence meta;
+    auto tempo = juce::MidiMessage::tempoMetaEvent(500000);
+    tempo.setTimeStamp(0);
+    meta.addEvent(tempo);
+    auto ts = juce::MidiMessage::timeSignatureMetaEvent(4, 4);
+    ts.setTimeStamp(0);
+    meta.addEvent(ts);
+
+    juce::MidiMessageSequence drums;
+    for (int b = 0; b < 4; ++b) {
+        addNote(drums, 10, b * bar, 120, 36, 110);
+        addNote(drums, 10, b * bar + ppq, 120, 38, 96);
+    }
+
+    juce::MidiMessageSequence bass;
+    addProgram(bass, 2, 33);
+    for (int b = 0; b < 4; ++b)
+        addNote(bass, 2, b * bar, ppq * 4, 36, 104);
+
+    juce::MidiMessageSequence piano;
+    addProgram(piano, 3, 0);
+    for (int b = 0; b < 4; ++b) {
+        addNote(piano, 3, b * bar, ppq * 4, 60, 88);
+        addNote(piano, 3, b * bar, ppq * 4, 64, 82);
+        addNote(piano, 3, b * bar, ppq * 4, 67, 80);
+    }
+
+    midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(meta);
+    midi.addTrack(drums);
+    midi.addTrack(bass);
+    midi.addTrack(piano);
+}
+
+void makeAminorFixture(juce::MidiFile& midi)
+{
+    constexpr int ppq = 480;
+    constexpr int bar = ppq * 4;
+    juce::MidiMessageSequence bass;
+    addProgram(bass, 2, 34);
+    addNote(bass, 2, 0, bar * 4, 45, 100);
+
+    juce::MidiMessageSequence piano;
+    addProgram(piano, 3, 0);
+    addNote(piano, 3, 0, bar * 4, 57, 88);
+    addNote(piano, 3, 0, bar * 4, 60, 82);
+    addNote(piano, 3, 0, bar * 4, 64, 80);
+
+    midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(bass);
+    midi.addTrack(piano);
+}
+
+void makeFsharpMinorFixture(juce::MidiFile& midi)
+{
+    constexpr int ppq = 480;
+    constexpr int bar = ppq * 4;
+
+    juce::MidiMessageSequence drums;
+    addNote(drums, 10, 0, 120, 36, 110);
+    addNote(drums, 10, ppq, 120, 38, 96);
+
+    juce::MidiMessageSequence bass;
+    addProgram(bass, 2, 34);
+    addNote(bass, 2, 0, bar * 4, 42, 100);
+
+    juce::MidiMessageSequence piano;
+    addProgram(piano, 3, 0);
+    addNote(piano, 3, 0, bar * 4, 66, 88);
+    addNote(piano, 3, 0, bar * 4, 69, 82);
+    addNote(piano, 3, 0, bar * 4, 73, 80);
+
+    midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(drums);
+    midi.addTrack(bass);
+    midi.addTrack(piano);
+}
+
+void testCmajorMapsPartsAndRoundTrips()
+{
+    juce::MidiFile midi;
+    makeCmajorFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-cmaj", midi);
+
+    auto result = cadenza::arranger::convertMidiFileToNativeStyle(file, {});
+    expect(result.ok && result.style != nullptr, "C major fixture converts");
+    expect(result.style->defaultTempo == 120, "tempo meta is imported");
+    expect(result.style->beatsPerBar == 4 && result.style->beatUnit == 4,
+           "time signature meta is imported");
+    expect(result.style->ticksPerBeat == 480, "PPQ is preserved");
+    expect(result.style->sections.size() == 1
+               && result.style->sections.front().name == "mainA"
+               && result.style->sections.front().barCount == 4,
+           "one mainA section is emitted");
+
+    const auto* drums = findPart(*result.style, "drums");
+    const auto* bass = findPart(*result.style, "bass");
+    const auto* chord1 = findPart(*result.style, "chord1");
+    expect(drums != nullptr && drums->midiChannel == 10, "drums map to channel 10");
+    expect(bass != nullptr && bass->midiChannel == 11, "bass maps to channel 11");
+    expect(chord1 != nullptr && chord1->midiChannel == 12, "piano maps to chord1 channel 12");
+    expect(!drums->notes.empty() && drums->notes.front().role == NoteRole::Absolute
+               && drums->notes.front().pitch == 36,
+           "drums stay absolute with original pitch");
+    expect(bass->yamahaPolicy && bass->yamahaPolicy->sourceRoot.value_or("") == "C"
+               && bass->yamahaPolicy->sourceChord.value_or("") == "",
+           "C major source chord is stored on bass policy");
+    expect(chord1->notes.size() >= 3
+               && chord1->notes[0].role == NoteRole::ChordRoot
+               && chord1->notes[1].role == NoteRole::Chord3
+               && chord1->notes[2].role == NoteRole::Chord5,
+           "chord tones get source-root-relative roles");
+
+    const auto json = cadenza::arranger::saveStyleToJson(*result.style);
+    const auto loaded = cadenza::arranger::loadStyleFromJson(json);
+    expect(loaded.ok && loaded.style.findSection("mainA") != nullptr,
+           "converted style round-trips through JSON");
+}
+
+void testAminorSourceChord()
+{
+    juce::MidiFile midi;
+    makeAminorFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-amin", midi);
+    cadenza::arranger::MidiStyleConvertOptions options;
+    options.normalizeToC = false;
+    auto result = cadenza::arranger::convertMidiFileToNativeStyle(file, options);
+    expect(result.ok && result.style != nullptr, "A minor fixture converts");
+    const auto* bass = findPart(*result.style, "bass");
+    expect(bass != nullptr && bass->yamahaPolicy
+               && bass->yamahaPolicy->sourceRoot.value_or("") == "A"
+               && bass->yamahaPolicy->sourceChord.value_or("") == "m",
+           "A minor source chord is detected");
+    const auto* chord1 = findPart(*result.style, "chord1");
+    expect(chord1 != nullptr && chord1->notes.size() >= 3
+               && chord1->notes[0].role == NoteRole::ChordRoot
+               && chord1->notes[1].role == NoteRole::Chord3
+               && chord1->notes[2].role == NoteRole::Chord5,
+           "minor chord tones are role-classified against A root");
+}
+
+void testNormalizeFsharpMinorToC()
+{
+    juce::MidiFile midi;
+    makeFsharpMinorFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-fsharp-min-normalize", midi);
+
+    cadenza::arranger::MidiStyleConvertOptions originalOptions;
+    originalOptions.normalizeToC = false;
+    auto original = cadenza::arranger::convertMidiFileToNativeStyle(file, originalOptions);
+    expect(original.ok && original.style != nullptr, "F# minor fixture converts without normalization");
+    const auto* originalBass = findPart(*original.style, "bass");
+    const auto* originalChord1 = findPart(*original.style, "chord1");
+    expect(originalBass != nullptr && originalBass->yamahaPolicy
+               && originalBass->yamahaPolicy->sourceRoot.value_or("") == "F#"
+               && originalBass->yamahaPolicy->sourceChord.value_or("") == "m",
+           "normalizeToC=false leaves detected F# minor source chord");
+    expect(originalChord1 != nullptr && originalChord1->notes.size() >= 3,
+           "unnormalized F# minor chord part exists");
+
+    cadenza::arranger::MidiStyleConvertOptions normalizedOptions;
+    normalizedOptions.normalizeToC = true;
+    auto normalized = cadenza::arranger::convertMidiFileToNativeStyle(file, normalizedOptions);
+    expect(normalized.ok && normalized.style != nullptr, "F# minor fixture converts with normalization");
+    const auto* drums = findPart(*normalized.style, "drums");
+    const auto* bass = findPart(*normalized.style, "bass");
+    const auto* chord1 = findPart(*normalized.style, "chord1");
+    expect(drums != nullptr && !drums->notes.empty()
+               && drums->notes[0].role == NoteRole::Absolute
+               && drums->notes[0].pitch == 36,
+           "normalized import leaves drum pitches absolute");
+    expect(bass != nullptr && bass->yamahaPolicy
+               && bass->yamahaPolicy->sourceRoot.value_or("") == "C"
+               && bass->yamahaPolicy->sourceChord.value_or("") == "m",
+           "normalized bass policy stores C minor");
+    expect(chord1 != nullptr && chord1->yamahaPolicy
+               && chord1->yamahaPolicy->sourceRoot.value_or("") == "C"
+               && chord1->yamahaPolicy->sourceChord.value_or("") == "m",
+           "normalized chord policy stores C minor");
+    expect(chord1 != nullptr && chord1->notes.size() >= 3
+               && chord1->notes[0].pitch == 60
+               && chord1->notes[1].pitch == 63
+               && chord1->notes[2].pitch == 67,
+           "F# minor chord tones transpose down to C minor");
+    expect(chord1->notes[0].role == originalChord1->notes[0].role
+               && chord1->notes[1].role == originalChord1->notes[1].role
+               && chord1->notes[2].role == originalChord1->notes[2].role,
+           "normalization preserves chord note roles");
+}
+
+void testOverrideSourceChord()
+{
+    juce::MidiFile midi;
+    makeAminorFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-override", midi);
+
+    cadenza::arranger::MidiStyleConvertOptions options;
+    options.overrideSourceRoot = 0;
+    options.overrideSourceChord = "";
+
+    auto result = cadenza::arranger::convertMidiFileToNativeStyle(file, options);
+    expect(result.ok && result.style != nullptr, "override fixture converts");
+    const auto* bass = findPart(*result.style, "bass");
+    expect(bass != nullptr && bass->yamahaPolicy
+               && bass->yamahaPolicy->sourceRoot.value_or("") == "C"
+               && bass->yamahaPolicy->sourceChord.value_or("x") == "",
+           "source chord override is stored on policy");
+    const auto* chord1 = findPart(*result.style, "chord1");
+    expect(chord1 != nullptr && !chord1->notes.empty()
+               && chord1->notes.front().role == NoteRole::Chord7,
+           "override source chord is used for role assignment");
+}
+
+void testInspectReadsEarliestTempo()
+{
+    constexpr int ppq = 480;
+    constexpr int bar = ppq * 4;
+    juce::MidiFile midi;
+    midi.setTicksPerQuarterNote(ppq);
+
+    juce::MidiMessageSequence laterMeta;
+    auto laterTempo = juce::MidiMessage::tempoMetaEvent(500000);
+    laterTempo.setTimeStamp(bar);
+    laterMeta.addEvent(laterTempo);
+    midi.addTrack(laterMeta);
+
+    juce::MidiMessageSequence notes;
+    auto firstTempo = juce::MidiMessage::tempoMetaEvent(512821);
+    firstTempo.setTimeStamp(0);
+    notes.addEvent(firstTempo);
+    auto ts = juce::MidiMessage::timeSignatureMetaEvent(4, 4);
+    ts.setTimeStamp(0);
+    notes.addEvent(ts);
+    addProgram(notes, 3, 0);
+    for (int b = 0; b < 6; ++b) {
+        addNote(notes, 3, b * bar, ppq * 4, 66, 88);
+        addNote(notes, 3, b * bar, ppq * 4, 69, 82);
+        addNote(notes, 3, b * bar, ppq * 4, 73, 80);
+    }
+    midi.addTrack(notes);
+
+    const auto file = writeMidi("cadenza-midi-style-tempo-inspect", midi);
+    auto info = cadenza::arranger::inspectMidiFileForStyleImport(file, 0, 4);
+    expect(info.ok, "inspect succeeds");
+    expect(info.tempo == 117, "earliest MIDI tempo meta is imported");
+    expect(info.beatsPerBar == 4 && info.beatUnit == 4, "inspect reports time signature");
+    expect(info.totalBars == 6, "inspect reports total available bars");
+
+    auto converted = cadenza::arranger::convertMidiFileToNativeStyle(file, {});
+    expect(converted.ok && converted.style != nullptr
+               && converted.style->defaultTempo == 117,
+           "conversion uses earliest MIDI tempo meta");
+}
+
+void testSmpteRejects()
+{
+    juce::MidiFile midi;
+    midi.setSmpteTimeFormat(25, 40);
+    juce::MidiMessageSequence track;
+    addNote(track, 1, 0, 40, 60);
+    midi.addTrack(track);
+    const auto file = writeMidi("cadenza-midi-style-smpte", midi);
+    auto result = cadenza::arranger::convertMidiFileToNativeStyle(file, {});
+    expect(!result.ok && result.style == nullptr
+               && result.warnings.joinIntoString(" ").containsIgnoreCase("SMPTE"),
+           "SMPTE MIDI is rejected with warning");
+}
+
+void testFallbackWarning()
+{
+    juce::MidiFile midi;
+    midi.setTicksPerQuarterNote(480);
+    juce::MidiMessageSequence track;
+    addProgram(track, 3, 0);
+    addNote(track, 3, 0, 480, 60);
+    addNote(track, 3, 0, 480, 61);
+    addNote(track, 3, 0, 480, 66);
+    midi.addTrack(track);
+    const auto file = writeMidi("cadenza-midi-style-fallback", midi);
+    auto result = cadenza::arranger::convertMidiFileToNativeStyle(file, {});
+    expect(result.ok && result.style != nullptr, "fallback fixture still converts");
+    expect(result.warnings.joinIntoString(" ").containsIgnoreCase("C major"),
+           "unmatched source chord falls back with warning");
+    const auto* chord1 = findPart(*result.style, "chord1");
+    expect(chord1 != nullptr && chord1->yamahaPolicy
+               && chord1->yamahaPolicy->sourceRoot.value_or("") == "C"
+               && chord1->yamahaPolicy->sourceChord.value_or("") == "",
+           "fallback policy stores C major");
+}
+}
+
+int main()
+{
+    testCmajorMapsPartsAndRoundTrips();
+    testAminorSourceChord();
+    testNormalizeFsharpMinorToC();
+    testOverrideSourceChord();
+    testInspectReadsEarliestTempo();
+    testSmpteRejects();
+    testFallbackWarning();
+    std::cout << "All MIDI style converter tests passed\n";
+    return 0;
+}

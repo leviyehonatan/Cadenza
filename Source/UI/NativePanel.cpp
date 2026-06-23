@@ -101,6 +101,7 @@ NativePanel::NativePanel()
 
     addAndMakeVisible(m_play);
     addAndMakeVisible(m_openStyle);
+    addAndMakeVisible(m_importMidiStyle);
     addAndMakeVisible(m_openSf);
     addAndMakeVisible(m_openAudio);
     addAndMakeVisible(m_openMidi);
@@ -667,6 +668,7 @@ NativePanel::NativePanel()
     m_fade.onClick          = [this] { if (m_cb.fadeOut)       m_cb.fadeOut(); };
     addAndMakeVisible(m_fade);
     m_openStyle.onClick     = [this] { if (m_cb.openStyle)     m_cb.openStyle(); };
+    m_importMidiStyle.onClick = [this] { if (m_cb.importMidiStyle) m_cb.importMidiStyle(); };
     m_openSf.onClick        = [this] { if (m_cb.openSoundFont) m_cb.openSoundFont(); };
     m_openAudio.onClick     = [this] { if (m_cb.openAudioSettings) m_cb.openAudioSettings(); };
     m_openMidi.onClick      = [this] { if (m_cb.openMidiSettings)  m_cb.openMidiSettings(); };
@@ -1428,7 +1430,8 @@ void NativePanel::resized()
     const bool showMixer    = onPage({ 0, 4 });      // Home, Mixer
     const bool showSettings = onPage({ 6 });         // Setting (file/device actions)
     const bool showEditor   = onPage({ kEditorPage });   // Editor (full-area piano roll)
-    setVis(showSettings, { &m_fade, &m_openStyle, &m_openSf, &m_openAudio, &m_openMidi, &m_openAnalyze, &m_aiSettings });
+    setVis(showSettings, { &m_fade, &m_openStyle, &m_importMidiStyle, &m_openSf,
+                            &m_openAudio, &m_openMidi, &m_openAnalyze, &m_aiSettings });
 
     // On the Editor page the embedded piano roll owns the whole content area, so the
     // always-on upper band (chord LCD, transpose, registrations, OTS, pads) is hidden.
@@ -1535,16 +1538,20 @@ void NativePanel::resized()
         area.removeFromTop(gap);
     }
 
-    // Setting page: file / device actions as a row (keeps the top bar clean).
+    // Setting page: file / device actions (keeps the top bar clean).
     if (showSettings) {
-        auto r = area.removeFromTop(40);
-        m_fade.setBounds(r.removeFromLeft(90));       r.removeFromLeft(gap);
-        m_openStyle.setBounds(r.removeFromLeft(120)); r.removeFromLeft(gap);
-        m_openSf.setBounds(r.removeFromLeft(140));    r.removeFromLeft(gap);
-        m_openAudio.setBounds(r.removeFromLeft(90));  r.removeFromLeft(gap);
-        m_openMidi.setBounds(r.removeFromLeft(80));   r.removeFromLeft(gap);
-        m_openAnalyze.setBounds(r.removeFromLeft(120)); r.removeFromLeft(gap);
-        m_aiSettings.setBounds(r.removeFromLeft(120));
+        auto r = area.removeFromTop(72);
+        auto fileRow = r.removeFromTop(30);
+        m_fade.setBounds(fileRow.removeFromLeft(82));       fileRow.removeFromLeft(gap);
+        m_openStyle.setBounds(fileRow.removeFromLeft(112)); fileRow.removeFromLeft(gap);
+        m_importMidiStyle.setBounds(fileRow.removeFromLeft(162)); fileRow.removeFromLeft(gap);
+        m_openSf.setBounds(fileRow.removeFromLeft(132));    fileRow.removeFromLeft(gap);
+        m_openAnalyze.setBounds(fileRow.removeFromLeft(118));
+        r.removeFromTop(8);
+        auto deviceRow = r.removeFromTop(30);
+        m_openAudio.setBounds(deviceRow.removeFromLeft(90));  deviceRow.removeFromLeft(gap);
+        m_openMidi.setBounds(deviceRow.removeFromLeft(80));   deviceRow.removeFromLeft(gap);
+        m_aiSettings.setBounds(deviceRow.removeFromLeft(120));
         area.removeFromTop(gap);
     }
 

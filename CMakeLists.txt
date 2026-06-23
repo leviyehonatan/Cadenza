@@ -262,6 +262,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
             Source/Audio/MasterGlue.cpp
             Source/Audio/PluginHost.cpp
             Source/Midi/MidiRouter.cpp
+            Source/Arranger/MidiStyleConverter.cpp
             Source/Arranger/StyleEngine.cpp
             Source/UI/CadenzaLookAndFeel.cpp
             Source/UI/NativePanel.cpp
@@ -338,6 +339,18 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
         )
         add_test(NAME cadenza_pattern_import_tests
                  COMMAND cadenza_pattern_import_tests)
+
+        add_executable(cadenza_midi_style_converter_tests
+            tests/MidiStyleConverterTests.cpp
+            Source/Arranger/MidiStyleConverter.cpp
+        )
+        target_link_libraries(cadenza_midi_style_converter_tests
+            PRIVATE
+                cadenza_core
+                juce::juce_audio_basics
+        )
+        add_test(NAME cadenza_midi_style_converter_tests
+                 COMMAND cadenza_midi_style_converter_tests)
     endif()
 
     add_custom_command(TARGET Cadenza POST_BUILD

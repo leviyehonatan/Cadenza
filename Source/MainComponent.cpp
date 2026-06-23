@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "Arranger/MidiStyleConverter.h"
 #include "Arranger/StyleLoader.h"
 #include "Arranger/SongLoader.h"
 #include "Audio/ChordAnalysis.h"
@@ -8,6 +9,7 @@
 #include "Arranger/OtsRecall.h"
 #include "Arranger/SectionButtons.h"
 #include "Arranger/SectionFlow.h"
+#include "UI/CadenzaLookAndFeel.h"
 #include "UI/NativePanel.h"
 #include "UI/StylePartEditor.h"
 #include "Ai/StyleGenerator.h"
@@ -16,6 +18,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -37,6 +40,268 @@ juce::File importedStylesDir()
         .getChildFile("Cadenza")
         .getChildFile("imported-styles");
 }
+
+const char* midiImportRootName(int root) noexcept
+{
+    static const char* names[] = {
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+    };
+    return names[((root % 12) + 12) % 12];
+}
+
+int midiImportRootIndex(const juce::String& name) noexcept
+{
+    for (int i = 0; i < 12; ++i)
+        if (name == midiImportRootName(i))
+            return i;
+    if (name == "Eb") return 3;
+    if (name == "Bb") return 10;
+    return 0;
+}
+
+juce::String midiImportQualityLabel(const juce::String& suffix)
+{
+    if (suffix == "m") return "min";
+    if (suffix == "Maj7" || suffix == "maj7") return "maj7";
+    if (suffix == "m7") return "min7";
+    if (suffix == "7") return "7";
+    if (suffix == "sus4") return "sus4";
+    if (suffix == "dim") return "dim";
+    if (suffix == "aug") return "aug";
+    return "maj";
+}
+
+juce::String midiImportQualitySuffix(const juce::String& label)
+{
+    if (label == "min") return "m";
+    if (label == "maj7") return "Maj7";
+    if (label == "min7") return "m7";
+    if (label == "7") return "7";
+    if (label == "sus4") return "sus4";
+    if (label == "dim") return "dim";
+    if (label == "aug") return "aug";
+    return {};
+}
+
+int midiImportQualityId(const juce::String& label) noexcept
+{
+    if (label == "min") return 2;
+    if (label == "7") return 3;
+    if (label == "maj7") return 4;
+    if (label == "min7") return 5;
+    if (label == "sus4") return 6;
+    if (label == "dim") return 7;
+    if (label == "aug") return 8;
+    return 1;
+}
+
+class MidiStyleImportDialog final : public juce::Component
+{
+public:
+    using ConvertCallback = std::function<void(cadenza::arranger::MidiStyleConvertOptions)>;
+
+    MidiStyleImportDialog(juce::File midiFile,
+                          cadenza::arranger::MidiStyleImportInfo initialInfo,
+                          ConvertCallback callback)
+        : m_midiFile(std::move(midiFile)),
+          m_info(std::move(initialInfo)),
+          m_onConvert(std::move(callback))
+    {
+        addAndMakeVisible(m_summary);
+        addAndMakeVisible(m_detected);
+        addAndMakeVisible(m_startLabel);
+        addAndMakeVisible(m_countLabel);
+        addAndMakeVisible(m_rootLabel);
+        addAndMakeVisible(m_qualityLabel);
+        addAndMakeVisible(m_startBar);
+        addAndMakeVisible(m_barCount);
+        addAndMakeVisible(m_root);
+        addAndMakeVisible(m_quality);
+        addAndMakeVisible(m_normalizeToC);
+        addAndMakeVisible(m_detect);
+        addAndMakeVisible(m_convert);
+        addAndMakeVisible(m_cancel);
+
+        m_startLabel.setText("Start bar", juce::dontSendNotification);
+        m_countLabel.setText("Bars", juce::dontSendNotification);
+        m_rootLabel.setText("Root", juce::dontSendNotification);
+        m_qualityLabel.setText("Quality", juce::dontSendNotification);
+
+        m_startBar.setSliderStyle(juce::Slider::IncDecButtons);
+        m_startBar.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 64, 22);
+        m_startBar.setNumDecimalPlacesToDisplay(0);
+        m_barCount.setSliderStyle(juce::Slider::IncDecButtons);
+        m_barCount.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 64, 22);
+        m_barCount.setNumDecimalPlacesToDisplay(0);
+
+        for (int i = 0; i < 12; ++i)
+            m_root.addItem(midiImportRootName(i), i + 1);
+        const char* qualities[] = { "maj", "min", "7", "maj7", "min7", "sus4", "dim", "aug" };
+        for (int i = 0; i < 8; ++i)
+            m_quality.addItem(qualities[i], i + 1);
+
+        m_detect.setButtonText("Detect");
+        m_convert.setButtonText("Convert");
+        m_cancel.setButtonText("Cancel");
+        m_normalizeToC.setButtonText("Play in C (normalize) - easier to play");
+        m_normalizeToC.setToggleState(true, juce::dontSendNotification);
+
+        applyThemeColours();
+
+        m_detect.onClick = [this] { refreshDetection(); };
+        m_convert.onClick = [this] {
+            if (m_onConvert) {
+                cadenza::arranger::MidiStyleConvertOptions options;
+                options.barStart = juce::roundToInt(m_startBar.getValue()) - 1;
+                options.barCount = juce::roundToInt(m_barCount.getValue());
+                options.overrideSourceRoot = std::max(0, m_root.getSelectedId() - 1);
+                options.overrideSourceChord = midiImportQualitySuffix(m_quality.getText());
+                options.normalizeToC = m_normalizeToC.getToggleState();
+                m_onConvert(options);
+            }
+            if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+                dw->exitModalState(1);
+        };
+        m_cancel.onClick = [this] {
+            if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+                dw->exitModalState(0);
+        };
+
+        configureRangeControls();
+        applyInfoToLabels(true);
+        setSize(460, 312);
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        g.fillAll(cadenza::ui::CadenzaLookAndFeel::panel());
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced(16);
+        m_summary.setBounds(r.removeFromTop(42));
+        m_detected.setBounds(r.removeFromTop(28));
+        r.removeFromTop(8);
+
+        auto row = r.removeFromTop(34);
+        m_startLabel.setBounds(row.removeFromLeft(96));
+        m_startBar.setBounds(row.removeFromLeft(120));
+        row.removeFromLeft(16);
+        m_countLabel.setBounds(row.removeFromLeft(48));
+        m_barCount.setBounds(row.removeFromLeft(120));
+
+        r.removeFromTop(12);
+        row = r.removeFromTop(34);
+        m_rootLabel.setBounds(row.removeFromLeft(96));
+        m_root.setBounds(row.removeFromLeft(120));
+        row.removeFromLeft(16);
+        m_qualityLabel.setBounds(row.removeFromLeft(64));
+        m_quality.setBounds(row.removeFromLeft(120));
+
+        r.removeFromTop(10);
+        m_normalizeToC.setBounds(r.removeFromTop(28));
+
+        r.removeFromTop(10);
+        row = r.removeFromTop(32);
+        m_detect.setBounds(row.removeFromLeft(92));
+        row.removeFromRight(8);
+        m_cancel.setBounds(row.removeFromRight(92));
+        row.removeFromRight(8);
+        m_convert.setBounds(row.removeFromRight(92));
+    }
+
+private:
+    void applyThemeColours()
+    {
+        const auto text = cadenza::ui::CadenzaLookAndFeel::textMain();
+        const auto value = cadenza::ui::CadenzaLookAndFeel::cream();
+        const auto accent = cadenza::ui::CadenzaLookAndFeel::accent();
+
+        m_summary.setColour(juce::Label::textColourId, value);
+        m_detected.setColour(juce::Label::textColourId, accent);
+        m_startLabel.setColour(juce::Label::textColourId, text);
+        m_countLabel.setColour(juce::Label::textColourId, text);
+        m_rootLabel.setColour(juce::Label::textColourId, text);
+        m_qualityLabel.setColour(juce::Label::textColourId, text);
+        m_normalizeToC.setColour(juce::ToggleButton::textColourId, text);
+    }
+
+    void configureRangeControls()
+    {
+        const int total = std::max(1, m_info.totalBars);
+        m_startBar.setRange(1.0, static_cast<double>(total), 1.0);
+        m_startBar.setValue(1.0, juce::dontSendNotification);
+        m_barCount.setRange(1.0, static_cast<double>(total), 1.0);
+        m_barCount.setValue(static_cast<double>(std::min(4, total)), juce::dontSendNotification);
+        m_startBar.onValueChange = [this] { clampBarCountToAvailable(); };
+        m_barCount.onValueChange = [this] { clampBarCountToAvailable(); };
+    }
+
+    void clampBarCountToAvailable()
+    {
+        const int total = std::max(1, m_info.totalBars);
+        const int start = std::clamp(juce::roundToInt(m_startBar.getValue()), 1, total);
+        const int maxCount = std::max(1, total - start + 1);
+        if (juce::roundToInt(m_startBar.getValue()) != start)
+            m_startBar.setValue(start, juce::dontSendNotification);
+        m_barCount.setRange(1.0, static_cast<double>(maxCount), 1.0);
+        if (juce::roundToInt(m_barCount.getValue()) > maxCount)
+            m_barCount.setValue(maxCount, juce::dontSendNotification);
+    }
+
+    void refreshDetection()
+    {
+        clampBarCountToAvailable();
+        m_info = cadenza::arranger::inspectMidiFileForStyleImport(
+            m_midiFile,
+            juce::roundToInt(m_startBar.getValue()) - 1,
+            juce::roundToInt(m_barCount.getValue()));
+        applyInfoToLabels(false);
+    }
+
+    void applyInfoToLabels(bool updateSelectors)
+    {
+        m_summary.setText(
+            "Tempo " + juce::String(m_info.tempo)
+            + " BPM, " + juce::String(m_info.beatsPerBar) + "/"
+            + juce::String(m_info.beatUnit)
+            + ", " + juce::String(std::max(1, m_info.totalBars)) + " bars available",
+            juce::dontSendNotification);
+
+        const auto root = m_info.detectedChord.rootName.isNotEmpty()
+            ? m_info.detectedChord.rootName
+            : juce::String(midiImportRootName(m_info.detectedChord.root));
+        const auto quality = midiImportQualityLabel(m_info.detectedChord.chordSuffix);
+        m_detected.setText(
+            juce::String("Detected source chord: ") + root + " " + quality
+            + (m_info.detectedChord.fallback ? " (fallback)" : ""),
+            juce::dontSendNotification);
+
+        if (updateSelectors) {
+            m_root.setSelectedId(midiImportRootIndex(root) + 1, juce::dontSendNotification);
+            m_quality.setSelectedId(midiImportQualityId(quality), juce::dontSendNotification);
+        }
+    }
+
+    juce::File m_midiFile;
+    cadenza::arranger::MidiStyleImportInfo m_info;
+    ConvertCallback m_onConvert;
+    juce::Label m_summary;
+    juce::Label m_detected;
+    juce::Label m_startLabel;
+    juce::Label m_countLabel;
+    juce::Label m_rootLabel;
+    juce::Label m_qualityLabel;
+    juce::Slider m_startBar;
+    juce::Slider m_barCount;
+    juce::ComboBox m_root;
+    juce::ComboBox m_quality;
+    juce::ToggleButton m_normalizeToC;
+    juce::TextButton m_detect;
+    juce::TextButton m_convert;
+    juce::TextButton m_cancel;
+};
 
 // Section to start a freshly-loaded style on. Yamaha styles run sparse (Main A)
 // to full (Main D) by design, so loading on Main A makes a rich style sound
@@ -1237,6 +1502,104 @@ void MainComponent::openStyleFileChooser()
         });
 }
 
+void MainComponent::openMidiStyleImportChooser()
+{
+    const auto startDir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+    m_midiStyleChooser = std::make_unique<juce::FileChooser>(
+        "Import a MIDI file as a Cadenza style",
+        startDir,
+        "*.mid;*.midi");
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    m_midiStyleChooser->launchAsync(
+        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [safe](const juce::FileChooser& chooser) {
+            auto* self = safe.getComponent();
+            if (self == nullptr)
+                return;
+
+            const auto midiFile = chooser.getResult();
+            if (midiFile.existsAsFile()) {
+                auto info = cadenza::arranger::inspectMidiFileForStyleImport(midiFile, 0, 4);
+                if (!info.ok) {
+                    juce::String status = "MIDI style import failed";
+                    if (!info.warnings.isEmpty())
+                        status += ": " + info.warnings.joinIntoString("; ");
+                    if (self->m_panel)
+                        self->m_panel->setRecorderState(false, false, status);
+                    juce::Logger::writeToLog("[Cadenza] " + status);
+                } else {
+                    juce::Component::SafePointer<MainComponent> dialogSafe(self);
+                    auto* dialog = new MidiStyleImportDialog(
+                        midiFile, info,
+                        [dialogSafe, midiFile](cadenza::arranger::MidiStyleConvertOptions options) {
+                            auto* owner = dialogSafe.getComponent();
+                            if (owner == nullptr)
+                                return;
+
+                            auto converted = cadenza::arranger::convertMidiFileToNativeStyle(midiFile, options);
+                            if (converted.ok && converted.style != nullptr) {
+                                auto dir = importedStylesDir().getChildFile("MIDI Imports");
+                                dir.createDirectory();
+                                auto out = dir.getNonexistentChildFile(
+                                    midiFile.getFileNameWithoutExtension(), ".cstyle");
+                                const bool saved = cadenza::arranger::saveStyleToFile(
+                                    *converted.style, out.getFullPathName().toStdString());
+                                if (saved && owner->loadAndApplyStyleFile(out)) {
+                                    owner->m_styleEngine.setEnabled(true);
+                                    owner->m_state.setChordSourceEnabled("arranger", true);
+                                    owner->m_midi.setChordMemory(true);
+                                    owner->m_state.setChordSourceEnabled("memory", true);
+                                    if (owner->m_recorder.sessionActive())
+                                        owner->recorderRefreshStyle();
+                                    if (owner->m_panel) {
+                                        owner->m_panel->setToggleStates(
+                                            owner->m_state.chordSourceEnabled("arranger"),
+                                            owner->m_state.chordSourceEnabled("memory"),
+                                            owner->m_state.syncroStopOnRelease(),
+                                            owner->m_state.chordSourceEnabled("bass"),
+                                            owner->m_state.autoFillEnabled());
+                                    }
+                                    owner->saveSettings();
+
+                                    juce::String status = "Imported MIDI style: " + out.getFileName();
+                                    if (!converted.warnings.isEmpty())
+                                        status += " - " + converted.warnings.joinIntoString("; ");
+                                    if (owner->m_panel)
+                                        owner->m_panel->setRecorderState(true, false, status);
+                                    juce::Logger::writeToLog("[Cadenza] " + status);
+                                } else {
+                                    const auto status = "MIDI style import save/load failed: "
+                                        + out.getFullPathName();
+                                    if (owner->m_panel)
+                                        owner->m_panel->setRecorderState(false, false, status);
+                                    juce::Logger::writeToLog("[Cadenza] " + status);
+                                }
+                            } else {
+                                juce::String status = "MIDI style import failed";
+                                if (!converted.warnings.isEmpty())
+                                    status += ": " + converted.warnings.joinIntoString("; ");
+                                if (owner->m_panel)
+                                    owner->m_panel->setRecorderState(false, false, status);
+                                juce::Logger::writeToLog("[Cadenza] " + status);
+                            }
+                        });
+
+                    juce::DialogWindow::LaunchOptions opts;
+                    opts.dialogTitle = "Import MIDI as Style";
+                    opts.content.setOwned(dialog);
+                    opts.componentToCentreAround = self;
+                    opts.escapeKeyTriggersCloseButton = true;
+                    opts.useNativeTitleBar = true;
+                    opts.resizable = false;
+                    opts.dialogBackgroundColour = cadenza::ui::CadenzaLookAndFeel::panel();
+                    opts.launchAsync();
+                }
+            }
+            self->m_midiStyleChooser.reset();
+        });
+}
+
 void MainComponent::openSoundFontFileChooser()
 {
     const auto sf2Dir = findResourcesRoot()
@@ -1466,6 +1829,8 @@ bool MainComponent::loadAndApplyStyleFile(const juce::File& file)
     }
     m_styleEngine.allNotesOff();
     m_styleEngine.setStyle(sharedStyle);
+    if (editableCadenzaStyle)
+        m_styleEngine.setStyle(m_recorder.snapshotStyle());
     if (!initialSection.empty()) {
         m_styleEngine.setSection(initialSection);
         if (initialSection.rfind("main", 0) == 0)
@@ -2601,6 +2966,7 @@ void MainComponent::buildNativePanel()
 
     cb.togglePlay   = [this] { togglePlayback(); };
     cb.openStyle     = [this] { openStyleFileChooser(); };
+    cb.importMidiStyle = [this] { openMidiStyleImportChooser(); };
     cb.openSoundFont = [this] { openSoundFontFileChooser(); };
     cb.openAudioSettings = [this] { showAudioSettings(); };
     cb.openMidiSettings  = [this] { showMidiSettings(); };

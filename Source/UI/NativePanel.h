@@ -115,6 +115,7 @@ public:
         std::function<void()> togglePlay;
         std::function<void()> fadeOut;                // fade the master out, then stop
         std::function<void()> openStyle;
+        std::function<void()> importMidiStyle;
         std::function<void()> openSoundFont;
         std::function<void()> openAudioSettings;
         std::function<void()> openMidiSettings;
@@ -271,6 +272,7 @@ private:
     juce::TextButton m_play       { "Play" };
     juce::TextButton m_fade       { "Fade" };
     juce::TextButton m_openStyle  { "Open Style" };
+    juce::TextButton m_importMidiStyle { "Import MIDI as Style" };
     juce::TextButton m_openSf     { "Open SoundFont" };
     juce::TextButton m_openAudio  { "Audio" };
     juce::TextButton m_openMidi   { "MIDI" };

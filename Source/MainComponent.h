@@ -52,6 +52,7 @@ private:
     bool tryLoadLastStyle();
     void tryLoadFactorySoundFont();
     void openStyleFileChooser();
+    void openMidiStyleImportChooser();
     void openSoundFontFileChooser();
     void openSongFileChooser();
     void openChordAnalysisChooser();
@@ -179,6 +180,7 @@ private:
     // Persistent settings.
     std::unique_ptr<cadenza::settings::SettingsStore> m_settings;
     std::unique_ptr<juce::FileChooser> m_styleChooser;
+    std::unique_ptr<juce::FileChooser> m_midiStyleChooser;
     std::unique_ptr<juce::FileChooser> m_soundFontChooser;
     std::unique_ptr<juce::FileChooser> m_songChooser;
     std::unique_ptr<juce::FileChooser> m_analysisChooser;
