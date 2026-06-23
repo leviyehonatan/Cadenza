@@ -44,6 +44,8 @@ add_library(cadenza_core STATIC
     Source/Midi/GmInstruments.cpp
     Source/Arranger/Style.cpp
     Source/Arranger/PatternNoteMerge.cpp
+    Source/Arranger/StyleLibraryIndex.h
+    Source/Arranger/StyleLibraryIndex.cpp
     Source/Arranger/StyleLoader.cpp
     Source/Arranger/StyParser.cpp
     Source/Arranger/PatternTransposer.cpp

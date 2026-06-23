@@ -8,6 +8,7 @@
 #include "Midi/MidiRouter.h"
 #include "Arranger/StyleEngine.h"
 #include "Arranger/Style.h"
+#include "Arranger/StyleLibraryIndex.h"
 #include "Arranger/SongPlayer.h"
 #include "Arranger/StyleRecorder.h"
 
@@ -18,6 +19,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace cadenza::ui { class NativePanel; class StylePartEditorWindow; }
 namespace cadenza::ai { struct StyleGenResult; }
@@ -122,6 +124,7 @@ private:
     void queueSongSectionForBar(int bar);
     bool loadAndApplySoundFontFile(const juce::File& file, bool persist);
     juce::Array<juce::File> factoryStyleFiles() const;
+    const std::vector<cadenza::arranger::StyleMetadata>& factoryStyleMetadata() const;
     void pushFactoryStylesToWeb();
     void pushRuntimeStateToWeb();
 
@@ -139,6 +142,7 @@ private:
     cadenza::audio::AudioEngine m_audio;
     cadenza::midi::MidiRouter   m_midi;
     cadenza::arranger::StyleEngine m_styleEngine { m_audio };
+    mutable cadenza::arranger::StyleLibraryIndex m_factoryStyleIndex;
 
     // Song mode (chord-chart auto-stepping).
     cadenza::arranger::SongPlayer m_songPlayer;

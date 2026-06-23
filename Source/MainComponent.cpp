@@ -910,27 +910,30 @@ juce::Array<juce::File> MainComponent::factoryStyleFiles() const
     return files;
 }
 
+const std::vector<cadenza::arranger::StyleMetadata>& MainComponent::factoryStyleMetadata() const
+{
+    const auto files = factoryStyleFiles();
+    std::vector<std::string> paths;
+    paths.reserve(static_cast<std::size_t>(files.size()));
+    for (const auto& file : files)
+        paths.push_back(file.getFullPathName().toStdString());
+    return m_factoryStyleIndex.entriesForFiles(paths);
+}
+
 void MainComponent::pushFactoryStylesToWeb()
 {
-    auto files = factoryStyleFiles();
+    const auto& styles = factoryStyleMetadata();
 
     juce::String js = "window.JuceBridge && window.JuceBridge.onFactoryStyles([";
-    for (int i = 0; i < files.size(); ++i) {
-        const auto& file = files.getReference(i);
-        auto loaded = cadenza::arranger::loadStyleFromFile(file.getFullPathName().toStdString());
-        const auto name = loaded.ok && !loaded.style.name.empty()
-            ? juce::String(loaded.style.name)
-            : file.getFileNameWithoutExtension();
-        const auto id = loaded.ok && !loaded.style.id.empty()
-            ? juce::String(loaded.style.id)
-            : file.getFileNameWithoutExtension();
+    for (std::size_t i = 0; i < styles.size(); ++i) {
+        const auto& style = styles[i];
 
         if (i > 0) js += ",";
         js += "{";
-        js += "id:" + jsString(id);
-        js += ",name:" + jsString(name);
-        js += ",path:" + jsString(file.getFullPathName());
-        js += ",kind:" + jsString(file.getFileExtension().trimCharactersAtStart(".").toLowerCase());
+        js += "id:" + jsString(juce::String(style.id));
+        js += ",name:" + jsString(juce::String(style.name));
+        js += ",path:" + jsString(juce::String(style.path));
+        js += ",kind:" + jsString(juce::String(style.kind));
         js += "}";
     }
     js += "]);";
@@ -1060,15 +1063,15 @@ void MainComponent::installBridgeHooks()
             return;
         }
 
-        for (const auto& f : factoryStyleFiles()) {
-            auto loaded = cadenza::arranger::loadStyleFromFile(f.getFullPathName().toStdString());
-            if (loaded.ok &&
-                (equalsIgnoreCase(loaded.style.id, name) ||
-                 equalsIgnoreCase(loaded.style.name, name) ||
-                 equalsIgnoreCase(f.getFileNameWithoutExtension().toStdString(), name))) {
-                loadAndApplyStyleFile(f);
-                return;
-            }
+        const auto files = factoryStyleFiles();
+        std::vector<std::string> paths;
+        paths.reserve(static_cast<std::size_t>(files.size()));
+        for (const auto& file : files)
+            paths.push_back(file.getFullPathName().toStdString());
+
+        if (const auto* style = m_factoryStyleIndex.findByIdNameOrStem(paths, name)) {
+            loadAndApplyStyleFile(juce::File(juce::String(style->path)));
+            return;
         }
         juce::Logger::writeToLog("[Cadenza] No style file matches: " + juce::String(name));
     };
@@ -1567,15 +1570,15 @@ bool MainComponent::selectStyleById(const std::string& styleId)
     if (styleId.empty())
         return false;
 
-    for (const auto& f : factoryStyleFiles()) {
-        auto loaded = cadenza::arranger::loadStyleFromFile(f.getFullPathName().toStdString());
-        if (loaded.ok &&
-            (equalsIgnoreCase(loaded.style.id, styleId) ||
-             equalsIgnoreCase(loaded.style.name, styleId) ||
-             equalsIgnoreCase(f.getFileNameWithoutExtension().toStdString(), styleId))) {
-            return loadAndApplyStyleFile(f);
-        }
-    }
+    const auto files = factoryStyleFiles();
+    std::vector<std::string> paths;
+    paths.reserve(static_cast<std::size_t>(files.size()));
+    for (const auto& file : files)
+        paths.push_back(file.getFullPathName().toStdString());
+
+    if (const auto* style = m_factoryStyleIndex.findByIdNameOrStem(paths, styleId))
+        return loadAndApplyStyleFile(juce::File(juce::String(style->path)));
+
     return false;
 }
 
