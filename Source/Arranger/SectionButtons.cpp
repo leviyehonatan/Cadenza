@@ -1,28 +1,10 @@
 #include "SectionButtons.h"
+#include "SectionFlow.h"
 
-#include <algorithm>
 #include <cctype>
 
 namespace cadenza::arranger
 {
-namespace
-{
-// Conventional arranger ordering of the section ids Cadenza produces
-// (see mapSectionMarker in StyParser).
-const std::vector<std::string>& preferredOrder()
-{
-    static const std::vector<std::string> order = {
-        "intro", "introB", "introC",
-        "mainA", "mainB", "mainC", "mainD",
-        "fillAA", "fillAB", "fillBA", "fillBB",
-        "fillAC", "fillCA", "fillCC", "fillDD",
-        "fillBreak",
-        "ending", "endingB", "endingC",
-    };
-    return order;
-}
-}
-
 std::string sectionDisplayLabel(const std::string& id)
 {
     if (id == "intro")  return "Intro";
@@ -51,20 +33,13 @@ std::vector<SectionButton> sectionButtonsForStyle(const Style& style)
     std::vector<SectionButton> buttons;
     buttons.reserve(style.sections.size());
 
-    // 1) Known sections in conventional order.
-    for (const auto& id : preferredOrder()) {
-        if (style.findSection(id) != nullptr)
-            buttons.push_back({ id, sectionDisplayLabel(id) });
-    }
+    std::vector<std::string> sectionIds;
+    sectionIds.reserve(style.sections.size());
+    for (const auto& section : style.sections)
+        sectionIds.push_back(section.name);
 
-    // 2) Any remaining style sections not covered above, in existing order.
-    const auto& order = preferredOrder();
-    for (const auto& section : style.sections) {
-        const bool alreadyKnown =
-            std::find(order.begin(), order.end(), section.name) != order.end();
-        if (!alreadyKnown)
-            buttons.push_back({ section.name, sectionDisplayLabel(section.name) });
-    }
+    for (const auto& id : preferredSectionOrder(sectionIds))
+        buttons.push_back({ id, sectionDisplayLabel(id) });
 
     return buttons;
 }

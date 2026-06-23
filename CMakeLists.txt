@@ -56,6 +56,7 @@ add_library(cadenza_core STATIC
     Source/Arranger/SongLoader.cpp
     Source/Arranger/SongPlayer.cpp
     Source/Arranger/SectionButtons.cpp
+    Source/Arranger/SectionFlow.cpp
     Source/Arranger/SectionChangeQueue.cpp
     Source/Arranger/StyleChangeQueue.cpp
     Source/Audio/MidiChannel.cpp
@@ -101,6 +102,7 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_righthand_tests    tests/RightHandTests.cpp)
     cadenza_add_test(cadenza_midimap_tests      tests/MidiControlMapTests.cpp)
     cadenza_add_test(cadenza_sections_tests     tests/SectionButtonsTests.cpp)
+    cadenza_add_test(cadenza_section_flow_tests tests/SectionFlowTests.cpp)
     cadenza_add_test(cadenza_section_queue_tests tests/SectionChangeQueueTests.cpp)
     cadenza_add_test(cadenza_style_queue_tests tests/StyleChangeQueueTests.cpp)
     cadenza_add_test(cadenza_transport_command_tests tests/TransportCommandMailboxTests.cpp)

@@ -7,6 +7,7 @@
 #include "Midi/GmInstruments.h"
 #include "Arranger/OtsRecall.h"
 #include "Arranger/SectionButtons.h"
+#include "Arranger/SectionFlow.h"
 #include "UI/NativePanel.h"
 #include "UI/StylePartEditor.h"
 #include "Ai/StyleGenerator.h"
@@ -15,6 +16,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <thread>
@@ -2321,6 +2323,15 @@ std::string sectionType(const std::string& id)
     if (starts("ending")) return "ending";
     return "main";
 }
+
+std::vector<std::string> sectionIdsForStyle(const cadenza::arranger::Style& style)
+{
+    std::vector<std::string> ids;
+    ids.reserve(style.sections.size());
+    for (const auto& section : style.sections)
+        ids.push_back(section.name);
+    return ids;
+}
 }
 
 void MainComponent::startFadeOut()
@@ -2365,24 +2376,26 @@ void MainComponent::executeControlCommand(const std::string& command)
 void MainComponent::triggerSection(const std::string& id)
 {
     const std::string type = sectionType(id);
+    const std::string previousMain = m_currentMain.empty() ? std::string("mainA") : m_currentMain;
+
+    // Auto Fill-In (Yamaha behavior): pressing a Main button while the band is
+    // playing inserts the transition fill from the previous Main to the target
+    // Main when the style has one, then lands on the selected Main.
+    std::optional<std::string> autoFillId;
+    if (type == "main" && m_state.autoFillEnabled() && m_audio.transport().playing()) {
+        if (const auto style = m_styleEngine.currentStyle()) {
+            autoFillId = cadenza::arranger::chooseAutoFill(
+                previousMain, id, sectionIdsForStyle(*style));
+        }
+    }
+
     if (type == "main")
         m_currentMain = id;   // remember as the return target for fills/intros
 
-    // Auto Fill-In (Yamaha behavior): pressing a Main button while the band is
-    // playing inserts that main's own fill for one pattern, then lands on the
-    // main. Pressing the active main again just plays its fill.
-    if (type == "main" && m_state.autoFillEnabled() && m_audio.transport().playing()) {
-        // "mainB" -> "fillBB"; skip when the style has no such fill.
-        if (id.size() == 5 && id.rfind("main", 0) == 0) {
-            const char v = id[4];
-            const std::string fillId = std::string("fill") + v + v;
-            const auto style = m_styleEngine.currentStyle();
-            if (style && style->findSection(fillId) != nullptr) {
-                m_styleEngine.requestSection(fillId, true, id);
-                if (m_panel) m_panel->setActiveSection(juce::String(fillId));
-                return;
-            }
-        }
+    if (autoFillId.has_value()) {
+        m_styleEngine.requestSection(*autoFillId, true, id);
+        if (m_panel) m_panel->setActiveSection(juce::String(*autoFillId));
+        return;
     }
 
     const bool once = (type != "main");   // intro / fill / ending are one-shots
@@ -2398,6 +2411,8 @@ void MainComponent::triggerSection(const std::string& id)
         // Stopped: set it up immediately so Play starts on the chosen section.
         m_styleEngine.setSection(id, once, returnTo);
         applyMixerState();
+        if (type == "main")
+            applyOtsLinkForSection(id);
     }
     if (m_panel) m_panel->setActiveSection(juce::String(id));   // show intent now
 }
@@ -3281,17 +3296,13 @@ void MainComponent::applyOtsLinkForSection(const std::string& name)
 {
     if (!m_settings || !m_settings->state().otsLinkEnabled)
         return;
-    int slot = -1;
-    if      (name == "mainA") slot = 0;
-    else if (name == "mainB") slot = 1;
-    else if (name == "mainC") slot = 2;
-    else if (name == "mainD") slot = 3;
-    if (slot < 0)
+    const auto slot = cadenza::arranger::mainSectionToOtsSlot(name);
+    if (!slot.has_value())
         return;                        // fills/intros/endings never retrigger
     if (name == m_lastLinkedMain)
         return;                        // fill returning to the same Main
     m_lastLinkedMain = name;
-    applyOts(slot);
+    applyOts(*slot);
 }
 
 void MainComponent::refreshOtsAvailability()
