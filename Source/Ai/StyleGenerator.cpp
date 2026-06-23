@@ -11,6 +11,9 @@ juce::String styleAuthorSystemPrompt()
 OUTPUT RULES (critical):
 - Reply with ONE JSON object only. No prose, no markdown, no code fences.
 - It must parse as JSON and follow the schema below exactly.
+- If the user's message includes a CURRENT STYLE, MODIFY that style to satisfy the
+  request and return the COMPLETE updated style - keep every section, part, and note
+  you were not asked to change. Otherwise, create a NEW style from the description.
 
 A .cstyle is an accompaniment recorded in C major / C root that Cadenza transposes
 live to follow the player's chord.
@@ -124,92 +127,137 @@ juce::String extractJsonObject(const juce::String& text)
         return t.substring(open, close + 1);
     return {};
 }
+
+// True if the style has any kick (36) or snare (38) anywhere — i.e. a drum
+// foundation exists. Used to catch the "hi-hats only, no groove" failure on CREATE.
+bool grooveHasFoundation(const juce::String& cstyleJson)
+{
+    const juce::var v = juce::JSON::parse(cstyleJson);
+    auto* sections = v["sections"].getDynamicObject();
+    if (sections == nullptr)
+        return true;   // can't tell — don't trigger a retry
+    for (const auto& sec : sections->getProperties())
+        if (auto* parts = sec.value["parts"].getArray())
+            for (const auto& part : *parts)
+                if (auto* notes = part["notes"].getArray())
+                    for (const auto& n : *notes) {
+                        const int p = (int) n["pitch"];
+                        if (p == 36 || p == 38) return true;
+                    }
+    return false;
+}
 }
 
 StyleGenResult generateStyle(const juce::String& apiKey,
                              const juce::String& model,
-                             const juce::String& userPrompt)
+                             const juce::String& userPrompt,
+                             const juce::String& currentStyleJson)
 {
-    StyleGenResult result;
-
     if (apiKey.trim().isEmpty()) {
-        result.error = "No Anthropic API key set. Add one in AI Settings.";
-        return result;
+        StyleGenResult r;
+        r.error = "No Anthropic API key set. Add one in AI Settings.";
+        return r;
     }
 
-    // --- build the request body ---
-    auto* msgObj = new juce::DynamicObject();
-    msgObj->setProperty("role", "user");
-    msgObj->setProperty("content", userPrompt);
-    juce::Array<juce::var> messages;
-    messages.add(juce::var(msgObj));
+    // One request round-trip for a given user message. Returns the parsed result.
+    auto run = [&](const juce::String& userContent) -> StyleGenResult {
+        StyleGenResult result;
 
-    auto* rootObj = new juce::DynamicObject();
-    rootObj->setProperty("model", model);
-    rootObj->setProperty("max_tokens", 16000);
-    rootObj->setProperty("system", styleAuthorSystemPrompt());
-    rootObj->setProperty("messages", messages);
-    const juce::String body = juce::JSON::toString(juce::var(rootObj));
+        auto* msgObj = new juce::DynamicObject();
+        msgObj->setProperty("role", "user");
+        msgObj->setProperty("content", userContent);
+        juce::Array<juce::var> messages;
+        messages.add(juce::var(msgObj));
 
-    // --- POST ---
-    juce::URL url("https://api.anthropic.com/v1/messages");
-    url = url.withPOSTData(body);
+        auto* rootObj = new juce::DynamicObject();
+        rootObj->setProperty("model", model);
+        rootObj->setProperty("max_tokens", 16000);
+        rootObj->setProperty("system", styleAuthorSystemPrompt());
+        rootObj->setProperty("messages", messages);
+        const juce::String body = juce::JSON::toString(juce::var(rootObj));
 
-    juce::StringPairArray responseHeaders;
-    int statusCode = 0;
-    const juce::String headers =
-        "x-api-key: " + apiKey.trim() + "\r\n"
-        "anthropic-version: 2023-06-01\r\n"
-        "content-type: application/json";
+        juce::URL url("https://api.anthropic.com/v1/messages");
+        url = url.withPOSTData(body);
 
-    auto options = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inPostData)
-        .withExtraHeaders(headers)
-        .withConnectionTimeoutMs(120000)
-        .withResponseHeaders(&responseHeaders)
-        .withStatusCode(&statusCode);
+        juce::StringPairArray responseHeaders;
+        int statusCode = 0;
+        const juce::String headers =
+            "x-api-key: " + apiKey.trim() + "\r\n"
+            "anthropic-version: 2023-06-01\r\n"
+            "content-type: application/json";
 
-    std::unique_ptr<juce::InputStream> stream(url.createInputStream(options));
-    if (stream == nullptr) {
-        result.error = "Could not reach api.anthropic.com (check your internet connection).";
+        auto options = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inPostData)
+            .withExtraHeaders(headers)
+            .withConnectionTimeoutMs(120000)
+            .withResponseHeaders(&responseHeaders)
+            .withStatusCode(&statusCode);
+
+        std::unique_ptr<juce::InputStream> stream(url.createInputStream(options));
+        if (stream == nullptr) {
+            result.error = "Could not reach api.anthropic.com (check your internet connection).";
+            return result;
+        }
+
+        const juce::String response = stream->readEntireStreamAsString();
+        const juce::var parsed = juce::JSON::parse(response);
+
+        if (statusCode != 200) {
+            juce::String msg = parsed["error"]["message"].toString();
+            if (msg.isEmpty()) msg = "HTTP " + juce::String(statusCode);
+            if (statusCode == 401) msg = "Invalid API key (401). Check it in AI Settings.";
+            else if (statusCode == 429) msg = "Rate limited (429). Wait a moment and try again.";
+            result.error = "API error: " + msg.toStdString();
+            return result;
+        }
+
+        result.inputTokens  = (int) parsed["usage"]["input_tokens"];
+        result.outputTokens = (int) parsed["usage"]["output_tokens"];
+
+        if (parsed["stop_reason"].toString() == "refusal") {
+            result.error = "The model declined this request. Try rephrasing.";
+            return result;
+        }
+
+        juce::String text;
+        if (auto* arr = parsed["content"].getArray())
+            for (const auto& block : *arr)
+                if (block["type"].toString() == "text")
+                    text += block["text"].toString();
+
+        const juce::String json = extractJsonObject(text);
+        if (json.isEmpty()) {
+            result.error = "The model did not return a style. Try a clearer description.";
+            return result;
+        }
+
+        result.ok = true;
+        result.cstyleJson = json.toStdString();
         return result;
-    }
+    };
 
-    const juce::String response = stream->readEntireStreamAsString();
-    const juce::var parsed = juce::JSON::parse(response);
+    const bool editing = currentStyleJson.trim().isNotEmpty();
 
-    if (statusCode != 200) {
-        juce::String msg = parsed["error"]["message"].toString();
-        if (msg.isEmpty()) msg = "HTTP " + juce::String(statusCode);
-        if (statusCode == 401) msg = "Invalid API key (401). Check it in AI Settings.";
-        else if (statusCode == 429) msg = "Rate limited (429). Wait a moment and try again.";
-        result.error = "API error: " + msg.toStdString();
+    juce::String userContent = userPrompt;
+    if (editing)
+        userContent += "\n\nCURRENT STYLE (modify this and return the full updated style):\n"
+                     + currentStyleJson;
+
+    StyleGenResult result = run(userContent);
+    if (!result.ok)
         return result;
+
+    // CREATE only: if the drums came back with no kick/snare foundation, retry once.
+    if (!editing && !grooveHasFoundation(juce::String(result.cstyleJson))) {
+        const juce::String retryContent = userPrompt +
+            "\n\n(IMPORTANT: the drums MUST include a kick (pitch 36) on the downbeats "
+            "and a snare (pitch 38) backbeat on beats 2 and 4 (ticks 960 and 2880).)";
+        StyleGenResult retry = run(retryContent);
+        if (retry.ok) {
+            retry.inputTokens  += result.inputTokens;   // report total cost
+            retry.outputTokens += result.outputTokens;
+            return retry;
+        }
     }
-
-    // usage (for cost visibility)
-    result.inputTokens  = (int) parsed["usage"]["input_tokens"];
-    result.outputTokens = (int) parsed["usage"]["output_tokens"];
-
-    // gather the text content blocks
-    juce::String text;
-    if (auto* arr = parsed["content"].getArray())
-        for (const auto& block : *arr)
-            if (block["type"].toString() == "text")
-                text += block["text"].toString();
-
-    if (parsed["stop_reason"].toString() == "refusal") {
-        result.error = "The model declined this request. Try rephrasing.";
-        return result;
-    }
-
-    const juce::String json = extractJsonObject(text);
-    if (json.isEmpty()) {
-        result.error = "The model did not return a style. Try a clearer description.";
-        return result;
-    }
-
-    result.ok = true;
-    result.cstyleJson = json.toStdString();
     return result;
 }
 }

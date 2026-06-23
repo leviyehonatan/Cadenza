@@ -24,9 +24,14 @@ struct StyleGenResult
 // Calls POST https://api.anthropic.com/v1/messages with the cadenza-style-author
 // system prompt and the user's description. Returns the parsed `.cstyle` JSON text
 // (validate/load it with StyleLoader) or an error.
+//
+// If currentStyleJson is non-empty, the request EDITS that style per the prompt and
+// returns the full updated style. If empty, it CREATES a new style (and auto-retries
+// once if the generated drums have no kick/snare foundation).
 StyleGenResult generateStyle(const juce::String& apiKey,
                              const juce::String& model,
-                             const juce::String& userPrompt);
+                             const juce::String& userPrompt,
+                             const juce::String& currentStyleJson = juce::String());
 
 // The system prompt embedding the .cstyle schema, note roles, channel layout,
 // GM drum map, and genre recipes (a compact form of the cadenza-style-author skill).
