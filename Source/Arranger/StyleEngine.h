@@ -22,6 +22,7 @@
 #include "../Midi/ChordRecognizer.h"
 
 #include <atomic>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -92,11 +93,37 @@ private:
         const PatternNote* src = nullptr;  // source note (lives in m_style)
     };
 
+    struct TimedPatternEvent {
+        int tick = 0;
+        std::size_t sequence = 0;
+        std::size_t partIndex = 0;
+        const Part* part = nullptr;
+        const PatternNote* note = nullptr;
+    };
+
+    struct TimedAutomationEvent {
+        int tick = 0;
+        std::size_t sequence = 0;
+        const Part* part = nullptr;
+        const AutomationEvent* event = nullptr;
+    };
+
+    struct SectionPlaybackCache {
+        const Section* section = nullptr;
+        std::vector<TimedPatternEvent> patternEvents;
+        std::vector<TimedAutomationEvent> automationEvents;
+        int maxHumanizeLateTicks = 0;
+        std::size_t activeReserve = 0;
+    };
+
     void onTick(int ticksAdvanced, cadenza::audio::Transport& transport);
     // Caller must hold m_publishMutex. Called only while stopped or on audio thread.
     void applyStyleReplacement(std::shared_ptr<const Style> style);
     bool handleBarBoundary(const Style& style);   // audio thread: apply queued/one-shot section changes
     void switchToSection(const Style& style, const std::string& name, bool once, const std::string& returnTo);
+    void installPreparedSectionCachesFor(const Style& style);
+    void selectSectionCache(const Section* section) noexcept;
+    static std::vector<SectionPlaybackCache> buildSectionPlaybackCaches(const Style& style);
     void applySectionChannelSetup(const Section& section);
     void firePatternNotesAtTick(int tickInSection);
     void fireAutomationAtTick(int tickInSection);   // CC/pitch-bend events due this tick
@@ -118,6 +145,10 @@ private:
     int m_sectionLengthTicks = 0;
     int m_humanizeLoopCounter = 0;   // bumped each section loop; varies the feel
     std::vector<ActiveNote> m_active;
+    std::vector<SectionPlaybackCache> m_sectionCaches;
+    std::vector<SectionPlaybackCache> m_preparedSectionCaches;
+    const Style* m_preparedStyle = nullptr;
+    const SectionPlaybackCache* m_currentSectionCache = nullptr;
 
     // One-shot / quantized section sequencing.
     bool        m_currentOnce = false;       // current section is a one-shot (audio thread)

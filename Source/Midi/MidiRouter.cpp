@@ -321,12 +321,6 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
         // channel with its Octave shift; chord-zone notes make no melody sound.
         for (const auto& ev : events) {
             if (m_onNote) m_onNote(ev.channel, ev.note, ev.velocity, ev.isOn);
-            juce::Logger::writeToLog(
-                juce::String("[Cadenza] live right ") + (ev.isOn ? "on " : "off")
-                + " orig=" + juce::String(note)
-                + " shifted=" + juce::String(ev.note)
-                + " ch=" + juce::String(ev.channel)
-                + " vel=" + juce::String(ev.velocity));
         }
 
         // Left split voice output (below-split notes).

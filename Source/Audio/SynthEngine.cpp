@@ -7,6 +7,11 @@
 
 namespace cadenza::audio
 {
+namespace
+{
+constexpr bool kLogResolvedPresets = false;
+}
+
 // ============================================================
 // NullSynthEngine — logs to JUCE Logger; produces silence.
 // ============================================================
@@ -17,33 +22,26 @@ void NullSynthEngine::renderBlock(juce::AudioBuffer<float>& buffer)
 
 void NullSynthEngine::noteOn(int channel, int note, int velocity)
 {
-    juce::Logger::writeToLog("[NullSynth] noteOn ch=" + juce::String(channel)
-                             + " n=" + juce::String(note)
-                             + " v=" + juce::String(velocity));
+    juce::ignoreUnused(channel, note, velocity);
 }
 
 void NullSynthEngine::noteOff(int channel, int note)
 {
-    juce::Logger::writeToLog("[NullSynth] noteOff ch=" + juce::String(channel)
-                             + " n=" + juce::String(note));
+    juce::ignoreUnused(channel, note);
 }
 
 void NullSynthEngine::programChange(int channel, int program)
 {
-    juce::Logger::writeToLog("[NullSynth] programChange ch=" + juce::String(channel)
-                             + " pg=" + juce::String(program));
+    juce::ignoreUnused(channel, program);
 }
 
 void NullSynthEngine::controlChange(int channel, int controller, int value)
 {
-    juce::Logger::writeToLog("[NullSynth] controlChange ch=" + juce::String(channel)
-                             + " cc=" + juce::String(controller)
-                             + " value=" + juce::String(value));
+    juce::ignoreUnused(channel, controller, value);
 }
 
 void NullSynthEngine::allNotesOff()
 {
-    juce::Logger::writeToLog("[NullSynth] allNotesOff");
 }
 
 // ============================================================
@@ -164,7 +162,8 @@ public:
                 fluid_synth_program_change(m_synth, channel, 0);   // standard kit
                 kitFellBack = true;
             }
-            logResolvedPreset(channel, program, kitFellBack);
+            if constexpr (kLogResolvedPresets)
+                logResolvedPreset(channel, program, kitFellBack);
             return;
         }
 
@@ -182,7 +181,8 @@ public:
             fellBack = true;
         }
 
-        logResolvedPreset(channel, program, fellBack);
+        if constexpr (kLogResolvedPresets)
+            logResolvedPreset(channel, program, fellBack);
     }
 
     void controlChange(int channel, int controller, int value) override {

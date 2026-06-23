@@ -4,50 +4,12 @@
 
 #include <algorithm>
 #include <optional>
-#include <sstream>
 
 namespace cadenza::arranger
 {
 namespace
 {
-juce::String optionalIntText(const std::optional<int>& value)
-{
-    return value ? juce::String(*value) : juce::String("-");
-}
-
-juce::String firstDrumNoteText(const Part& part, int limit = 20)
-{
-    std::vector<int> notes;
-    notes.reserve(static_cast<std::size_t>(std::min(limit, static_cast<int>(part.notes.size()))));
-
-    for (const auto& note : part.notes) {
-        if (std::find(notes.begin(), notes.end(), note.pitch) == notes.end())
-            notes.push_back(note.pitch);
-        if (static_cast<int>(notes.size()) >= limit)
-            break;
-    }
-
-    std::ostringstream out;
-    for (std::size_t i = 0; i < notes.size(); ++i) {
-        if (i > 0) out << ',';
-        out << notes[i];
-    }
-    return notes.empty() ? juce::String("-") : juce::String(out.str());
-}
-
-bool drumNotesLookSuspicious(const Part& part)
-{
-    if (part.notes.empty())
-        return false;
-
-    int outsideCommonGmRange = 0;
-    for (const auto& note : part.notes) {
-        if (note.pitch < 35 || note.pitch > 81)
-            ++outsideCommonGmRange;
-    }
-
-    return outsideCommonGmRange > 0;
-}
+constexpr std::size_t kDefaultActiveNoteReserve = 16384;
 }
 
 StyleEngine::StyleEngine(cadenza::audio::AudioEngine& engine)
@@ -56,6 +18,7 @@ StyleEngine::StyleEngine(cadenza::audio::AudioEngine& engine)
     // Default chord (until set): C major.
     m_chord.rootPitchClass = 0;
     m_chord.quality = cadenza::midi::ChordQuality::Major;
+    m_active.reserve(kDefaultActiveNoteReserve);
 }
 
 void StyleEngine::install()
@@ -67,24 +30,37 @@ void StyleEngine::install()
 
 void StyleEngine::setStyle(std::shared_ptr<const Style> style)
 {
+    const Style* preparedStyle = style.get();
+    auto preparedCaches = style ? buildSectionPlaybackCaches(*style)
+                                : std::vector<SectionPlaybackCache>{};
+
     m_panic.store(true);          // audio thread drops active notes on its next tick
     m_engine.allNotesOff();
     m_immediateSectionChanges.clear();
 
     if (m_engine.transport().playing()) {
+        {
+            std::lock_guard<std::mutex> lk(m_publishMutex);
+            m_preparedStyle = preparedStyle;
+            m_preparedSectionCaches = std::move(preparedCaches);
+        }
         m_styleChanges.publish(std::move(style));
         return;
     }
 
     m_styleChanges.clear();
     std::lock_guard<std::mutex> lk(m_publishMutex);
+    m_preparedStyle = preparedStyle;
+    m_preparedSectionCaches = std::move(preparedCaches);
     applyStyleReplacement(std::move(style));
 }
 
 void StyleEngine::applyStyleReplacement(std::shared_ptr<const Style> style)
 {
     m_style = std::move(style);
+    m_currentSectionCache = nullptr;
     if (m_style) {
+        installPreparedSectionCachesFor(*m_style);
         applyStyleTimingToTransport(m_engine.transport(), *m_style, false);
         m_engine.transport().reset();
 
@@ -95,10 +71,14 @@ void StyleEngine::applyStyleReplacement(std::shared_ptr<const Style> style)
         if (sec) {
             m_sectionLengthTicks = sec->barCount * cadenza::ticksPerBar(
                 m_style->ticksPerBeat, m_style->beatsPerBar, m_style->beatUnit);
+            selectSectionCache(sec);
             applySectionChannelSetup(*sec);
         }
     } else {
         m_sectionLengthTicks = 0;
+        m_sectionCaches.clear();
+        m_preparedSectionCaches.clear();
+        m_preparedStyle = nullptr;
     }
     m_lastFiredTickInSection = -1;
     m_currentOnce = false;            // reset one-shot / queued sequencing for the new style
@@ -111,6 +91,94 @@ std::shared_ptr<const Style> StyleEngine::currentStyle() const
 {
     std::lock_guard<std::mutex> lk(m_publishMutex);
     return m_style;
+}
+
+std::vector<StyleEngine::SectionPlaybackCache> StyleEngine::buildSectionPlaybackCaches(const Style& style)
+{
+    std::vector<SectionPlaybackCache> caches;
+    caches.reserve(style.sections.size());
+
+    for (const auto& section : style.sections) {
+        SectionPlaybackCache cache;
+        cache.section = &section;
+
+        std::size_t noteCount = 0;
+        std::size_t automationCount = 0;
+        for (const auto& part : section.parts) {
+            noteCount += part.notes.size();
+            automationCount += part.automation.size();
+        }
+
+        cache.patternEvents.reserve(noteCount);
+        cache.automationEvents.reserve(automationCount);
+        cache.activeReserve = std::max(kDefaultActiveNoteReserve, noteCount * 2);
+
+        std::size_t patternSequence = 0;
+        std::size_t automationSequence = 0;
+        for (std::size_t partIndex = 0; partIndex < section.parts.size(); ++partIndex) {
+            const auto& part = section.parts[partIndex];
+            cache.maxHumanizeLateTicks = std::max(
+                cache.maxHumanizeLateTicks,
+                humanizeProfileForPart(part, 100).maxLateTicks);
+
+            for (const auto& note : part.notes) {
+                cache.patternEvents.push_back(TimedPatternEvent{
+                    note.tick, patternSequence++, partIndex, &part, &note
+                });
+            }
+
+            for (const auto& ev : part.automation) {
+                cache.automationEvents.push_back(TimedAutomationEvent{
+                    ev.tick, automationSequence++, &part, &ev
+                });
+            }
+        }
+
+        std::stable_sort(cache.patternEvents.begin(), cache.patternEvents.end(),
+            [](const TimedPatternEvent& a, const TimedPatternEvent& b) {
+                return a.tick < b.tick;
+            });
+        std::stable_sort(cache.automationEvents.begin(), cache.automationEvents.end(),
+            [](const TimedAutomationEvent& a, const TimedAutomationEvent& b) {
+                return a.tick < b.tick;
+            });
+
+        caches.push_back(std::move(cache));
+    }
+
+    return caches;
+}
+
+void StyleEngine::installPreparedSectionCachesFor(const Style& style)
+{
+    if (m_preparedStyle == &style) {
+        m_sectionCaches.swap(m_preparedSectionCaches);
+        m_preparedStyle = nullptr;
+    } else {
+        m_sectionCaches = buildSectionPlaybackCaches(style);
+    }
+
+    if (!m_engine.transport().playing()) {
+        std::size_t reserve = kDefaultActiveNoteReserve;
+        for (const auto& cache : m_sectionCaches)
+            reserve = std::max(reserve, cache.activeReserve);
+        if (m_active.capacity() < reserve)
+            m_active.reserve(reserve);
+    }
+}
+
+void StyleEngine::selectSectionCache(const Section* section) noexcept
+{
+    m_currentSectionCache = nullptr;
+    if (section == nullptr)
+        return;
+
+    for (const auto& cache : m_sectionCaches) {
+        if (cache.section == section) {
+            m_currentSectionCache = &cache;
+            return;
+        }
+    }
 }
 
 // Caller must hold m_publishMutex. Updates the playing section + its length, runs
@@ -128,6 +196,7 @@ void StyleEngine::switchToSection(const Style& style, const std::string& name,
     if (picked) {
         m_sectionLengthTicks = picked->barCount * cadenza::ticksPerBar(
             style.ticksPerBeat, style.beatsPerBar, style.beatUnit);
+        selectSectionCache(picked);
         applySectionChannelSetup(*picked);
     }
     m_currentOnce     = once;
@@ -310,15 +379,15 @@ void StyleEngine::onTick(int ticksAdvanced, cadenza::audio::Transport& transport
 
     // 4) snapshot pointers (single lock acquisition)
     std::shared_ptr<const Style> style;
-    std::string sectionName;
+    bool hasSection = false;
     int sectionLength;
     {
         std::lock_guard<std::mutex> lk(m_publishMutex);
         style = m_style;
-        sectionName = m_sectionName;
+        hasSection = !m_sectionName.empty();
         sectionLength = m_sectionLengthTicks;
     }
-    if (!style || sectionName.empty() || sectionLength <= 0) return;
+    if (!style || !hasSection || sectionLength <= 0) return;
 
     // 4b) if the chord changed since last tick, re-voice sustained held notes now.
     if (m_chordDirty.exchange(false))
@@ -359,14 +428,6 @@ void StyleEngine::applySectionChannelSetup(const Section& section)
     const auto setups = playbackSetupsForSection(section);
 
     for (const auto& setup : setups) {
-        const Part* part = nullptr;
-        for (const auto& candidate : section.parts) {
-            if (candidate.midiChannel == setup.sourceChannel && candidate.name == setup.partName) {
-                part = &candidate;
-                break;
-            }
-        }
-
         // Send the style's voicing as recorded. Yamaha styles are XG-based, so an
         // XG/GS SoundFont (e.g. Timbres of Heaven) resolves the original bank+
         // program to the intended voice/drum kit; with a plain GM SoundFont
@@ -395,62 +456,13 @@ void StyleEngine::applySectionChannelSetup(const Section& section)
         m_engine.controlChange(setup.cadenzaChannel, 1, 0);
         m_engine.controlChange(setup.cadenzaChannel, 64, 0);
         m_engine.pitchBend(setup.cadenzaChannel, 8192);
-
-        juce::Logger::writeToLog(
-            juce::String("[Cadenza] Style part setup section=") + juce::String(section.name)
-            + " part=" + juce::String(setup.partName)
-            + " sourceCh=" + juce::String(setup.sourceChannel)
-            + " playbackCh=" + juce::String(setup.cadenzaChannel)
-            + " synthCh=" + (setup.synthChannel ? juce::String(*setup.synthChannel) : juce::String("invalid"))
-            + " bankMsb=" + optionalIntText(setup.bankMsb)
-            + " bankLsb=" + optionalIntText(setup.bankLsb)
-            + " program=" + optionalIntText(setup.program)
-            + " volume=" + optionalIntText(setup.volume)
-            + " pan=" + optionalIntText(setup.pan)
-            + " reverb=" + optionalIntText(setup.reverb)
-            + " chorus=" + optionalIntText(setup.chorus)
-            + " percussion=" + juce::String(setup.percussion ? "true" : "false")
-            + " notes=" + juce::String(setup.noteCount));
-
-        if (setup.percussion) {
-            juce::Logger::writeToLog(
-                juce::String("[Cadenza] Drum part diagnostics section=") + juce::String(section.name)
-                + " part=" + juce::String(setup.partName)
-                + " sourceCh=" + juce::String(setup.sourceChannel)
-                + " playbackCh=" + juce::String(setup.cadenzaChannel)
-                + " synthCh=" + (setup.synthChannel ? juce::String(*setup.synthChannel) : juce::String("invalid"))
-                + " bankMsb=" + optionalIntText(setup.bankMsb)
-                + " bankLsb=" + optionalIntText(setup.bankLsb)
-                + " program=" + optionalIntText(setup.program)
-                + " percussion=" + juce::String(setup.percussion ? "true" : "false")
-                + " firstNotes=" + (part != nullptr ? firstDrumNoteText(*part) : juce::String("-")));
-
-            if (part != nullptr && drumNotesLookSuspicious(*part)) {
-                juce::Logger::writeToLog(
-                    juce::String("[Cadenza] WARNING: Drum notes include pitches outside common GM drum range 35..81; ")
-                    + "section=" + juce::String(section.name)
-                    + " part=" + juce::String(setup.partName)
-                    + " sourceCh=" + juce::String(setup.sourceChannel)
-                    + " playbackCh=" + juce::String(setup.cadenzaChannel)
-                    + " firstNotes=" + firstDrumNoteText(*part));
-            }
-        }
     }
 }
 
 void StyleEngine::firePatternNotesAtTick(int tickInSection)
 {
-    std::shared_ptr<const Style> style;
-    std::string sectionName;
-    {
-        std::lock_guard<std::mutex> lk(m_publishMutex);
-        style = m_style;
-        sectionName = m_sectionName;
-    }
-    if (!style) return;
-
-    const Section* section = style->findSection(sectionName);
-    if (!section) return;
+    const auto* cache = m_currentSectionCache;
+    if (cache == nullptr) return;
 
     // Snapshot chord + transpose context for consistent transposition this tick.
     // Octave is deliberately NOT applied to style parts (see makeStylePlaybackContext).
@@ -463,77 +475,111 @@ void StyleEngine::firePatternNotesAtTick(int tickInSection)
 
     const int humanize = m_humanizeAmount.load();
     const int secLen   = m_sectionLengthTicks;
+    const int firstPossibleTick = humanize > 0
+        ? tickInSection - cache->maxHumanizeLateTicks
+        : tickInSection;
 
-    for (std::size_t partIndex = 0; partIndex < section->parts.size(); ++partIndex) {
-        const auto& part = section->parts[partIndex];
-        const HumanizeProfile hp = humanizeProfileForPart(part, humanize);
+    const auto first = std::lower_bound(
+        cache->patternEvents.begin(), cache->patternEvents.end(), firstPossibleTick,
+        [](const TimedPatternEvent& ev, int tick) { return ev.tick < tick; });
+    const auto last = std::upper_bound(
+        first, cache->patternEvents.end(), tickInSection,
+        [](int tick, const TimedPatternEvent& ev) { return tick < ev.tick; });
 
-        for (const auto& note : part.notes) {
-            // Humanized micro-timing: the note may fire a few ticks LATE (never
-            // early, so it can't fire in the past or be skipped). Clamp so a note
-            // near the loop end still lands inside the section and isn't dropped.
-            const std::uint32_t seed = humanizeSeed(note.tick, note.pitch,
-                                                    static_cast<int>(partIndex), m_humanizeLoopCounter);
-            int late = humanizeLateTicks(seed, hp.maxLateTicks);
-            if (secLen > 0)
-                late = std::min(late, std::max(0, secLen - 1 - note.tick));
-            if (note.tick + late != tickInSection) continue;
+    auto eventIsDue = [&](const TimedPatternEvent& ev, std::uint32_t& seedOut,
+                          HumanizeProfile& profileOut) {
+        if (ev.part == nullptr || ev.note == nullptr)
+            return false;
 
-            auto maybeMidi = playbackNoteForPart(part, note, ctx);
-            if (!maybeMidi) continue;
+        profileOut = humanizeProfileForPart(*ev.part, humanize);
+        seedOut = humanizeSeed(ev.note->tick, ev.note->pitch,
+                               static_cast<int>(ev.partIndex), m_humanizeLoopCounter);
+        int late = humanizeLateTicks(seedOut, profileOut.maxLateTicks);
+        if (secLen > 0)
+            late = std::min(late, std::max(0, secLen - 1 - ev.note->tick));
+        return ev.note->tick + late == tickInSection;
+    };
 
-            const int midi = *maybeMidi;
-            const int channel = playbackChannelForPart(part);
-            const bool percussion = part.percussion || channel == 10;
-            if (percussion) {
-                const auto remap = drumNoteForPlayback(part, note.pitch);
-                if (remap.remapped) {
-                    juce::Logger::writeToLog(
-                        juce::String("[Cadenza] Yamaha/XG drum note remap part=") + juce::String(part.name)
-                        + " original=" + juce::String(remap.originalNote)
-                        + " remapped=" + juce::String(remap.playbackNote)
-                        + " bankMsb=" + optionalIntText(part.bankMsb)
-                        + " bankLsb=" + optionalIntText(part.bankLsb)
-                        + " program=" + optionalIntText(part.program));
-                }
-            }
+    auto fireEvent = [&](const TimedPatternEvent& ev, std::uint32_t seed,
+                         const HumanizeProfile& hp) {
+        const auto& part = *ev.part;
+        const auto& note = *ev.note;
 
-            const int velocity = humanizeVelocity(note.velocity, seed, hp.velocityJitter);
-            m_engine.noteOn(channel, midi, velocity);
+        auto maybeMidi = playbackNoteForPart(part, note, ctx);
+        if (!maybeMidi) return;
 
-            // Schedule a note-off after `duration` ticks. Keep source pointers so
-            // sustained notes can be re-voiced if the chord changes mid-hold.
-            m_active.push_back(ActiveNote{ channel, midi,
-                                           std::max(1, note.duration), velocity,
-                                           &part, &note });
+        const int midi = *maybeMidi;
+        const int channel = playbackChannelForPart(part);
+        const int velocity = humanizeVelocity(note.velocity, seed, hp.velocityJitter);
+        m_engine.noteOn(channel, midi, velocity);
+
+        // Schedule a note-off after `duration` ticks. Keep source pointers so
+        // sustained notes can be re-voiced if the chord changes mid-hold.
+        m_active.push_back(ActiveNote{ channel, midi,
+                                       std::max(1, note.duration), velocity,
+                                       &part, &note });
+    };
+
+    if (humanize <= 0) {
+        for (auto it = first; it != last; ++it) {
+            std::uint32_t seed = 0;
+            HumanizeProfile hp;
+            if (eventIsDue(*it, seed, hp))
+                fireEvent(*it, seed, hp);
         }
+        return;
+    }
+
+    std::size_t lastSequence = 0;
+    bool haveLastSequence = false;
+    for (;;) {
+        const TimedPatternEvent* next = nullptr;
+        std::uint32_t nextSeed = 0;
+        HumanizeProfile nextProfile;
+
+        for (auto it = first; it != last; ++it) {
+            if (haveLastSequence && it->sequence <= lastSequence)
+                continue;
+            std::uint32_t seed = 0;
+            HumanizeProfile hp;
+            if (!eventIsDue(*it, seed, hp))
+                continue;
+            if (next == nullptr || it->sequence < next->sequence) {
+                next = &*it;
+                nextSeed = seed;
+                nextProfile = hp;
+            }
+        }
+
+        if (next == nullptr)
+            break;
+
+        fireEvent(*next, nextSeed, nextProfile);
+        lastSequence = next->sequence;
+        haveLastSequence = true;
     }
 }
 
 void StyleEngine::fireAutomationAtTick(int tickInSection)
 {
-    std::shared_ptr<const Style> style;
-    std::string sectionName;
-    {
-        std::lock_guard<std::mutex> lk(m_publishMutex);
-        style = m_style;
-        sectionName = m_sectionName;
-    }
-    if (!style) return;
+    const auto* cache = m_currentSectionCache;
+    if (cache == nullptr) return;
 
-    const Section* section = style->findSection(sectionName);
-    if (!section) return;
+    const auto first = std::lower_bound(
+        cache->automationEvents.begin(), cache->automationEvents.end(), tickInSection,
+        [](const TimedAutomationEvent& ev, int tick) { return ev.tick < tick; });
+    const auto last = std::upper_bound(
+        first, cache->automationEvents.end(), tickInSection,
+        [](int tick, const TimedAutomationEvent& ev) { return tick < ev.tick; });
 
-    for (const auto& part : section->parts) {
-        if (part.automation.empty()) continue;
-        const int channel = playbackChannelForPart(part);
-        for (const auto& ev : part.automation) {
-            if (ev.tick != tickInSection) continue;
-            if (ev.type == AutomationEvent::kPitchBend)
-                m_engine.pitchBend(channel, ev.value);
-            else
-                m_engine.controlChange(channel, ev.type, ev.value);
-        }
+    for (auto it = first; it != last; ++it) {
+        if (it->part == nullptr || it->event == nullptr)
+            continue;
+        const int channel = playbackChannelForPart(*it->part);
+        if (it->event->type == AutomationEvent::kPitchBend)
+            m_engine.pitchBend(channel, it->event->value);
+        else
+            m_engine.controlChange(channel, it->event->type, it->event->value);
     }
 }
 
