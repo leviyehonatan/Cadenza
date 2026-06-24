@@ -144,6 +144,55 @@ void makeFsharpMinorFixture(juce::MidiFile& midi)
     midi.addTrack(piano);
 }
 
+void makeSparseIntroThenFullBandFixture(juce::MidiFile& midi)
+{
+    constexpr int ppq = 480;
+    constexpr int bar = ppq * 4;
+
+    juce::MidiMessageSequence drums;
+    for (int b = 0; b < 8; ++b) {
+        addNote(drums, 10, b * bar, 120, 36, 110);
+        addNote(drums, 10, b * bar + ppq, 120, 38, 96);
+    }
+
+    juce::MidiMessageSequence bass;
+    addProgram(bass, 2, 33);
+    for (int b = 0; b < 8; ++b)
+        addNote(bass, 2, b * bar, ppq * 4, 36, 104);
+
+    juce::MidiMessageSequence piano;
+    addProgram(piano, 3, 0);
+    for (int b = 4; b < 8; ++b) {
+        addNote(piano, 3, b * bar, ppq * 4, 60, 88);
+        addNote(piano, 3, b * bar, ppq * 4, 64, 82);
+        addNote(piano, 3, b * bar, ppq * 4, 67, 80);
+    }
+
+    midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(drums);
+    midi.addTrack(bass);
+    midi.addTrack(piano);
+}
+
+void makeBassDrumsOnlyFixture(juce::MidiFile& midi)
+{
+    constexpr int ppq = 480;
+    constexpr int bar = ppq * 4;
+
+    juce::MidiMessageSequence drums;
+    for (int b = 0; b < 4; ++b)
+        addNote(drums, 10, b * bar, 120, 36, 110);
+
+    juce::MidiMessageSequence bass;
+    addProgram(bass, 2, 33);
+    for (int b = 0; b < 4; ++b)
+        addNote(bass, 2, b * bar, ppq * 4, 36, 104);
+
+    midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(drums);
+    midi.addTrack(bass);
+}
+
 void testCmajorMapsPartsAndRoundTrips()
 {
     juce::MidiFile midi;
@@ -355,6 +404,52 @@ void testFallbackWarning()
                && chord1->yamahaPolicy->sourceChord.value_or("") == "",
            "fallback policy stores C major");
 }
+
+void testInspectAutoRangeSkipsSparseIntro()
+{
+    juce::MidiFile midi;
+    makeSparseIntroThenFullBandFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-auto-range", midi);
+
+    auto info = cadenza::arranger::inspectMidiFileForStyleImport(file, 0, 4);
+    expect(info.ok, "auto-range fixture inspects");
+    expect(info.recommendedRange.barStart == 4,
+           "auto-range starts in the full-band region instead of bar 1");
+    expect(info.recommendedRange.barCount == 4, "auto-range keeps requested four-bar length");
+}
+
+void testInspectChordConfidence()
+{
+    juce::MidiFile clearMinor;
+    makeFsharpMinorFixture(clearMinor);
+    const auto clearFile = writeMidi("cadenza-midi-style-confidence-high", clearMinor);
+    auto clearInfo = cadenza::arranger::inspectMidiFileForStyleImport(clearFile, 0, 4);
+    expect(clearInfo.ok, "clear chord fixture inspects");
+    expect(clearInfo.detectedChord.confidence == cadenza::arranger::MidiStyleChordConfidence::High,
+           "clear minor triad with a third reports high confidence");
+
+    juce::MidiFile sparse;
+    makeBassDrumsOnlyFixture(sparse);
+    const auto sparseFile = writeMidi("cadenza-midi-style-confidence-low", sparse);
+    auto sparseInfo = cadenza::arranger::inspectMidiFileForStyleImport(sparseFile, 0, 4);
+    expect(sparseInfo.ok, "bass and drums fixture inspects");
+    expect(sparseInfo.detectedChord.confidence == cadenza::arranger::MidiStyleChordConfidence::Low,
+           "bass and drums only reports low confidence");
+
+    juce::MidiFile fallback;
+    fallback.setTicksPerQuarterNote(480);
+    juce::MidiMessageSequence track;
+    addProgram(track, 3, 0);
+    addNote(track, 3, 0, 480, 60);
+    addNote(track, 3, 0, 480, 61);
+    addNote(track, 3, 0, 480, 66);
+    fallback.addTrack(track);
+    const auto fallbackFile = writeMidi("cadenza-midi-style-confidence-fallback-low", fallback);
+    auto fallbackInfo = cadenza::arranger::inspectMidiFileForStyleImport(fallbackFile, 0, 4);
+    expect(fallbackInfo.ok, "fallback fixture inspects");
+    expect(fallbackInfo.detectedChord.confidence == cadenza::arranger::MidiStyleChordConfidence::Low,
+           "fallback-to-C reports low confidence");
+}
 }
 
 int main()
@@ -366,6 +461,8 @@ int main()
     testInspectReadsEarliestTempo();
     testSmpteRejects();
     testFallbackWarning();
+    testInspectAutoRangeSkipsSparseIntro();
+    testInspectChordConfidence();
     std::cout << "All MIDI style converter tests passed\n";
     return 0;
 }

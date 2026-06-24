@@ -19,12 +19,28 @@ struct MidiStyleConvertOptions
     bool normalizeToC = true;
 };
 
+enum class MidiStyleChordConfidence
+{
+    High,
+    Medium,
+    Low,
+};
+
+struct MidiStyleRecommendedRange
+{
+    int barStart = 0;
+    int barCount = 4;
+    bool fallback = true;
+};
+
 struct MidiStyleDetectedChord
 {
     int root = 0;
     juce::String rootName = "C";
     juce::String chordSuffix;
     bool fallback = true;
+    MidiStyleChordConfidence confidence = MidiStyleChordConfidence::Low;
+    juce::String confidenceReason;
 };
 
 struct MidiStyleImportInfo
@@ -34,6 +50,7 @@ struct MidiStyleImportInfo
     int beatsPerBar = 4;
     int beatUnit = 4;
     int totalBars = 1;
+    MidiStyleRecommendedRange recommendedRange;
     MidiStyleDetectedChord detectedChord;
     juce::StringArray warnings;
     bool ok = false;

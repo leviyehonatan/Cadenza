@@ -479,6 +479,8 @@ struct DetectedChord
     int root = 0;
     std::string suffix;
     bool fallback = true;
+    MidiStyleChordConfidence confidence = MidiStyleChordConfidence::Low;
+    juce::String confidenceReason = "No confident chord evidence";
 };
 
 DetectedChord detectSourceChord(const std::vector<SourceGroup*>& harmonic,
@@ -489,12 +491,18 @@ DetectedChord detectSourceChord(const std::vector<SourceGroup*>& harmonic,
     int bassPc = -1;
     int lowestPitch = 128;
     int lowestPc = 0;
+    int noteCount = 0;
+    int nonBassNoteCount = 0;
+    int weightedPitchClasses = 0;
 
     for (const auto* group : harmonic) {
         const bool bass = classifyGroup(*group) == Slot::Bass;
         for (const auto& n : group->notes) {
             if (n.end <= startTick || n.start >= endTick)
                 continue;
+            ++noteCount;
+            if (!bass)
+                ++nonBassNoteCount;
             const int p = pc(n.pitch);
             const int clippedStart = std::max(n.start, startTick);
             const int clippedEnd = std::min(n.end, endTick);
@@ -519,12 +527,33 @@ DetectedChord detectSourceChord(const std::vector<SourceGroup*>& harmonic,
     if (maxWeight <= 0.0)
         return {};
     for (int i = 0; i < 12; ++i)
-        if (weights[static_cast<std::size_t>(i)] >= maxWeight * 0.20)
+        if (weights[static_cast<std::size_t>(i)] >= maxWeight * 0.20) {
             mask = static_cast<std::uint16_t>(mask | cadenza::midi::pcBit(i));
+            ++weightedPitchClasses;
+        }
 
     const int rootHint = bassPc >= 0 ? bassPc : lowestPc;
-    if (const auto match = cadenza::midi::matchChordMask(mask, rootHint, 3))
-        return { match->root, match->info != nullptr ? match->info->suffix : "", false };
+    if (const auto match = cadenza::midi::matchChordMask(mask, rootHint, 3)) {
+        DetectedChord detected { match->root, match->info != nullptr ? match->info->suffix : "", false };
+        const bool hasMinorThird = (mask & cadenza::midi::pcBit(match->root + 3)) != 0;
+        const bool hasMajorThird = (mask & cadenza::midi::pcBit(match->root + 4)) != 0;
+        const bool hasThird = hasMinorThird || hasMajorThird;
+        const bool hasFifth = (mask & cadenza::midi::pcBit(match->root + 7)) != 0
+            || (mask & cadenza::midi::pcBit(match->root + 6)) != 0
+            || (mask & cadenza::midi::pcBit(match->root + 8)) != 0;
+
+        if (hasThird && hasFifth && nonBassNoteCount >= 3 && weightedPitchClasses >= 3) {
+            detected.confidence = MidiStyleChordConfidence::High;
+            detected.confidenceReason = "Clear triad with a third present";
+        } else if (hasThird && noteCount >= 2) {
+            detected.confidence = MidiStyleChordConfidence::Medium;
+            detected.confidenceReason = "Matched chord, but evidence is thin";
+        } else {
+            detected.confidence = MidiStyleChordConfidence::Low;
+            detected.confidenceReason = "Matched chord without a clear third";
+        }
+        return detected;
+    }
     return {};
 }
 
@@ -548,6 +577,187 @@ std::vector<SourceGroup*> harmonicGroups(ParsedMidi& parsed)
     harmonic.insert(harmonic.end(), chords.begin(), chords.end());
     harmonic.insert(harmonic.end(), pads.begin(), pads.end());
     return harmonic;
+}
+
+bool noteOverlaps(const RawNote& note, int startTick, int endTick) noexcept
+{
+    return note.end > startTick && note.start < endTick;
+}
+
+int countNotesInWindow(const SourceGroup& group, int startTick, int endTick)
+{
+    int count = 0;
+    for (const auto& note : group.notes)
+        if (noteOverlaps(note, startTick, endTick))
+            ++count;
+    return count;
+}
+
+int countBarsWithNotes(const std::vector<SourceGroup*>& groups,
+                       int startTick,
+                       int barTicks,
+                       int barCount)
+{
+    int bars = 0;
+    for (int b = 0; b < barCount; ++b) {
+        const int barStart = startTick + b * barTicks;
+        const int barEnd = barStart + barTicks;
+        bool hasNotes = false;
+        for (const auto* group : groups) {
+            if (countNotesInWindow(*group, barStart, barEnd) > 0) {
+                hasNotes = true;
+                break;
+            }
+        }
+        if (hasNotes)
+            ++bars;
+    }
+    return bars;
+}
+
+struct RangeScore
+{
+    int barStart = 0;
+    int barCount = 4;
+    double score = 0.0;
+    bool clearlyFull = false;
+};
+
+RangeScore scoreRange(ParsedMidi& parsed, int barStart, int barCount, int barTicks)
+{
+    const int startTick = barStart * barTicks;
+    const int endTick = startTick + barCount * barTicks;
+
+    std::vector<SourceGroup*> drums;
+    std::vector<SourceGroup*> basses;
+    std::vector<SourceGroup*> chords;
+    std::vector<SourceGroup*> pads;
+    std::vector<SourceGroup*> phrases;
+    for (auto& group : parsed.groups) {
+        switch (classifyGroup(group)) {
+            case Slot::Drums: drums.push_back(&group); break;
+            case Slot::Bass: basses.push_back(&group); break;
+            case Slot::Chord: chords.push_back(&group); break;
+            case Slot::Pad: pads.push_back(&group); break;
+            case Slot::Phrase: phrases.push_back(&group); break;
+            case Slot::Drop: break;
+        }
+    }
+
+    auto hasAny = [&](const std::vector<SourceGroup*>& groups) {
+        for (const auto* group : groups)
+            if (countNotesInWindow(*group, startTick, endTick) > 0)
+                return true;
+        return false;
+    };
+
+    std::vector<SourceGroup*> harmonyParts;
+    harmonyParts.insert(harmonyParts.end(), chords.begin(), chords.end());
+    harmonyParts.insert(harmonyParts.end(), pads.begin(), pads.end());
+
+    const bool hasDrums = hasAny(drums);
+    const bool hasBass = hasAny(basses);
+    const int harmonyBars = countBarsWithNotes(harmonyParts, startTick, barTicks, barCount);
+    const double harmonyCoverage = std::clamp(
+        static_cast<double>(harmonyBars) / static_cast<double>(std::max(1, barCount)), 0.0, 1.0);
+    const bool hasHarmony = harmonyCoverage > 0.0;
+    const bool hasPhrase = hasAny(phrases);
+
+    int activeSlots = 0;
+    for (const bool active : { hasDrums, hasBass, hasHarmony, hasPhrase })
+        if (active)
+            ++activeSlots;
+
+    std::vector<SourceGroup*> harmonic;
+    harmonic.insert(harmonic.end(), basses.begin(), basses.end());
+    harmonic.insert(harmonic.end(), chords.begin(), chords.end());
+    harmonic.insert(harmonic.end(), pads.begin(), pads.end());
+    const auto detected = detectSourceChord(harmonic, startTick, endTick);
+    const auto harmonyDetected = detectSourceChord(harmonyParts, startTick, endTick);
+    const bool hasThirdBearingHarmony = harmonyDetected.confidence != MidiStyleChordConfidence::Low;
+    const double thirdBonus = hasThirdBearingHarmony
+        ? (harmonyDetected.confidence == MidiStyleChordConfidence::High ? 20.0 : 9.0)
+        : 0.0;
+
+    std::vector<int> noteCounts;
+    noteCounts.reserve(static_cast<std::size_t>(barCount));
+    for (int b = 0; b < barCount; ++b) {
+        const int barBegin = startTick + b * barTicks;
+        const int barEnd = barBegin + barTicks;
+        int count = 0;
+        for (const auto* group : { &drums, &basses, &chords, &pads, &phrases })
+            for (const auto* source : *group)
+                count += countNotesInWindow(*source, barBegin, barEnd);
+        noteCounts.push_back(count);
+    }
+
+    const double mean = noteCounts.empty() ? 0.0
+        : static_cast<double>(std::accumulate(noteCounts.begin(), noteCounts.end(), 0))
+            / static_cast<double>(noteCounts.size());
+    double variance = 0.0;
+    for (const int count : noteCounts)
+        variance += (static_cast<double>(count) - mean) * (static_cast<double>(count) - mean);
+    variance = noteCounts.empty() ? 0.0 : variance / static_cast<double>(noteCounts.size());
+    const double cv = mean > 0.0 ? std::sqrt(variance) / mean : 2.0;
+    const int minDensity = noteCounts.empty() ? 0 : *std::min_element(noteCounts.begin(), noteCounts.end());
+
+    double densityScore = 0.0;
+    if (mean < 2.0)
+        densityScore -= 30.0;
+    else if (mean < 5.0)
+        densityScore -= 12.0;
+    else
+        densityScore += std::max(0.0, 18.0 * (1.0 - std::min(cv, 1.0)));
+    if (mean > 90.0)
+        densityScore -= std::min(25.0, (mean - 90.0) * 0.25);
+    if (minDensity == 0)
+        densityScore -= 18.0;
+
+    RangeScore result;
+    result.barStart = barStart;
+    result.barCount = barCount;
+    result.score = activeSlots * 8.0
+        + (hasDrums ? 12.0 : 0.0)
+        + (hasBass ? 14.0 : 0.0)
+        + harmonyCoverage * 26.0
+        + (hasDrums && hasBass && harmonyCoverage >= 1.0 && hasThirdBearingHarmony ? 25.0 : 0.0)
+        + thirdBonus * harmonyCoverage
+        + densityScore;
+    result.clearlyFull = hasDrums && hasBass && harmonyCoverage >= 1.0
+        && hasThirdBearingHarmony
+        && detected.confidence != MidiStyleChordConfidence::Low
+        && mean >= 5.0
+        && cv <= 0.75;
+    return result;
+}
+
+MidiStyleRecommendedRange recommendRange(ParsedMidi& parsed,
+                                         int totalBars,
+                                         int barTicks,
+                                         int targetBarCount)
+{
+    MidiStyleRecommendedRange fallback;
+    fallback.barStart = 0;
+    fallback.barCount = std::clamp(std::max(1, targetBarCount), 1, std::max(1, totalBars));
+    fallback.fallback = true;
+
+    if (totalBars <= 1 || barTicks <= 0)
+        return fallback;
+
+    const int count = fallback.barCount;
+    const int lastStart = std::max(0, totalBars - count);
+    RangeScore best { 0, count, -std::numeric_limits<double>::infinity(), false };
+    for (int start = 0; start <= lastStart; ++start) {
+        const auto score = scoreRange(parsed, start, count, barTicks);
+        if (score.clearlyFull && score.score >= 95.0)
+            return { start, count, false };
+        if (score.score > best.score)
+            best = score;
+    }
+
+    if (best.score >= 70.0)
+        return { best.barStart, best.barCount, !best.clearlyFull };
+    return fallback;
 }
 
 int totalBarsFor(const ParsedMidi& parsed, int barTicks) noexcept
@@ -579,6 +789,7 @@ MidiStyleImportInfo inspectMidiFileForStyleImport(const juce::File& midi,
     info.beatsPerBar = parsed->beatsPerBar;
     info.beatUnit = parsed->beatUnit;
     info.totalBars = totalBarsFor(*parsed, barTicks);
+    info.recommendedRange = recommendRange(*parsed, info.totalBars, barTicks, std::max(1, barCount));
 
     const int clampedStart = std::clamp(barStart, 0, std::max(0, info.totalBars - 1));
     const int clampedCount = std::clamp(std::max(1, barCount), 1, std::max(1, info.totalBars - clampedStart));
@@ -590,6 +801,8 @@ MidiStyleImportInfo inspectMidiFileForStyleImport(const juce::File& midi,
     info.detectedChord.rootName = rootName(detected.root);
     info.detectedChord.chordSuffix = juce::String(detected.suffix);
     info.detectedChord.fallback = detected.fallback;
+    info.detectedChord.confidence = detected.confidence;
+    info.detectedChord.confidenceReason = detected.confidenceReason;
     if (detected.fallback)
         info.warnings.add("Could not confidently detect source chord; using C major fallback");
 

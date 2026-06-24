@@ -95,6 +95,16 @@ int midiImportQualityId(const juce::String& label) noexcept
     return 1;
 }
 
+juce::String midiImportConfidenceLabel(cadenza::arranger::MidiStyleChordConfidence confidence)
+{
+    switch (confidence) {
+        case cadenza::arranger::MidiStyleChordConfidence::High: return "High";
+        case cadenza::arranger::MidiStyleChordConfidence::Medium: return "Medium";
+        case cadenza::arranger::MidiStyleChordConfidence::Low: return "Low - please check";
+    }
+    return "Low - please check";
+}
+
 class MidiStyleImportDialog final : public juce::Component
 {
 public:
@@ -168,7 +178,7 @@ public:
         };
 
         configureRangeControls();
-        applyInfoToLabels(true);
+        refreshDetection();
         setSize(460, 312);
     }
 
@@ -230,12 +240,15 @@ private:
     void configureRangeControls()
     {
         const int total = std::max(1, m_info.totalBars);
+        const int recommendedStart = std::clamp(m_info.recommendedRange.barStart + 1, 1, total);
+        const int recommendedCount = std::clamp(
+            std::max(1, m_info.recommendedRange.barCount), 1, std::max(1, total - recommendedStart + 1));
         m_startBar.setRange(1.0, static_cast<double>(total), 1.0);
-        m_startBar.setValue(1.0, juce::dontSendNotification);
+        m_startBar.setValue(static_cast<double>(recommendedStart), juce::dontSendNotification);
         m_barCount.setRange(1.0, static_cast<double>(total), 1.0);
-        m_barCount.setValue(static_cast<double>(std::min(4, total)), juce::dontSendNotification);
-        m_startBar.onValueChange = [this] { clampBarCountToAvailable(); };
-        m_barCount.onValueChange = [this] { clampBarCountToAvailable(); };
+        m_barCount.setValue(static_cast<double>(recommendedCount), juce::dontSendNotification);
+        m_startBar.onValueChange = [this] { handleRangeChanged(); };
+        m_barCount.onValueChange = [this] { handleRangeChanged(); };
     }
 
     void clampBarCountToAvailable()
@@ -250,6 +263,12 @@ private:
             m_barCount.setValue(maxCount, juce::dontSendNotification);
     }
 
+    void handleRangeChanged()
+    {
+        clampBarCountToAvailable();
+        refreshDetection();
+    }
+
     void refreshDetection()
     {
         clampBarCountToAvailable();
@@ -257,7 +276,7 @@ private:
             m_midiFile,
             juce::roundToInt(m_startBar.getValue()) - 1,
             juce::roundToInt(m_barCount.getValue()));
-        applyInfoToLabels(false);
+        applyInfoToLabels(true);
     }
 
     void applyInfoToLabels(bool updateSelectors)
@@ -273,10 +292,19 @@ private:
             ? m_info.detectedChord.rootName
             : juce::String(midiImportRootName(m_info.detectedChord.root));
         const auto quality = midiImportQualityLabel(m_info.detectedChord.chordSuffix);
+        const auto confidence = midiImportConfidenceLabel(m_info.detectedChord.confidence);
         m_detected.setText(
             juce::String("Detected source chord: ") + root + " " + quality
+            + "  (confidence: " + confidence + ")"
             + (m_info.detectedChord.fallback ? " (fallback)" : ""),
             juce::dontSendNotification);
+        const auto detectedColour =
+            m_info.detectedChord.confidence == cadenza::arranger::MidiStyleChordConfidence::Low
+                ? cadenza::ui::CadenzaLookAndFeel::led().withMultipliedAlpha(0.88f)
+                : m_info.detectedChord.confidence == cadenza::arranger::MidiStyleChordConfidence::Medium
+                    ? cadenza::ui::CadenzaLookAndFeel::goldBright()
+                    : cadenza::ui::CadenzaLookAndFeel::accent();
+        m_detected.setColour(juce::Label::textColourId, detectedColour);
 
         if (updateSelectors) {
             m_root.setSelectedId(midiImportRootIndex(root) + 1, juce::dontSendNotification);
