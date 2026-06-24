@@ -12,6 +12,18 @@ dist/
 # (GeneralUser GS is small enough to stay tracked).
 resources/sf2/Timbres Of Heaven*.sf2
 
+# Yamaha style files are copyrighted user-supplied content — never commit them.
+*.STY
+*.PRS
+*.SST
+*.FPS
+*.BCS
+*.sty
+*.prs
+*.sst
+*.fps
+*.bcs
+
 # CMake
 CMakeCache.txt
 CMakeFiles/
