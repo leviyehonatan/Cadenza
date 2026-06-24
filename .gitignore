@@ -53,3 +53,24 @@ lib/
 # Generated diagnostics + tooling artifacts (regenerated on demand)
 diagnostics/
 .superpowers/
+
+# Bundled third-party plugins / neural models (not part of the source build)
+*.vst3
+NeuralPi/
+dnnn Audio/
+VST3/
+uploads/
+
+# Legacy web-UI prototype — superseded by the native JUCE UI (JUCE_WEB_BROWSER=0)
+Cadenza Workstation.html
+css/
+js/
+
+# Internal AI-assistant config + study / audit docs (not for the public repo)
+.claude/
+CLAUDE.md
+*_STUDY.md
+FEATURES_AGENTS_README.md
+DEPENDENCY_FEATURE_AUDIT.md
+LIVE_PLAYBACK_VS_EXPORT_AUDIT.md
+docs/superpowers/
