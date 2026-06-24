@@ -29,6 +29,7 @@ struct SectionsMergeResult
     std::string error;
     cadenza::arranger::Style style;
     int addedSections = 0;
+    int replacedSections = 0;
     int skippedSections = 0;
 };
 
@@ -51,6 +52,10 @@ StyleGenResult generateStyleSectionsOnly(const juce::String& apiKey,
 
 SectionsMergeResult mergeAiGeneratedSections(const cadenza::arranger::Style& original,
                                              const std::string& sectionsJson);
+
+SectionsMergeResult mergeAiPolishedSection(const cadenza::arranger::Style& original,
+                                           const std::string& sectionId,
+                                           const std::string& sectionsJson);
 
 // Conservative post-generation checks for edit-mode AI actions. These do not
 // call the network and are kept pure so UI code can reject unsafe AI output.

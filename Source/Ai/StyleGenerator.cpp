@@ -230,6 +230,56 @@ SectionsMergeResult mergeAiGeneratedSections(const cadenza::arranger::Style& ori
     return result;
 }
 
+SectionsMergeResult mergeAiPolishedSection(const cadenza::arranger::Style& original,
+                                           const std::string& sectionId,
+                                           const std::string& sectionsJson)
+{
+    SectionsMergeResult result;
+    result.style = original;
+
+    if (!styleHasUniqueSectionIds(original)) {
+        result.error = "The loaded style has duplicate section ids.";
+        return result;
+    }
+
+    const auto* originalSection = findSection(original, sectionId);
+    if (originalSection == nullptr) {
+        result.error = "The target section was not found.";
+        return result;
+    }
+
+    auto parsed = cadenza::arranger::loadSectionsFromJson(sectionsJson);
+    if (!parsed.ok) {
+        result.error = parsed.error;
+        return result;
+    }
+
+    if (parsed.sections.size() != 1 || parsed.sections.front().name != sectionId) {
+        result.error = "AI polish must return exactly the requested section.";
+        return result;
+    }
+
+    auto& polishedSection = parsed.sections.front();
+    if (!sectionIsWellFormed(polishedSection)
+        || !sectionStructureMatches(*originalSection, polishedSection)) {
+        result.error = "AI polish changed the section structure.";
+        return result;
+    }
+
+    for (auto& section : result.style.sections) {
+        if (section.name == sectionId) {
+            if (!sectionContentsMatch(section, polishedSection))
+                result.replacedSections = 1;
+            section = std::move(polishedSection);
+            result.ok = true;
+            return result;
+        }
+    }
+
+    result.error = "The target section was not found.";
+    return result;
+}
+
 juce::String styleAuthorSystemPrompt()
 {
     // Compact form of the cadenza-style-author skill: enough for the model to emit
@@ -559,7 +609,7 @@ StyleGenResult generateStyleSectionsOnly(const juce::String& apiKey,
 {
     const juce::String userContent =
         userPrompt
-        + "\n\nSTYLE REFERENCE (do not return or rewrite these existing sections):\n"
+        + "\n\nSTYLE REFERENCE:\n"
         + currentStyleJson;
     return generateStyle(apiKey, model, userContent, juce::String());
 }

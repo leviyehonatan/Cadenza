@@ -857,12 +857,23 @@ WORKED EXAMPLE - sections-only output shape. Adapt this to the current style's t
     {"tick":3360,"duration":120,"pitch":38,"velocity":114,"role":"absolute"} ]}]}}})PROMPT";
 }
 
-juce::String aiPolishPrompt()
+juce::String aiPolishSectionPrompt(const std::string& sectionId)
 {
-    return "Review this arranger style and FIX obvious problems: notes that sound out of key or wrong against the section's "
-           "chord, and stray/random or misplaced drum hits. Keep the overall groove, all section ids, the number of sections, "
-           "tempo, time signature, and instrument assignments. Do not rewrite the style; make minimal corrective edits. "
-           "Return the COMPLETE updated style JSON only.";
+    return juce::String("Polish ONLY section \"") + juce::String(sectionId) + "\" in the style reference below. "
+           "Fix obvious out-of-key or stray notes and odd/misplaced drum hits in that one section. "
+           "Keep the same section id, barCount, parts, instruments, channels, and automation; notes may change. "
+           "Drums stay absolute with GM drum pitches. Return ONLY JSON shaped exactly like "
+           "{\"sections\":{\"" + juce::String(sectionId) + "\":{...polished section...}}}. "
+           "Do not include any other section, prose, markdown, or code fences.";
+}
+
+cadenza::arranger::Style oneSectionStyleForPrompt(const cadenza::arranger::Style& style,
+                                                  const cadenza::arranger::Section& section)
+{
+    auto oneSection = style;
+    oneSection.sections.clear();
+    oneSection.sections.push_back(section);
+    return oneSection;
 }
 }
 
@@ -3108,6 +3119,66 @@ void MainComponent::applyGeneratedStyle(const cadenza::ai::StyleGenResult& resul
     applyGeneratedStyle(result, nullptr, AiStyleAction::None);
 }
 
+void MainComponent::applyPolishedStyle(const cadenza::ai::StyleGenResult& result,
+                                       int polishedSections,
+                                       int totalSections,
+                                       int warningCount)
+{
+    const int tokens = result.inputTokens + result.outputTokens;
+    if (!result.ok) {
+        finishAiWorking("AI failed: " + juce::String(result.error));
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "AI Style", juce::String(result.error));
+        return;
+    }
+
+    if (polishedSections <= 0) {
+        juce::String message = "AI: nothing to polish / kept original (0 of "
+            + juce::String(totalSections) + " sections polished, used "
+            + juce::String(tokens) + " tokens)";
+        if (warningCount > 0)
+            message += " - " + juce::String(warningCount) + " section(s) kept after warnings";
+        finishAiWorking(message);
+        return;
+    }
+
+    auto loaded = cadenza::arranger::loadStyleFromJson(result.cstyleJson);
+    if (!loaded.ok) {
+        finishAiWorking("AI returned an invalid polished style; kept your original.");
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "AI Style", "The AI returned an invalid polished style: " + juce::String(loaded.error));
+        return;
+    }
+
+    auto dir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                   .getChildFile("Cadenza AI Styles");
+    dir.createDirectory();
+    juce::String name = juce::String(loaded.style.name);
+    if (name.isEmpty()) name = "AI Style";
+    auto file = dir.getChildFile(juce::File::createLegalFileName(name) + ".cstyle");
+    file.replaceWithText(juce::String(result.cstyleJson));
+
+    if (loadAndApplyStyleFile(file)) {
+        if (m_panel)
+            m_panel->setActivePage(cadenza::ui::NativePanel::kEditorPage);
+
+        juce::String message = "AI: polished " + juce::String(polishedSections)
+            + " of " + juce::String(totalSections) + " sections (used "
+            + juce::String(tokens) + " tokens)";
+        if (warningCount > 0)
+            message += " - kept " + juce::String(warningCount) + " section(s)";
+        message += " - \"" + name + "\" loaded; edit & Save";
+        finishAiWorking(message);
+        juce::Logger::writeToLog("[Cadenza] AI style polished: " + name
+                                 + " (" + juce::String(tokens) + " tokens, saved "
+                                 + file.getFullPathName() + ")");
+    } else {
+        finishAiWorking("AI failed: could not load the polished style.");
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "AI Style", "Could not load the polished style.");
+    }
+}
+
 void MainComponent::generateAiFillsIntroEnding()
 {
     generateStyleEditAction(aiAddFillsPrompt(), "AI: generating fills...", AiStyleAction::AddFillsIntroEnding);
@@ -3115,7 +3186,7 @@ void MainComponent::generateAiFillsIntroEnding()
 
 void MainComponent::polishStyleWithAi()
 {
-    generateStyleEditAction(aiPolishPrompt(), "AI: polishing style...", AiStyleAction::Polish);
+    generateStyleEditAction({}, "AI: polishing style...", AiStyleAction::Polish);
 }
 
 void MainComponent::generateStyleEditAction(const juce::String& prompt,
@@ -3157,6 +3228,79 @@ void MainComponent::generateStyleEditAction(const juce::String& prompt,
 
     juce::Component::SafePointer<MainComponent> safe(this);
     std::thread([safe, key, model, prompt, currentStyleJson, originalStyle, action] {
+        if (action == AiStyleAction::Polish) {
+            cadenza::ai::StyleGenResult finalResult;
+            int polishedSections = 0;
+            int warningCount = 0;
+            const int totalSections = static_cast<int>(originalStyle->sections.size());
+
+            try {
+                auto working = *originalStyle;
+                for (int i = 0; i < totalSections; ++i) {
+                    const auto sectionId = originalStyle->sections[static_cast<std::size_t>(i)].name;
+                    const juce::String progress = "AI: polishing section "
+                        + juce::String(i + 1) + " of " + juce::String(totalSections) + "...";
+                    juce::MessageManager::callAsync([safe, progress, model] {
+                        if (auto* self = safe.getComponent()) {
+                            if (self->m_panel) {
+                                self->m_panel->beginAiWorking(progress, "AI: Polish");
+                                self->m_panel->setRecorderState(true, false, progress + " (" + model + ")");
+                            }
+                        }
+                    });
+
+                    const auto* section = working.findSection(sectionId);
+                    if (section == nullptr) {
+                        ++warningCount;
+                        continue;
+                    }
+
+                    const auto promptStyle = oneSectionStyleForPrompt(working, *section);
+                    const juce::String sectionJson(cadenza::arranger::saveStyleToJson(promptStyle, true));
+                    auto sectionResult = cadenza::ai::generateStyleSectionsOnly(
+                        key, model, aiPolishSectionPrompt(sectionId), sectionJson);
+                    finalResult.inputTokens += sectionResult.inputTokens;
+                    finalResult.outputTokens += sectionResult.outputTokens;
+
+                    if (!sectionResult.ok) {
+                        ++warningCount;
+                        juce::Logger::writeToLog("[Cadenza] AI polish kept original "
+                            + juce::String(sectionId) + ": " + juce::String(sectionResult.error));
+                        continue;
+                    }
+
+                    auto merged = cadenza::ai::mergeAiPolishedSection(
+                        working, sectionId, sectionResult.cstyleJson);
+                    if (!merged.ok) {
+                        ++warningCount;
+                        juce::Logger::writeToLog("[Cadenza] AI polish rejected "
+                            + juce::String(sectionId) + ": " + juce::String(merged.error));
+                        continue;
+                    }
+
+                    polishedSections += merged.replacedSections;
+                    working = std::move(merged.style);
+                }
+
+                finalResult.ok = true;
+                if (polishedSections > 0)
+                    finalResult.cstyleJson = cadenza::arranger::saveStyleToJson(working, true);
+            } catch (const std::exception& e) {
+                finalResult.ok = false;
+                finalResult.error = e.what();
+            } catch (...) {
+                finalResult.ok = false;
+                finalResult.error = "unknown error.";
+            }
+
+            juce::MessageManager::callAsync(
+                [safe, finalResult, polishedSections, totalSections, warningCount] {
+                    if (auto* self = safe.getComponent())
+                        self->applyPolishedStyle(finalResult, polishedSections, totalSections, warningCount);
+                });
+            return;
+        }
+
         cadenza::ai::StyleGenResult result;
         try {
             result = action == AiStyleAction::AddFillsIntroEnding

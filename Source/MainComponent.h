@@ -140,6 +140,10 @@ private:
     void applyGeneratedStyle(const cadenza::ai::StyleGenResult& result,
                              std::shared_ptr<const cadenza::arranger::Style> originalStyle,
                              AiStyleAction action);
+    void applyPolishedStyle(const cadenza::ai::StyleGenResult& result,
+                            int polishedSections,
+                            int totalSections,
+                            int warningCount);
     bool beginAiWorking(const juce::String& workingMessage, const juce::String& activeButtonText);
     void finishAiWorking(const juce::String& resultMessage);
     void recorderCloseEditor();

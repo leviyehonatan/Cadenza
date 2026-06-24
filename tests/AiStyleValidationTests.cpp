@@ -210,6 +210,126 @@ void mergesSectionsOnlyResponseWithoutChangingExistingSections()
     check(reloaded.style.findSection("fillAA") != nullptr, "fillAA survives round trip");
     check(reloaded.style.findSection("mainA") != nullptr, "mainA survives round trip");
 }
+
+void replacesOnlyTargetSectionFromPolishResponse()
+{
+    const auto original = baseStyle();
+    const std::string sectionsJson = R"({
+      "sections": {
+        "mainA": {
+          "barCount": 2,
+          "parts": [
+            {
+              "name": "drums",
+              "channel": 10,
+              "instrument": "Standard Kit",
+              "program": 0,
+              "percussion": true,
+              "notes": [
+                { "tick": 0, "duration": 120, "pitch": 36, "velocity": 100, "role": "absolute" },
+                { "tick": 960, "duration": 120, "pitch": 38, "velocity": 100, "role": "absolute" }
+              ]
+            },
+            {
+              "name": "bass",
+              "channel": 2,
+              "instrument": "Piano",
+              "program": 1,
+              "percussion": false,
+              "notes": [
+                { "tick": 0, "duration": 120, "pitch": 43, "velocity": 100, "role": "absolute" }
+              ]
+            }
+          ]
+        }
+      }
+    })";
+
+    const auto merged = cadenza::ai::mergeAiPolishedSection(original, "mainA", sectionsJson);
+    check(merged.ok, "single-section polish merge should succeed");
+    check(merged.replacedSections == 1, "changed target section should be counted");
+
+    const auto* originalMainA = original.findSection("mainA");
+    const auto* mergedMainA = merged.style.findSection("mainA");
+    const auto* originalMainB = original.findSection("mainB");
+    const auto* mergedMainB = merged.style.findSection("mainB");
+    check(originalMainA != nullptr && mergedMainA != nullptr, "mainA present");
+    check(originalMainB != nullptr && mergedMainB != nullptr, "mainB present");
+    check(mergedMainA->parts[1].notes[0].pitch == 43, "mainA bass note updated");
+    check(mergedMainB->parts[1].notes[0].pitch == originalMainB->parts[1].notes[0].pitch,
+          "mainB bass note unchanged");
+    check(mergedMainA->barCount == originalMainA->barCount, "mainA bar count preserved");
+    check(mergedMainA->parts.size() == originalMainA->parts.size(), "mainA part count preserved");
+}
+
+void rejectsPolishResponseWhenReturnedIdDoesNotMatch()
+{
+    const auto original = baseStyle();
+    const std::string sectionsJson = R"({
+      "sections": {
+        "mainB": {
+          "barCount": 2,
+          "parts": [
+            {
+              "name": "drums",
+              "channel": 10,
+              "instrument": "Standard Kit",
+              "program": 0,
+              "percussion": true,
+              "notes": [
+                { "tick": 0, "duration": 120, "pitch": 36, "velocity": 100, "role": "absolute" }
+              ]
+            },
+            {
+              "name": "bass",
+              "channel": 2,
+              "instrument": "Piano",
+              "program": 1,
+              "percussion": false,
+              "notes": [
+                { "tick": 0, "duration": 120, "pitch": 43, "velocity": 100, "role": "absolute" }
+              ]
+            }
+          ]
+        }
+      }
+    })";
+
+    const auto merged = cadenza::ai::mergeAiPolishedSection(original, "mainA", sectionsJson);
+    check(!merged.ok, "wrong returned section id should be rejected");
+    check(merged.style.findSection("mainA")->parts[1].notes[0].pitch
+              == original.findSection("mainA")->parts[1].notes[0].pitch,
+          "original mainA kept after wrong id");
+}
+
+void rejectsPolishResponseWhenBarCountChanges()
+{
+    const auto original = baseStyle();
+    auto changed = original;
+    changed.sections.erase(changed.sections.begin() + 1, changed.sections.end());
+    changed.sections[0].barCount = 4;
+    const auto sectionsJson = cadenza::arranger::saveStyleToJson(changed, false);
+
+    const auto merged = cadenza::ai::mergeAiPolishedSection(original, "mainA", sectionsJson);
+    check(!merged.ok, "changed bar count should be rejected");
+    check(merged.style.findSection("mainA")->barCount == original.findSection("mainA")->barCount,
+          "original bar count kept");
+}
+
+void rejectsPolishResponseWhenPartStructureChanges()
+{
+    const auto original = baseStyle();
+    auto changed = original;
+    changed.sections.erase(changed.sections.begin() + 1, changed.sections.end());
+    changed.sections[0].parts[1].midiChannel = 3;
+    const auto sectionsJson = cadenza::arranger::saveStyleToJson(changed, false);
+
+    const auto merged = cadenza::ai::mergeAiPolishedSection(original, "mainA", sectionsJson);
+    check(!merged.ok, "changed part channel should be rejected");
+    check(merged.style.findSection("mainA")->parts[1].midiChannel
+              == original.findSection("mainA")->parts[1].midiChannel,
+          "original part channel kept");
+}
 }
 
 int main()
@@ -222,6 +342,10 @@ int main()
     rejectsPolishWhenSectionIdsChange();
     rejectsPolishWhenPartStructureChanges();
     mergesSectionsOnlyResponseWithoutChangingExistingSections();
+    replacesOnlyTargetSectionFromPolishResponse();
+    rejectsPolishResponseWhenReturnedIdDoesNotMatch();
+    rejectsPolishResponseWhenBarCountChanges();
+    rejectsPolishResponseWhenPartStructureChanges();
 
     std::cout << "AiStyleValidationTests passed\n";
     return 0;
