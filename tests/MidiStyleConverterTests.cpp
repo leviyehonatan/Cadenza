@@ -4,6 +4,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -245,6 +246,86 @@ void makeBassDrumsOnlyFixture(juce::MidiFile& midi)
     midi.setTicksPerQuarterNote(ppq);
     midi.addTrack(drums);
     midi.addTrack(bass);
+}
+
+void addFullBandBars(juce::MidiMessageSequence& drums,
+                     juce::MidiMessageSequence& bass,
+                     juce::MidiMessageSequence& piano,
+                     int firstBar,
+                     int barCount,
+                     int root,
+                     int third,
+                     int fifth)
+{
+    constexpr int ppq = 480;
+    constexpr int bar = ppq * 4;
+    for (int b = firstBar; b < firstBar + barCount; ++b) {
+        addNote(drums, 10, b * bar, 120, 36, 110);
+        addNote(drums, 10, b * bar + ppq, 120, 38, 96);
+        addNote(bass, 2, b * bar, ppq * 4, root - 24, 104);
+        addNote(piano, 3, b * bar, ppq * 4, root, 88);
+        addNote(piano, 3, b * bar, ppq * 4, third, 82);
+        addNote(piano, 3, b * bar, ppq * 4, fifth, 80);
+    }
+}
+
+void makeAutoSparseIntroRepeatedMainFixture(juce::MidiFile& midi)
+{
+    constexpr int ppq = 480;
+    constexpr int bar = ppq * 4;
+
+    juce::MidiMessageSequence drums;
+    juce::MidiMessageSequence bass;
+    juce::MidiMessageSequence piano;
+    addProgram(bass, 2, 33);
+    addProgram(piano, 3, 0);
+
+    for (int b = 0; b < 4; ++b) {
+        addNote(drums, 10, b * bar, 120, 36, 110);
+        addNote(bass, 2, b * bar, ppq * 4, 36, 104);
+    }
+    addFullBandBars(drums, bass, piano, 4, 8, 60, 64, 67);
+
+    midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(drums);
+    midi.addTrack(bass);
+    midi.addTrack(piano);
+}
+
+void makeAutoTwoDistinctRepeatedMainsFixture(juce::MidiFile& midi)
+{
+    constexpr int ppq = 480;
+
+    juce::MidiMessageSequence drums;
+    juce::MidiMessageSequence bass;
+    juce::MidiMessageSequence piano;
+    addProgram(bass, 2, 33);
+    addProgram(piano, 3, 0);
+
+    addFullBandBars(drums, bass, piano, 0, 8, 60, 64, 67);
+    addFullBandBars(drums, bass, piano, 8, 8, 65, 69, 72);
+
+    midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(drums);
+    midi.addTrack(bass);
+    midi.addTrack(piano);
+}
+
+void makeAutoNoIntroFixture(juce::MidiFile& midi)
+{
+    constexpr int ppq = 480;
+
+    juce::MidiMessageSequence drums;
+    juce::MidiMessageSequence bass;
+    juce::MidiMessageSequence piano;
+    addProgram(bass, 2, 33);
+    addProgram(piano, 3, 0);
+    addFullBandBars(drums, bass, piano, 0, 8, 60, 64, 67);
+
+    midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(drums);
+    midi.addTrack(bass);
+    midi.addTrack(piano);
 }
 
 void testCmajorMapsPartsAndRoundTrips()
@@ -536,6 +617,78 @@ void testInspectAutoRangeSkipsSparseIntro()
     expect(info.recommendedRange.barCount == 4, "auto-range keeps requested four-bar length");
 }
 
+void testAutoSplitFindsMainAfterSparseIntro()
+{
+    juce::MidiFile midi;
+    makeAutoSparseIntroRepeatedMainFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-auto-split-intro-main", midi);
+
+    auto result = cadenza::arranger::autoSplitMidiFileForStyleImport(file, {});
+    expect(result.ok, "auto-split succeeds for sparse intro plus repeated main");
+    const auto mainA = std::find_if(result.sections.begin(), result.sections.end(), [](const auto& spec) {
+        return spec.sectionId == "mainA";
+    });
+    expect(mainA != result.sections.end(), "auto-split emits mainA");
+    expect(mainA->barStart >= 4, "auto-split mainA starts in the full-band region instead of bar 1");
+    const auto intro = std::find_if(result.sections.begin(), result.sections.end(), [](const auto& spec) {
+        return spec.sectionId == "intro";
+    });
+    expect(intro != result.sections.end() && intro->barStart == 0,
+           "auto-split keeps the obvious sparse intro");
+    expect(result.warnings.joinIntoString(" ").containsIgnoreCase("Main A: found at bars"),
+           "auto-split reports the original mainA timeline location");
+}
+
+void testAutoSplitFindsDistinctRepeatedMainB()
+{
+    juce::MidiFile midi;
+    makeAutoTwoDistinctRepeatedMainsFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-auto-split-mainb", midi);
+
+    auto result = cadenza::arranger::autoSplitMidiFileForStyleImport(file, {});
+    expect(result.ok, "auto-split succeeds for two repeated full-band regions");
+    const auto mainA = std::find_if(result.sections.begin(), result.sections.end(), [](const auto& spec) {
+        return spec.sectionId == "mainA";
+    });
+    const auto mainB = std::find_if(result.sections.begin(), result.sections.end(), [](const auto& spec) {
+        return spec.sectionId == "mainB";
+    });
+    expect(mainA != result.sections.end() && mainB != result.sections.end(),
+           "auto-split emits mainA and mainB");
+    expect(mainA->barStart != mainB->barStart, "mainB comes from a distinct timeline block");
+}
+
+void testAutoSplitDoesNotInventIntro()
+{
+    juce::MidiFile midi;
+    makeAutoNoIntroFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-auto-split-no-intro", midi);
+
+    auto result = cadenza::arranger::autoSplitMidiFileForStyleImport(file, {});
+    expect(result.ok, "auto-split succeeds for repeated full-band song");
+    const auto intro = std::find_if(result.sections.begin(), result.sections.end(), [](const auto& spec) {
+        return spec.sectionId == "intro";
+    });
+    expect(intro == result.sections.end(), "auto-split does not invent an intro");
+}
+
+void testAutoSplitSectionsConvertAndRoundTrip()
+{
+    juce::MidiFile midi;
+    makeAutoTwoDistinctRepeatedMainsFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-auto-split-roundtrip", midi);
+
+    auto split = cadenza::arranger::autoSplitMidiFileForStyleImport(file, {});
+    expect(split.ok && split.sections.size() >= 2, "auto-split returns multiple specs for round-trip");
+    auto converted = cadenza::arranger::convertMidiFileToNativeStyleMultiSection(file, split.sections, true);
+    expect(converted.ok && converted.style != nullptr, "auto-split specs convert through multi-section import");
+    const auto json = cadenza::arranger::saveStyleToJson(*converted.style);
+    const auto loaded = cadenza::arranger::loadStyleFromJson(json);
+    expect(loaded.ok && loaded.style.findSection("mainA") != nullptr
+               && loaded.style.findSection("mainB") != nullptr,
+           "auto-split converted style round-trips through JSON");
+}
+
 void testInspectChordConfidence()
 {
     juce::MidiFile clearMinor;
@@ -581,6 +734,10 @@ int main()
     testSmpteRejects();
     testFallbackWarning();
     testInspectAutoRangeSkipsSparseIntro();
+    testAutoSplitFindsMainAfterSparseIntro();
+    testAutoSplitFindsDistinctRepeatedMainB();
+    testAutoSplitDoesNotInventIntro();
+    testAutoSplitSectionsConvertAndRoundTrip();
     testInspectChordConfidence();
     std::cout << "All MIDI style converter tests passed\n";
     return 0;

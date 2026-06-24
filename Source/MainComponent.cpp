@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cctype>
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -165,6 +166,7 @@ public:
         addAndMakeVisible(m_slotLabel);
         addAndMakeVisible(m_sectionSlot);
         addAndMakeVisible(m_addToStyle);
+        addAndMakeVisible(m_autoSplit);
         addAndMakeVisible(m_sectionsLabel);
         addAndMakeVisible(m_capturedSummary);
         addAndMakeVisible(m_capturedSections);
@@ -206,6 +208,7 @@ public:
 
         m_detect.setButtonText("Detect");
         m_addToStyle.setButtonText("Add to style");
+        m_autoSplit.setButtonText("Auto-split into sections");
         m_removeSection.setButtonText("Remove");
         m_sectionsLabel.setText("Style sections", juce::dontSendNotification);
         m_capturedSummary.setReadOnly(true);
@@ -230,6 +233,7 @@ public:
         m_quality.onChange = [this] { updateNormalizeHint(); };
         m_normalizeToC.onClick = [this] { updateNormalizeHint(); };
         m_addToStyle.onClick = [this] { addCurrentRangeToStyle(); };
+        m_autoSplit.onClick = [this] { autoSplitIntoSections(); };
         m_removeSection.onClick = [this] { removeSelectedCapturedSection(); };
         m_convert.onClick = [this] {
             stopPreview();
@@ -296,6 +300,8 @@ public:
         m_sectionSlot.setBounds(row.removeFromLeft(140));
         row.removeFromLeft(12);
         m_addToStyle.setBounds(row.removeFromLeft(122));
+        row.removeFromLeft(10);
+        m_autoSplit.setBounds(row.removeFromLeft(188));
 
         r.removeFromTop(8);
         m_sectionsLabel.setBounds(r.removeFromTop(22));
@@ -478,8 +484,12 @@ private:
         else if (spec.sectionId == "mainD") label = "Main D";
         else if (spec.sectionId == "ending") label = "Ending";
         else label = "Main A";
-        return label + ": bars " + juce::String(start) + "-" + juce::String(end)
+        auto text = label + ": bars " + juce::String(start) + "-" + juce::String(end)
             + "  " + spec.overrideRoot + " " + spec.overrideQuality;
+        const auto hint = m_autoHints.find(spec.sectionId.toStdString());
+        if (hint != m_autoHints.end())
+            text += "  (auto, " + hint->second + ")";
+        return text;
     }
 
     void refreshCapturedSectionList()
@@ -503,6 +513,7 @@ private:
     {
         auto spec = currentSectionSpec();
         const auto sectionId = spec.sectionId;
+        m_autoHints.erase(sectionId.toStdString());
         auto it = std::find_if(m_capturedSpecs.begin(), m_capturedSpecs.end(),
                                [&](const auto& existing) { return existing.sectionId == sectionId; });
         if (it != m_capturedSpecs.end())
@@ -512,11 +523,79 @@ private:
         refreshCapturedSectionList();
     }
 
+    static juce::String sectionLabelForSpec(const juce::String& id)
+    {
+        if (id == "intro") return "Intro";
+        if (id == "mainB") return "Main B";
+        if (id == "mainC") return "Main C";
+        if (id == "mainD") return "Main D";
+        if (id == "ending") return "Ending";
+        return "Main A";
+    }
+
+    static juce::String foundAtHintFor(const cadenza::arranger::MidiStyleSectionSpec& spec,
+                                       const juce::StringArray& warnings)
+    {
+        const auto prefix = sectionLabelForSpec(spec.sectionId) + ": found at bars ";
+        for (const auto& warning : warnings)
+            if (warning.startsWith(prefix))
+                return "found at bars " + warning.fromFirstOccurrenceOf(prefix, false, false).trim();
+        return "auto";
+    }
+
+    void applyAutoSplitResult(cadenza::arranger::MidiStyleAutoSplitResult result)
+    {
+        stopPreview();
+        if (!result.ok || result.sections.empty()) {
+            const auto message = result.warnings.isEmpty()
+                ? juce::String("Auto-split could not find style sections")
+                : result.warnings.joinIntoString("; ");
+            m_capturedSummary.setText(message, juce::dontSendNotification);
+            return;
+        }
+
+        m_capturedSpecs = std::move(result.sections);
+        m_autoHints.clear();
+        for (const auto& spec : m_capturedSpecs)
+            m_autoHints[spec.sectionId.toStdString()] = foundAtHintFor(spec, result.warnings);
+        refreshCapturedSectionList();
+    }
+
+    void runAutoSplitReplacingCurrent()
+    {
+        cadenza::arranger::MidiStyleAutoSplitOptions options;
+        options.normalizeToC = m_normalizeToC.getToggleState();
+        applyAutoSplitResult(cadenza::arranger::autoSplitMidiFileForStyleImport(m_midiFile, options));
+    }
+
+    void autoSplitIntoSections()
+    {
+        if (m_capturedSpecs.empty()) {
+            runAutoSplitReplacingCurrent();
+            return;
+        }
+
+        juce::Component::SafePointer<MidiStyleImportDialog> safe(this);
+        juce::AlertWindow::showOkCancelBox(
+            juce::MessageBoxIconType::QuestionIcon,
+            "Replace captured sections?",
+            "Auto-split will replace the current captured section list.",
+            "Replace",
+            "Keep",
+            this,
+            juce::ModalCallbackFunction::create([safe](int result) {
+                if (result != 0)
+                    if (auto* dialog = safe.getComponent())
+                        dialog->runAutoSplitReplacingCurrent();
+            }));
+    }
+
     void removeSelectedCapturedSection()
     {
         const int index = m_capturedSections.getSelectedId() - 1;
         if (index < 0 || index >= static_cast<int>(m_capturedSpecs.size()))
             return;
+        m_autoHints.erase(m_capturedSpecs[static_cast<std::size_t>(index)].sectionId.toStdString());
         m_capturedSpecs.erase(m_capturedSpecs.begin() + index);
         refreshCapturedSectionList();
     }
@@ -619,6 +698,7 @@ private:
     juce::TextEditor m_capturedSummary;
     juce::ToggleButton m_normalizeToC;
     juce::TextButton m_addToStyle;
+    juce::TextButton m_autoSplit;
     juce::TextButton m_removeSection;
     juce::TextButton m_preview;
     juce::TextButton m_prevSection;
@@ -627,6 +707,7 @@ private:
     juce::TextButton m_convert;
     juce::TextButton m_cancel;
     std::vector<cadenza::arranger::MidiStyleSectionSpec> m_capturedSpecs;
+    std::map<std::string, juce::String> m_autoHints;
 };
 
 // Section to start a freshly-loaded style on. Yamaha styles run sparse (Main A)

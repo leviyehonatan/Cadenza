@@ -9,6 +9,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <map>
 #include <numeric>
 #include <limits>
@@ -760,6 +761,236 @@ MidiStyleRecommendedRange recommendRange(ParsedMidi& parsed,
     return fallback;
 }
 
+struct BlockFingerprint
+{
+    int barStart = 0;
+    int barCount = 4;
+    std::uint8_t activeMask = 0;
+    std::array<int, 5> noteCounts {};
+    std::array<double, 5> densities {};
+    std::array<double, 12> pitchClasses {};
+    DetectedChord chord;
+    RangeScore score;
+    bool hasAnyNotes = false;
+    bool fullBand = false;
+};
+
+int activeCount(std::uint8_t mask) noexcept
+{
+    int count = 0;
+    while (mask != 0) {
+        count += mask & 1;
+        mask >>= 1;
+    }
+    return count;
+}
+
+juce::String qualityLabelForSuffix(const std::string& suffix)
+{
+    if (suffix == "m") return "min";
+    if (suffix.empty()) return "maj";
+    return juce::String(suffix);
+}
+
+BlockFingerprint fingerprintBlock(ParsedMidi& parsed, int barStart, int barCount, int barTicks)
+{
+    BlockFingerprint fp;
+    fp.barStart = barStart;
+    fp.barCount = barCount;
+    fp.score = scoreRange(parsed, barStart, barCount, barTicks);
+
+    const int startTick = barStart * barTicks;
+    const int endTick = startTick + barCount * barTicks;
+    std::vector<SourceGroup*> harmonic;
+    std::vector<SourceGroup*> harmonyParts;
+    int harmonyBars = 0;
+
+    for (auto& group : parsed.groups) {
+        const auto slot = classifyGroup(group);
+        int slotIndex = -1;
+        switch (slot) {
+            case Slot::Drums: slotIndex = 0; break;
+            case Slot::Bass: slotIndex = 1; harmonic.push_back(&group); break;
+            case Slot::Chord: slotIndex = 2; harmonic.push_back(&group); harmonyParts.push_back(&group); break;
+            case Slot::Pad: slotIndex = 3; harmonic.push_back(&group); harmonyParts.push_back(&group); break;
+            case Slot::Phrase: slotIndex = 4; break;
+            case Slot::Drop: break;
+        }
+        if (slotIndex < 0)
+            continue;
+
+        int count = 0;
+        for (const auto& note : group.notes) {
+            if (!noteOverlaps(note, startTick, endTick))
+                continue;
+            ++count;
+            fp.hasAnyNotes = true;
+            if (slot != Slot::Drums) {
+                const int clippedStart = std::max(note.start, startTick);
+                const int clippedEnd = std::min(note.end, endTick);
+                fp.pitchClasses[static_cast<std::size_t>(pc(note.pitch))] +=
+                    static_cast<double>(std::max(1, clippedEnd - clippedStart));
+            }
+        }
+        fp.noteCounts[static_cast<std::size_t>(slotIndex)] += count;
+    }
+
+    for (int i = 0; i < 5; ++i) {
+        if (fp.noteCounts[static_cast<std::size_t>(i)] > 0)
+            fp.activeMask = static_cast<std::uint8_t>(fp.activeMask | (1u << i));
+        fp.densities[static_cast<std::size_t>(i)] =
+            static_cast<double>(fp.noteCounts[static_cast<std::size_t>(i)])
+            / static_cast<double>(std::max(1, barCount));
+    }
+
+    const double pcSum = std::accumulate(fp.pitchClasses.begin(), fp.pitchClasses.end(), 0.0);
+    if (pcSum > 0.0)
+        for (auto& value : fp.pitchClasses)
+            value /= pcSum;
+
+    harmonyBars = countBarsWithNotes(harmonyParts, startTick, barTicks, barCount);
+    const bool hasDrums = (fp.activeMask & (1u << 0)) != 0;
+    const bool hasBass = (fp.activeMask & (1u << 1)) != 0;
+    const bool hasHarmony = harmonyBars >= std::max(1, barCount);
+    fp.fullBand = hasDrums && hasBass && hasHarmony && fp.score.clearlyFull;
+    fp.chord = detectSourceChord(harmonic, startTick, endTick);
+    return fp;
+}
+
+double normalizedDensityDistance(double a, double b)
+{
+    const double denom = std::max({ 1.0, std::abs(a), std::abs(b) });
+    return std::abs(a - b) / denom;
+}
+
+double fingerprintDistance(const BlockFingerprint& a, const BlockFingerprint& b)
+{
+    const auto activeDelta = static_cast<unsigned int>(a.activeMask ^ b.activeMask);
+    double activeDistance = 0.0;
+    for (int i = 0; i < 5; ++i)
+        if ((activeDelta & (1u << i)) != 0)
+            activeDistance += (i == 0 || i == 1 || i == 2 || i == 3) ? 0.28 : 0.16;
+
+    double densityDistance = 0.0;
+    for (int i = 0; i < 5; ++i)
+        densityDistance += normalizedDensityDistance(a.densities[static_cast<std::size_t>(i)],
+                                                     b.densities[static_cast<std::size_t>(i)]);
+    densityDistance /= 5.0;
+
+    double pitchDistance = 0.0;
+    for (int i = 0; i < 12; ++i)
+        pitchDistance += std::abs(a.pitchClasses[static_cast<std::size_t>(i)]
+                                  - b.pitchClasses[static_cast<std::size_t>(i)]);
+    pitchDistance *= 0.5;
+
+    double chordDistance = 0.0;
+    if (!a.chord.fallback && !b.chord.fallback) {
+        if (pc(a.chord.root - b.chord.root) != 0)
+            chordDistance += 0.35;
+        if (a.chord.suffix != b.chord.suffix)
+            chordDistance += 0.20;
+    } else if (a.chord.fallback != b.chord.fallback) {
+        chordDistance += 0.15;
+    }
+
+    return activeDistance * 2.2 + densityDistance * 1.4 + pitchDistance + chordDistance;
+}
+
+struct BlockGroup
+{
+    std::vector<int> memberIndexes;
+    double averageScore = 0.0;
+    int firstBar = 0;
+};
+
+std::vector<BlockGroup> groupSimilarBlocks(const std::vector<BlockFingerprint>& blocks)
+{
+    std::vector<BlockGroup> groups;
+    constexpr double similarThreshold = 0.58;
+    for (int i = 0; i < static_cast<int>(blocks.size()); ++i) {
+        int bestGroup = -1;
+        double bestDistance = std::numeric_limits<double>::infinity();
+        for (int g = 0; g < static_cast<int>(groups.size()); ++g) {
+            const auto& rep = blocks[static_cast<std::size_t>(groups[static_cast<std::size_t>(g)].memberIndexes.front())];
+            const double distance = fingerprintDistance(blocks[static_cast<std::size_t>(i)], rep);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestGroup = g;
+            }
+        }
+        if (bestGroup >= 0 && bestDistance <= similarThreshold) {
+            groups[static_cast<std::size_t>(bestGroup)].memberIndexes.push_back(i);
+        } else {
+            BlockGroup group;
+            group.memberIndexes.push_back(i);
+            group.firstBar = blocks[static_cast<std::size_t>(i)].barStart;
+            groups.push_back(std::move(group));
+        }
+    }
+
+    for (auto& group : groups) {
+        double total = 0.0;
+        for (const int index : group.memberIndexes)
+            total += blocks[static_cast<std::size_t>(index)].score.score;
+        group.averageScore = group.memberIndexes.empty()
+            ? 0.0
+            : total / static_cast<double>(group.memberIndexes.size());
+        group.firstBar = blocks[static_cast<std::size_t>(group.memberIndexes.front())].barStart;
+    }
+    return groups;
+}
+
+bool groupIsRepeatedFullBand(const BlockGroup& group,
+                             const std::vector<BlockFingerprint>& blocks,
+                             int preferredBlockBars)
+{
+    if (group.memberIndexes.size() < 2)
+        return false;
+    int full = 0;
+    for (const int index : group.memberIndexes) {
+        const auto& block = blocks[static_cast<std::size_t>(index)];
+        if (block.fullBand && block.barCount == preferredBlockBars)
+            ++full;
+    }
+    return full >= 2;
+}
+
+MidiStyleSectionSpec specForBlock(const juce::String& sectionId, const BlockFingerprint& block)
+{
+    MidiStyleSectionSpec spec;
+    spec.sectionId = sectionId;
+    spec.barStart = block.barStart;
+    spec.barCount = block.barCount;
+    if (block.chord.confidence != MidiStyleChordConfidence::Low && !block.chord.fallback) {
+        spec.overrideRoot = rootName(block.chord.root);
+        spec.overrideQuality = qualityLabelForSuffix(block.chord.suffix);
+    }
+    return spec;
+}
+
+juce::String sectionLabel(const juce::String& id)
+{
+    if (id == "intro") return "Intro";
+    if (id == "mainB") return "Main B";
+    if (id == "mainC") return "Main C";
+    if (id == "mainD") return "Main D";
+    if (id == "ending") return "Ending";
+    return "Main A";
+}
+
+void addFoundAtWarning(juce::StringArray& warnings, const MidiStyleSectionSpec& spec)
+{
+    const int start = spec.barStart + 1;
+    const int end = spec.barStart + std::max(1, spec.barCount);
+    warnings.add(sectionLabel(spec.sectionId) + ": found at bars "
+                 + juce::String(start) + "-" + juce::String(end));
+}
+
+bool sameRange(const BlockFingerprint& block, const MidiStyleSectionSpec& spec) noexcept
+{
+    return block.barStart == spec.barStart && block.barCount == spec.barCount;
+}
+
 int totalBarsFor(const ParsedMidi& parsed, int barTicks) noexcept
 {
     if (barTicks <= 0)
@@ -1001,6 +1232,150 @@ MidiStyleImportInfo inspectMidiFileForStyleImport(const juce::File& midi,
 
     info.ok = true;
     return info;
+}
+
+MidiStyleAutoSplitResult autoSplitMidiFileForStyleImport(const juce::File& midi,
+                                                         const MidiStyleAutoSplitOptions& options)
+{
+    MidiStyleAutoSplitResult result;
+    (void) options.normalizeToC;
+    auto parsed = parseMidi(midi, result.warnings);
+    if (!parsed) {
+        if (result.warnings.isEmpty())
+            result.warnings.add("Could not parse MIDI file");
+        return result;
+    }
+
+    const int barTicks = cadenza::ticksPerBar(
+        parsed->ppq, std::max(1, parsed->beatsPerBar), std::max(1, parsed->beatUnit));
+    if (barTicks <= 0) {
+        result.warnings.add("Invalid MIDI time signature; could not compute bar length");
+        return result;
+    }
+
+    const int totalBars = totalBarsFor(*parsed, barTicks);
+    int blockBars = std::clamp(std::max(1, options.blockBars), 1, std::max(1, totalBars));
+    if (totalBars < blockBars * 2 && totalBars >= 2)
+        blockBars = 2;
+
+    std::vector<BlockFingerprint> blocks;
+    for (int start = 0; start < totalBars; start += blockBars) {
+        const int count = std::min(blockBars, totalBars - start);
+        if (count <= 0)
+            break;
+        blocks.push_back(fingerprintBlock(*parsed, start, count, barTicks));
+    }
+
+    if (blocks.empty()) {
+        result.warnings.add("MIDI file has no usable bar ranges for auto-split");
+        return result;
+    }
+
+    auto groups = groupSimilarBlocks(blocks);
+    std::vector<int> mainGroupIndexes;
+    for (int i = 0; i < static_cast<int>(groups.size()); ++i)
+        if (groupIsRepeatedFullBand(groups[static_cast<std::size_t>(i)], blocks, blockBars))
+            mainGroupIndexes.push_back(i);
+
+    std::stable_sort(mainGroupIndexes.begin(), mainGroupIndexes.end(), [&](int a, int b) {
+        const auto& ga = groups[static_cast<std::size_t>(a)];
+        const auto& gb = groups[static_cast<std::size_t>(b)];
+        if (ga.memberIndexes.size() != gb.memberIndexes.size())
+            return ga.memberIndexes.size() > gb.memberIndexes.size();
+        if (std::abs(ga.averageScore - gb.averageScore) > 0.001)
+            return ga.averageScore > gb.averageScore;
+        return ga.firstBar < gb.firstBar;
+    });
+
+    if (mainGroupIndexes.empty()) {
+        result.warnings.add("Auto-split could not find a repeated full-band Main section");
+        result.ok = false;
+        return result;
+    } else {
+        std::vector<int> selectedGroupIndexes;
+        const char* mainIds[] = { "mainA", "mainB", "mainC", "mainD" };
+        for (const int groupIndex : mainGroupIndexes) {
+            const auto& group = groups[static_cast<std::size_t>(groupIndex)];
+            const auto& representative = blocks[static_cast<std::size_t>(group.memberIndexes.front())];
+            bool distinct = true;
+            for (const int selected : selectedGroupIndexes) {
+                const auto& selectedGroup = groups[static_cast<std::size_t>(selected)];
+                const auto& selectedRep = blocks[static_cast<std::size_t>(selectedGroup.memberIndexes.front())];
+                if (fingerprintDistance(representative, selectedRep) < 0.72) {
+                    distinct = false;
+                    break;
+                }
+            }
+            if (!distinct)
+                continue;
+
+            selectedGroupIndexes.push_back(groupIndex);
+            auto spec = specForBlock(mainIds[result.sections.size()], representative);
+            addFoundAtWarning(result.warnings, spec);
+            result.sections.push_back(std::move(spec));
+            if (result.sections.size() >= 4)
+                break;
+        }
+    }
+
+    if (result.sections.empty()) {
+        result.warnings.add("Auto-split did not select any mappable style sections");
+        return result;
+    }
+
+    int firstMainStart = totalBars;
+    double firstMainScore = 0.0;
+    std::vector<BlockFingerprint> mainBlocks;
+    for (const auto& spec : result.sections) {
+        if (!spec.sectionId.startsWith("main"))
+            continue;
+        firstMainStart = std::min(firstMainStart, spec.barStart);
+        auto it = std::find_if(blocks.begin(), blocks.end(), [&](const auto& block) {
+            return sameRange(block, spec);
+        });
+        if (it != blocks.end()) {
+            firstMainScore = std::max(firstMainScore, it->score.score);
+            mainBlocks.push_back(*it);
+        }
+    }
+
+    auto introIt = std::find_if(blocks.begin(), blocks.end(), [&](const auto& block) {
+        return block.barStart < firstMainStart
+            && block.hasAnyNotes
+            && !block.fullBand
+            && (activeCount(block.activeMask) < 3 || block.score.score <= firstMainScore - 20.0);
+    });
+    if (introIt != blocks.end()) {
+        auto spec = specForBlock("intro", *introIt);
+        addFoundAtWarning(result.warnings, spec);
+        result.sections.push_back(std::move(spec));
+    }
+
+    const auto& finalBlock = blocks.back();
+    const bool alreadySelected = std::any_of(result.sections.begin(), result.sections.end(), [&](const auto& spec) {
+        return sameRange(finalBlock, spec);
+    });
+    if (!alreadySelected && finalBlock.hasAnyNotes) {
+        double nearestMainDistance = std::numeric_limits<double>::infinity();
+        for (const auto& mainBlock : mainBlocks)
+            nearestMainDistance = std::min(nearestMainDistance, fingerprintDistance(finalBlock, mainBlock));
+        const bool sparseOrCadential = !finalBlock.fullBand && activeCount(finalBlock.activeMask) <= 2;
+        const bool differsFromMains = nearestMainDistance > 0.78 && finalBlock.score.score <= firstMainScore - 12.0;
+        if (sparseOrCadential || differsFromMains) {
+            auto spec = specForBlock("ending", finalBlock);
+            addFoundAtWarning(result.warnings, spec);
+            result.sections.push_back(std::move(spec));
+        }
+    }
+
+    std::stable_sort(result.sections.begin(), result.sections.end(), [](const auto& a, const auto& b) {
+        const int ao = sectionOrder(a.sectionId);
+        const int bo = sectionOrder(b.sectionId);
+        return ao == bo ? a.sectionId.compare(b.sectionId) < 0 : ao < bo;
+    });
+
+    result.ok = !result.sections.empty();
+    return result;
 }
 
 MidiStyleConvertResult convertMidiFileToNativeStyle(const juce::File& midi,

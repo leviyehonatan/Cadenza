@@ -80,6 +80,22 @@ struct MidiStyleSectionSpec
     juce::String overrideQuality;
 };
 
+struct MidiStyleAutoSplitOptions
+{
+    int blockBars = 4;
+    bool normalizeToC = true;
+};
+
+struct MidiStyleAutoSplitResult
+{
+    std::vector<MidiStyleSectionSpec> sections;
+    juce::StringArray warnings;
+    bool ok = false;
+};
+
+MidiStyleAutoSplitResult autoSplitMidiFileForStyleImport(const juce::File& midi,
+                                                         const MidiStyleAutoSplitOptions& options);
+
 MidiStyleConvertResult convertMidiFileToNativeStyleMultiSection(const juce::File& midi,
                                                                 const std::vector<MidiStyleSectionSpec>& sections,
                                                                 bool normalizeToC);
