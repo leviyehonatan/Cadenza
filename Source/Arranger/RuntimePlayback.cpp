@@ -193,44 +193,6 @@ bool isYamahaXgDrumPart(const Part& part)
     return !isGmCompatibleDrumKeyMap(sourceDrumKeyMap(part.bankMsb, part.program));
 }
 
-int remapYamahaXgToGmDrumNote(int note) noexcept
-{
-    return remapDrumNoteToGm(DrumSourceKeyMap::YamahaXg, note);
-
-    // Yamaha/Genos kits use notes outside GM's percussion range (35..81). On a GM
-    // SoundFont those land on undefined slots and play garbage (whistle/dog-like
-    // SFX) or nothing. Map them to playable GM drums so imported styles groove.
-
-    // 1) Explicit known Yamaha/XG extensions -> closest GM drum (by sound, not by
-    //    octave math). The high XG percussion (82..87) must NOT fold down into GM's
-    //    whistle/guiro/cuica slots (71..79) — cuica/guiro sound like animal SFX.
-    switch (note) {
-        case 31: return 37;   // sticks        -> side stick
-        case 13: return 36;   // low kick      -> bass drum 1
-        case 14: return 37;   // rim           -> side stick
-        case 15: return 35;   // kick var      -> acoustic bass drum
-        case 82: return 70;   // shaker        -> maracas
-        case 83: return 80;   // jingle bell   -> mute triangle
-        case 84: return 81;   // bell tree     -> open triangle
-        case 85: return 37;   // castanets     -> side stick
-        case 86: return 36;   // mute surdo    -> bass drum (keeps the low pulse)
-        case 87: return 47;   // open surdo    -> low-mid tom
-        default: break;
-    }
-
-    // 2) In GM range already: keep as-is.
-    if (note >= 35 && note <= 81)
-        return note;
-
-    // 3) Anything still out of range: fold low hits up toward the kick/tom zone;
-    //    map remaining highs to a crash rather than into the SFX/animal slots.
-    if (note > 81)
-        return 49;            // unknown high percussion -> crash cymbal
-    int n = note;
-    while (n < 35) n += 12;   // low hits land in the kick/snare/tom zone (36..46)
-    return std::clamp(n, 35, 50);
-}
-
 DrumNoteRemap drumNoteForPlayback(const Part& part, int note)
 {
     const bool percussion = part.percussion || cadenza::audio::isCadenzaDrumChannel(part.midiChannel);

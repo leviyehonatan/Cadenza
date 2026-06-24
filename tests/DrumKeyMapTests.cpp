@@ -60,8 +60,10 @@ void xgExtensionsMapToGmSounds()
     expectMap(DrumSourceKeyMap::YamahaXg, 33, 35, "XG soft kick maps to GM kick");
     expectMap(DrumSourceKeyMap::YamahaXg, 34, 37, "XG rim shot maps to GM side stick");
     expectMap(DrumSourceKeyMap::YamahaXg, 82, 70, "XG shaker maps to GM maracas");
-    expectMap(DrumSourceKeyMap::YamahaXg, 83, 53, "XG jingle bell maps to GM bell");
-    expectMap(DrumSourceKeyMap::YamahaXg, 84, 59, "XG belltree maps to GM cymbal wash");
+    expectMap(DrumSourceKeyMap::YamahaXg, 83, 53, "XG jingle bell maps to GM bell-like metal hit");
+    expectMap(DrumSourceKeyMap::YamahaXg, 84, 59, "XG bell tree maps to GM cymbal shimmer");
+    expectMap(DrumSourceKeyMap::YamahaXg, 86, 36, "XG mute surdo maps to GM bass drum pulse");
+    expectMap(DrumSourceKeyMap::YamahaXg, 87, 47, "XG open surdo maps to GM low-mid tom");
 }
 
 void xgPopLatinMapsDifferentInRangeMeanings()

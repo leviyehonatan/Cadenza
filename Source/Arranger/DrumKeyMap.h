@@ -1,5 +1,8 @@
 #pragma once
 
+// Clean-room implementation derived from the published General MIDI Level 1
+// percussion key map and Yamaha XG drum/percussion specifications.
+
 #include <optional>
 
 namespace cadenza::arranger

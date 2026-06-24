@@ -4270,7 +4270,7 @@ void MainComponent::updateNativePanelStyle()
                 continue;
             channels.push_back(ch);
             labels.emplace_back(ch, part.name.empty() ? ("Ch " + std::to_string(ch)) : part.name);
-            // Instrument: the style's own program, else the JJazzLab-style role default.
+            // Instrument: the style's own program, else the standard GM role default.
             const int program = part.program.value_or(cadenza::midi::defaultGmProgramForRole(part.name));
             seeds.push_back({ ch, part.volume.value_or(100), program });
         }
