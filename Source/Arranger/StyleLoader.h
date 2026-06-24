@@ -6,6 +6,7 @@
 #include "Style.h"
 
 #include <string>
+#include <vector>
 
 namespace cadenza::arranger
 {
@@ -16,7 +17,15 @@ struct LoadResult
     Style style;
 };
 
+struct SectionsLoadResult
+{
+    bool ok = true;
+    std::string error;
+    std::vector<Section> sections;
+};
+
 LoadResult loadStyleFromJson(const std::string& json);
+SectionsLoadResult loadSectionsFromJson(const std::string& json);
 std::string saveStyleToJson(const Style& style, bool pretty = true);
 
 // File helpers (use only C++ standard library; can be called from cadenza_core_tests).

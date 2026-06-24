@@ -1,4 +1,5 @@
 #include "Ai/StyleGenerator.h"
+#include "Arranger/StyleLoader.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -132,6 +133,83 @@ void rejectsPolishWhenPartStructureChanges()
     check(!cadenza::ai::validatePolishKeptStructure(original, ai),
           "changed part metadata should be rejected");
 }
+
+void mergesSectionsOnlyResponseWithoutChangingExistingSections()
+{
+    const auto original = baseStyle();
+    const std::string sectionsJson = R"({
+      "sections": {
+        "fillAA": {
+          "barCount": 1,
+          "parts": [
+            {
+              "name": "drums",
+              "channel": 10,
+              "instrument": "Standard Kit",
+              "program": 0,
+              "percussion": true,
+              "notes": [
+                { "tick": 0, "duration": 120, "pitch": 36, "velocity": 110, "role": "absolute" },
+                { "tick": 960, "duration": 120, "pitch": 38, "velocity": 112, "role": "absolute" }
+              ]
+            }
+          ]
+        },
+        "mainA": {
+          "barCount": 1,
+          "parts": [
+            {
+              "name": "drums",
+              "channel": 10,
+              "instrument": "Standard Kit",
+              "program": 0,
+              "percussion": true,
+              "notes": [
+                { "tick": 0, "duration": 120, "pitch": 40, "velocity": 110, "role": "absolute" }
+              ]
+            }
+          ]
+        },
+        "fillAC": {
+          "barCount": 1,
+          "parts": [
+            {
+              "name": "drums",
+              "channel": 10,
+              "instrument": "Standard Kit",
+              "program": 0,
+              "percussion": true,
+              "notes": [
+                { "tick": 0, "duration": 120, "pitch": 36, "velocity": 110, "role": "absolute" }
+              ]
+            }
+          ]
+        }
+      }
+    })";
+
+    const auto merged = cadenza::ai::mergeAiGeneratedSections(original, sectionsJson);
+    check(merged.ok, "sections-only merge should succeed");
+    check(merged.addedSections == 1, "only allowed new fillAA should be added");
+    check(merged.skippedSections == 2, "existing mainA and disallowed fillAC should be skipped");
+    check(merged.style.sections.size() == original.sections.size() + 1, "one section appended");
+    check(merged.style.findSection("fillAA") != nullptr, "fillAA added");
+    check(merged.style.findSection("fillAC") == nullptr, "fillAC skipped");
+
+    const auto* originalMainA = original.findSection("mainA");
+    const auto* mergedMainA = merged.style.findSection("mainA");
+    check(originalMainA != nullptr && mergedMainA != nullptr, "mainA present before and after merge");
+    check(mergedMainA->barCount == originalMainA->barCount, "mainA bar count unchanged");
+    check(mergedMainA->parts.size() == originalMainA->parts.size(), "mainA parts unchanged");
+    check(mergedMainA->parts[0].notes[0].pitch == originalMainA->parts[0].notes[0].pitch,
+          "mainA notes unchanged");
+
+    const auto roundTripJson = cadenza::arranger::saveStyleToJson(merged.style, false);
+    const auto reloaded = cadenza::arranger::loadStyleFromJson(roundTripJson);
+    check(reloaded.ok, "merged style should reload");
+    check(reloaded.style.findSection("fillAA") != nullptr, "fillAA survives round trip");
+    check(reloaded.style.findSection("mainA") != nullptr, "mainA survives round trip");
+}
 }
 
 int main()
@@ -143,6 +221,7 @@ int main()
     acceptsPolishWhenOnlyNotesChange();
     rejectsPolishWhenSectionIdsChange();
     rejectsPolishWhenPartStructureChanges();
+    mergesSectionsOnlyResponseWithoutChangingExistingSections();
 
     std::cout << "AiStyleValidationTests passed\n";
     return 0;

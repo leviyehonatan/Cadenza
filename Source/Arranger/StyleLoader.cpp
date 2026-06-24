@@ -138,6 +138,94 @@ YamahaRetriggerRule yamahaRetriggerRuleFromString(const std::string& value) noex
     return YamahaRetriggerRule::Unknown;
 }
 
+YamahaPolicySource yamahaPolicySourceFromString(const std::string& value) noexcept;
+
+Part loadPart(const cadenza::json::Value& partVal)
+{
+    Part part;
+    part.name        = partVal.get("name").asString();
+    part.midiChannel = partVal.get("channel").asInt(part.midiChannel);
+    part.instrument  = partVal.get("instrument").asString();
+    if (partVal.get("bankMsb").isNumber())
+        part.bankMsb = partVal.get("bankMsb").asInt();
+    if (partVal.get("bankLsb").isNumber())
+        part.bankLsb = partVal.get("bankLsb").asInt();
+    if (partVal.get("program").isNumber())
+        part.program = partVal.get("program").asInt();
+    if (partVal.get("volume").isNumber())
+        part.volume = partVal.get("volume").asInt();
+    if (partVal.get("pan").isNumber())
+        part.pan = partVal.get("pan").asInt();
+    if (partVal.get("reverb").isNumber())
+        part.reverb = partVal.get("reverb").asInt();
+    if (partVal.get("chorus").isNumber())
+        part.chorus = partVal.get("chorus").asInt();
+    part.percussion = partVal.get("percussion").asBool(part.midiChannel == 10);
+    part.octaveOffset = partVal.get("octaveOffset").asInt(part.octaveOffset);
+
+    const auto& policyVal = partVal.get("yamahaPolicy");
+    if (policyVal.isObject()) {
+        YamahaChannelPolicy policy;
+        policy.source = yamahaPolicySourceFromString(policyVal.get("source").asString());
+        policy.sourceChannel = policyVal.get("sourceChannel").asInt(policy.sourceChannel);
+        policy.destinationPart = policyVal.get("destinationPart").asString();
+        policy.destinationType = policyVal.get("destinationType").asString();
+        policy.destinationName = policyVal.get("destinationName").asString();
+        if (policyVal.get("sourceRoot").isString())
+            policy.sourceRoot = policyVal.get("sourceRoot").asString();
+        if (policyVal.get("sourceChord").isString())
+            policy.sourceChord = policyVal.get("sourceChord").asString();
+        policy.ntr = yamahaNtrFromString(policyVal.get("ntr").asString());
+        policy.ntt = yamahaNttFromString(policyVal.get("ntt").asString());
+        policy.bassOn = policyVal.get("bassOn").asBool(policy.bassOn);
+        if (policyVal.get("chordRootUpperLimit").isNumber())
+            policy.chordRootUpperLimit = policyVal.get("chordRootUpperLimit").asInt();
+        if (policyVal.get("noteLowLimit").isNumber())
+            policy.noteLowLimit = policyVal.get("noteLowLimit").asInt();
+        if (policyVal.get("noteHighLimit").isNumber())
+            policy.noteHighLimit = policyVal.get("noteHighLimit").asInt();
+        policy.retriggerRule = yamahaRetriggerRuleFromString(
+            policyVal.get("retriggerRule").asString());
+        part.yamahaPolicy = std::move(policy);
+    }
+
+    const auto& notesArr = partVal.get("notes").asArray();
+    for (const auto& noteVal : notesArr) {
+        PatternNote n;
+        n.tick        = noteVal.get("tick").asInt(0);
+        n.duration    = noteVal.get("duration").asInt(0);
+        n.pitch       = noteVal.get("pitch").asInt(60);
+        n.velocity    = noteVal.get("velocity").asInt(100);
+        n.role        = roleFromString(noteVal.get("role").asString("absolute"));
+        n.scaleDegree = noteVal.get("scaleDegree").asInt(0);
+        part.notes.push_back(n);
+    }
+
+    const auto& autoArr = partVal.get("automation").asArray();
+    for (const auto& aVal : autoArr) {
+        AutomationEvent ev;
+        ev.tick  = aVal.get("tick").asInt(0);
+        ev.type  = aVal.get("type").asInt(0);
+        ev.value = aVal.get("value").asInt(0);
+        part.automation.push_back(ev);
+    }
+
+    return part;
+}
+
+Section loadSection(const std::string& secName, const cadenza::json::Value& secVal)
+{
+    Section section;
+    section.name = secName;
+    section.barCount = secVal.get("barCount").asInt(section.barCount);
+
+    const auto& partsArr = secVal.get("parts").asArray();
+    for (const auto& partVal : partsArr)
+        section.parts.push_back(loadPart(partVal));
+
+    return section;
+}
+
 const char* yamahaPolicySourceToString(YamahaPolicySource value) noexcept
 {
     switch (value) {
@@ -220,86 +308,6 @@ LoadResult loadStyleFromJson(const std::string& json)
     }
 
     const auto& sectionsObj = root.get("sections").asObject();
-    auto loadSection = [&](const std::string& secName, const cadenza::json::Value& secVal) {
-        Section section;
-        section.name = secName;
-        section.barCount = secVal.get("barCount").asInt(section.barCount);
-
-        const auto& partsArr = secVal.get("parts").asArray();
-        for (const auto& partVal : partsArr) {
-            Part part;
-            part.name        = partVal.get("name").asString();
-            part.midiChannel = partVal.get("channel").asInt(part.midiChannel);
-            part.instrument  = partVal.get("instrument").asString();
-            if (partVal.get("bankMsb").isNumber())
-                part.bankMsb = partVal.get("bankMsb").asInt();
-            if (partVal.get("bankLsb").isNumber())
-                part.bankLsb = partVal.get("bankLsb").asInt();
-            if (partVal.get("program").isNumber())
-                part.program = partVal.get("program").asInt();
-            if (partVal.get("volume").isNumber())
-                part.volume = partVal.get("volume").asInt();
-            if (partVal.get("pan").isNumber())
-                part.pan = partVal.get("pan").asInt();
-            if (partVal.get("reverb").isNumber())
-                part.reverb = partVal.get("reverb").asInt();
-            if (partVal.get("chorus").isNumber())
-                part.chorus = partVal.get("chorus").asInt();
-            part.percussion = partVal.get("percussion").asBool(part.midiChannel == 10);
-            part.octaveOffset = partVal.get("octaveOffset").asInt(part.octaveOffset);
-
-            const auto& policyVal = partVal.get("yamahaPolicy");
-            if (policyVal.isObject()) {
-                YamahaChannelPolicy policy;
-                policy.source = yamahaPolicySourceFromString(
-                    policyVal.get("source").asString());
-                policy.sourceChannel = policyVal.get("sourceChannel").asInt(policy.sourceChannel);
-                policy.destinationPart = policyVal.get("destinationPart").asString();
-                policy.destinationType = policyVal.get("destinationType").asString();
-                policy.destinationName = policyVal.get("destinationName").asString();
-                if (policyVal.get("sourceRoot").isString())
-                    policy.sourceRoot = policyVal.get("sourceRoot").asString();
-                if (policyVal.get("sourceChord").isString())
-                    policy.sourceChord = policyVal.get("sourceChord").asString();
-                policy.ntr = yamahaNtrFromString(policyVal.get("ntr").asString());
-                policy.ntt = yamahaNttFromString(policyVal.get("ntt").asString());
-                policy.bassOn = policyVal.get("bassOn").asBool(policy.bassOn);
-                if (policyVal.get("chordRootUpperLimit").isNumber())
-                    policy.chordRootUpperLimit = policyVal.get("chordRootUpperLimit").asInt();
-                if (policyVal.get("noteLowLimit").isNumber())
-                    policy.noteLowLimit = policyVal.get("noteLowLimit").asInt();
-                if (policyVal.get("noteHighLimit").isNumber())
-                    policy.noteHighLimit = policyVal.get("noteHighLimit").asInt();
-                policy.retriggerRule = yamahaRetriggerRuleFromString(
-                    policyVal.get("retriggerRule").asString());
-                part.yamahaPolicy = std::move(policy);
-            }
-
-            const auto& notesArr = partVal.get("notes").asArray();
-            for (const auto& noteVal : notesArr) {
-                PatternNote n;
-                n.tick        = noteVal.get("tick").asInt(0);
-                n.duration    = noteVal.get("duration").asInt(0);
-                n.pitch       = noteVal.get("pitch").asInt(60);
-                n.velocity    = noteVal.get("velocity").asInt(100);
-                n.role        = roleFromString(noteVal.get("role").asString("absolute"));
-                n.scaleDegree = noteVal.get("scaleDegree").asInt(0);
-                part.notes.push_back(n);
-            }
-
-            const auto& autoArr = partVal.get("automation").asArray();
-            for (const auto& aVal : autoArr) {
-                AutomationEvent ev;
-                ev.tick  = aVal.get("tick").asInt(0);
-                ev.type  = aVal.get("type").asInt(0);
-                ev.value = aVal.get("value").asInt(0);
-                part.automation.push_back(ev);
-            }
-            section.parts.push_back(std::move(part));
-        }
-        style.sections.push_back(std::move(section));
-    };
-
     std::vector<std::string> loadedSectionNames;
     for (const auto& orderVal : root.get("sectionOrder").asArray()) {
         const auto sectionName = orderVal.asString();
@@ -308,14 +316,14 @@ LoadResult loadStyleFromJson(const std::string& json)
             || std::find(loadedSectionNames.begin(), loadedSectionNames.end(), sectionName)
                 != loadedSectionNames.end())
             continue;
-        loadSection(it->first, it->second);
+        style.sections.push_back(loadSection(it->first, it->second));
         loadedSectionNames.push_back(sectionName);
     }
     for (const auto& [secName, secVal] : sectionsObj) {
         if (std::find(loadedSectionNames.begin(), loadedSectionNames.end(), secName)
             != loadedSectionNames.end())
             continue;
-        loadSection(secName, secVal);
+        style.sections.push_back(loadSection(secName, secVal));
     }
 
     for (const auto& slotVal : root.get("ots").asArray()) {
@@ -338,6 +346,42 @@ LoadResult loadStyleFromJson(const std::string& json)
     }
 
     result.style = std::move(style);
+    return result;
+}
+
+SectionsLoadResult loadSectionsFromJson(const std::string& json)
+{
+    SectionsLoadResult result;
+
+    cadenza::json::ParseError perr;
+    auto root = cadenza::json::parse(json, &perr);
+    if (!perr.ok()) {
+        result.ok = false;
+        result.error = "JSON parse error: " + perr.message;
+        return result;
+    }
+    if (!root.isObject()) {
+        result.ok = false;
+        result.error = "expected top-level object";
+        return result;
+    }
+
+    const auto& sectionsValue = root.get("sections");
+    if (!sectionsValue.isObject()) {
+        result.ok = false;
+        result.error = "expected sections object";
+        return result;
+    }
+
+    for (const auto& [secName, secVal] : sectionsValue.asObject()) {
+        if (secName.empty()) {
+            result.ok = false;
+            result.error = "section id is empty";
+            result.sections.clear();
+            return result;
+        }
+        result.sections.push_back(loadSection(secName, secVal));
+    }
     return result;
 }
 

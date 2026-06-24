@@ -821,11 +821,11 @@ juce::String boolLiteral(bool value)
 
 juce::String aiAddFillsPrompt()
 {
-    return "Add arranger fill sections to this style: a 1-bar drum-led 'fillAA' for mainA and 'fillBB' for mainB (and fillCC/"
-           "fillDD if those Mains exist), plus direct transition fills 'fillAB'/'fillBA' where both Mains exist. Also add a "
-           "short 'intro' (1-2 bars) and 'ending' (1-2 bars) ONLY if they are missing. Base fills on each Main's groove and "
-           "instruments. KEEP every existing section, its notes, ids, tempo, time signature, and instruments unchanged. "
-           "Return the COMPLETE updated style JSON only.";
+    return "Return ONLY a JSON object of NEW sections to ADD to this style: "
+           "{\"sections\":{\"fillAA\":{..},\"fillBB\":{..},\"fillAB\":{..},\"intro\":{..},\"ending\":{..}}}. "
+           "Include fillXX for each existing Main, transition fills fillAB/fillBA where both Mains exist, and intro/ending "
+           "ONLY if missing. Each section uses the same schema as the style's sections (barCount + parts + notes, drums "
+           "absolute). Do NOT include existing sections. Output JSON only.";
 }
 
 juce::String aiPolishPrompt()
@@ -3130,7 +3130,9 @@ void MainComponent::generateStyleEditAction(const juce::String& prompt,
     std::thread([safe, key, model, prompt, currentStyleJson, originalStyle, action] {
         cadenza::ai::StyleGenResult result;
         try {
-            result = cadenza::ai::generateStyle(key, model, prompt, currentStyleJson);
+            result = action == AiStyleAction::AddFillsIntroEnding
+                ? cadenza::ai::generateStyleSectionsOnly(key, model, prompt, currentStyleJson)
+                : cadenza::ai::generateStyle(key, model, prompt, currentStyleJson);
         } catch (const std::exception& e) {
             result.ok = false;
             result.error = e.what();
@@ -3156,26 +3158,42 @@ void MainComponent::applyGeneratedStyle(const cadenza::ai::StyleGenResult& resul
         return;
     }
 
-    auto loaded = cadenza::arranger::loadStyleFromJson(result.cstyleJson);
-    if (!loaded.ok) {
-        finishAiWorking("AI returned an invalid style; kept your original.");
-        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
-            "AI Style", "The AI returned an invalid style: " + juce::String(loaded.error));
-        return;
-    }
-
+    cadenza::arranger::Style finalStyle;
+    std::string finalJson;
     if (action == AiStyleAction::AddFillsIntroEnding) {
-        if (originalStyle == nullptr
-            || !cadenza::ai::validateAiAddedSectionsOnly(*originalStyle, loaded.style)) {
-            finishAiWorking("AI fill generation changed existing sections; kept your original.");
+        if (originalStyle == nullptr) {
+            finishAiWorking("AI fill generation had no original style snapshot; kept your original.");
             return;
         }
-    } else if (action == AiStyleAction::Polish) {
-        if (originalStyle == nullptr
-            || !cadenza::ai::validatePolishKeptStructure(*originalStyle, loaded.style)) {
+
+        auto merged = cadenza::ai::mergeAiGeneratedSections(*originalStyle, result.cstyleJson);
+        if (!merged.ok) {
+            finishAiWorking("AI fill generation returned invalid sections; kept your original.");
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                "AI Style", "The AI returned invalid sections: " + juce::String(merged.error));
+            return;
+        }
+
+        finalStyle = std::move(merged.style);
+        finalJson = cadenza::arranger::saveStyleToJson(finalStyle, true);
+    } else {
+        auto loaded = cadenza::arranger::loadStyleFromJson(result.cstyleJson);
+        if (!loaded.ok) {
+            finishAiWorking("AI returned an invalid style; kept your original.");
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                "AI Style", "The AI returned an invalid style: " + juce::String(loaded.error));
+            return;
+        }
+
+        if (action == AiStyleAction::Polish
+            && (originalStyle == nullptr
+                || !cadenza::ai::validatePolishKeptStructure(*originalStyle, loaded.style))) {
             finishAiWorking("AI polish changed the style structure; kept your original.");
             return;
         }
+
+        finalStyle = std::move(loaded.style);
+        finalJson = result.cstyleJson;
     }
 
     // Persist it as a real .cstyle and load it through the normal path (so it
@@ -3183,10 +3201,10 @@ void MainComponent::applyGeneratedStyle(const cadenza::ai::StyleGenResult& resul
     auto dir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
                    .getChildFile("Cadenza AI Styles");
     dir.createDirectory();
-    juce::String name = juce::String(loaded.style.name);
+    juce::String name = juce::String(finalStyle.name);
     if (name.isEmpty()) name = "AI Style";
     auto file = dir.getChildFile(juce::File::createLegalFileName(name) + ".cstyle");
-    file.replaceWithText(juce::String(result.cstyleJson));
+    file.replaceWithText(juce::String(finalJson));
 
     const int tokens = result.inputTokens + result.outputTokens;
     if (loadAndApplyStyleFile(file)) {

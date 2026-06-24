@@ -23,6 +23,15 @@ struct StyleGenResult
     int outputTokens = 0;
 };
 
+struct SectionsMergeResult
+{
+    bool ok = false;
+    std::string error;
+    cadenza::arranger::Style style;
+    int addedSections = 0;
+    int skippedSections = 0;
+};
+
 // Calls POST https://api.anthropic.com/v1/messages with the cadenza-style-author
 // system prompt and the user's description. Returns the parsed `.cstyle` JSON text
 // (validate/load it with StyleLoader) or an error.
@@ -34,6 +43,14 @@ StyleGenResult generateStyle(const juce::String& apiKey,
                              const juce::String& model,
                              const juce::String& userPrompt,
                              const juce::String& currentStyleJson = juce::String());
+
+StyleGenResult generateStyleSectionsOnly(const juce::String& apiKey,
+                                         const juce::String& model,
+                                         const juce::String& userPrompt,
+                                         const juce::String& currentStyleJson);
+
+SectionsMergeResult mergeAiGeneratedSections(const cadenza::arranger::Style& original,
+                                             const std::string& sectionsJson);
 
 // Conservative post-generation checks for edit-mode AI actions. These do not
 // call the network and are kept pure so UI code can reject unsafe AI output.

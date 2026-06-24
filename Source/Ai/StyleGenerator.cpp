@@ -1,5 +1,7 @@
 #include "StyleGenerator.h"
 
+#include "Arranger/StyleLoader.h"
+
 #include <algorithm>
 #include <set>
 
@@ -127,6 +129,22 @@ bool styleHasUniqueSectionIds(const cadenza::arranger::Style& style)
             return false;
     return true;
 }
+
+bool sectionIsWellFormed(const cadenza::arranger::Section& section)
+{
+    if (section.name.empty() || section.barCount <= 0 || section.parts.empty())
+        return false;
+
+    for (const auto& part : section.parts) {
+        if (part.name.empty() || part.midiChannel < 1 || part.midiChannel > 16)
+            return false;
+        for (const auto& note : part.notes)
+            if (note.tick < 0 || note.duration <= 0 || note.pitch < 0 || note.pitch > 127
+                || note.velocity < 1 || note.velocity > 127)
+                return false;
+    }
+    return true;
+}
 }
 
 bool validateAiAddedSectionsOnly(const cadenza::arranger::Style& original,
@@ -166,6 +184,50 @@ bool validatePolishKeptStructure(const cadenza::arranger::Style& original,
     }
 
     return true;
+}
+
+SectionsMergeResult mergeAiGeneratedSections(const cadenza::arranger::Style& original,
+                                             const std::string& sectionsJson)
+{
+    SectionsMergeResult result;
+    result.style = original;
+
+    if (!styleHasUniqueSectionIds(original)) {
+        result.error = "The loaded style has duplicate section ids.";
+        return result;
+    }
+
+    auto parsed = cadenza::arranger::loadSectionsFromJson(sectionsJson);
+    if (!parsed.ok) {
+        result.error = parsed.error;
+        return result;
+    }
+
+    std::set<std::string> seenIncoming;
+    for (auto& section : parsed.sections) {
+        if (!seenIncoming.insert(section.name).second) {
+            ++result.skippedSections;
+            continue;
+        }
+        if (hasSection(result.style, section.name)
+            || !isAllowedAddedSectionId(original, section.name)
+            || !sectionIsWellFormed(section)) {
+            ++result.skippedSections;
+            continue;
+        }
+        result.style.sections.push_back(std::move(section));
+        ++result.addedSections;
+    }
+
+    if (!validateAiAddedSectionsOnly(original, result.style)) {
+        result.error = "AI fill generation changed existing sections; kept your original.";
+        result.style = original;
+        result.addedSections = 0;
+        return result;
+    }
+
+    result.ok = true;
+    return result;
 }
 
 juce::String styleAuthorSystemPrompt()
@@ -309,8 +371,18 @@ bool grooveHasFoundation(const juce::String& cstyleJson)
                     for (const auto& n : *notes) {
                         const int p = (int) n["pitch"];
                         if (p == 36 || p == 38) return true;
-                    }
+    }
     return false;
+}
+
+bool isCutOffStopReason(const juce::String& stopReason)
+{
+    return stopReason == "max_tokens";
+}
+
+std::string cutOffErrorMessage()
+{
+    return "The AI response was cut off (too large). Try the Haiku model, or a smaller/simpler style.";
 }
 }
 
@@ -352,26 +424,59 @@ StyleGenResult generateStyle(const juce::String& apiKey,
             "anthropic-version: 2023-06-01\r\n"
             "content-type: application/json";
 
+        constexpr int requestTimeoutMs = 300000;
+
         auto options = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inPostData)
             .withExtraHeaders(headers)
-            .withConnectionTimeoutMs(120000)
+            .withConnectionTimeoutMs(requestTimeoutMs)
             .withResponseHeaders(&responseHeaders)
             .withStatusCode(&statusCode);
 
+        const auto requestStartMs = juce::Time::getMillisecondCounter();
         std::unique_ptr<juce::InputStream> stream(url.createInputStream(options));
+        const auto responseStartMs = juce::Time::getMillisecondCounter();
+        const auto connectElapsedMs = responseStartMs - requestStartMs;
         if (stream == nullptr) {
-            result.error = "Could not reach api.anthropic.com (check your internet connection).";
+            const auto elapsedSeconds = (int) ((connectElapsedMs + 500) / 1000);
+            juce::Logger::writeToLog(juce::String("Anthropic API request returned no response after ")
+                                     + juce::String(elapsedSeconds)
+                                     + "s; statusCode="
+                                     + juce::String(statusCode));
+            result.error = (juce::String("No response from api.anthropic.com after ")
+                            + juce::String(elapsedSeconds)
+                            + "s. This is usually a timeout on a large request or a network/firewall block - "
+                              "check your connection, try again, or switch to the faster Haiku model in AI Settings.").toStdString();
             return result;
         }
 
         const juce::String response = stream->readEntireStreamAsString();
+        const auto requestEndMs = juce::Time::getMillisecondCounter();
+        const auto requestElapsedMs = requestEndMs - requestStartMs;
         const juce::var parsed = juce::JSON::parse(response);
 
         if (statusCode != 200) {
+            const auto elapsedSeconds = (int) ((requestElapsedMs + 500) / 1000);
+            if (statusCode <= 0) {
+                juce::Logger::writeToLog(juce::String("Anthropic API request failed without an HTTP status after ")
+                                         + juce::String(elapsedSeconds)
+                                         + "s");
+                result.error = (juce::String("No usable HTTP response from api.anthropic.com after ")
+                                + juce::String(elapsedSeconds)
+                                + "s. This is usually a timeout on a large request or a network/firewall block - "
+                                  "check your connection, try again, or switch to the faster Haiku model in AI Settings.").toStdString();
+                return result;
+            }
+
             juce::String msg = parsed["error"]["message"].toString();
             if (msg.isEmpty()) msg = "HTTP " + juce::String(statusCode);
             if (statusCode == 401) msg = "Invalid API key (401). Check it in AI Settings.";
             else if (statusCode == 429) msg = "Rate limited (429). Wait a moment and try again.";
+            juce::Logger::writeToLog(juce::String("Anthropic API request failed after ")
+                                     + juce::String(elapsedSeconds)
+                                     + "s with statusCode="
+                                     + juce::String(statusCode)
+                                     + ": "
+                                     + msg);
             result.error = "API error: " + msg.toStdString();
             return result;
         }
@@ -379,8 +484,13 @@ StyleGenResult generateStyle(const juce::String& apiKey,
         result.inputTokens  = (int) parsed["usage"]["input_tokens"];
         result.outputTokens = (int) parsed["usage"]["output_tokens"];
 
-        if (parsed["stop_reason"].toString() == "refusal") {
+        const juce::String stopReason = parsed["stop_reason"].toString();
+        if (stopReason == "refusal") {
             result.error = "The model declined this request. Try rephrasing.";
+            return result;
+        }
+        if (isCutOffStopReason(stopReason)) {
+            result.error = cutOffErrorMessage();
             return result;
         }
 
@@ -392,7 +502,21 @@ StyleGenResult generateStyle(const juce::String& apiKey,
 
         const juce::String json = extractJsonObject(text);
         if (json.isEmpty()) {
+            if (isCutOffStopReason(stopReason)) {
+                result.error = cutOffErrorMessage();
+                return result;
+            }
             result.error = "The model did not return a style. Try a clearer description.";
+            return result;
+        }
+
+        const auto parsedJson = juce::JSON::parse(json);
+        if (parsedJson.isVoid()) {
+            if (isCutOffStopReason(stopReason)) {
+                result.error = cutOffErrorMessage();
+                return result;
+            }
+            result.error = "The model did not return valid JSON. Try again with a smaller/simpler style.";
             return result;
         }
 
@@ -413,7 +537,8 @@ StyleGenResult generateStyle(const juce::String& apiKey,
         return result;
 
     // CREATE only: if the drums came back with no kick/snare foundation, retry once.
-    if (!editing && !grooveHasFoundation(juce::String(result.cstyleJson))) {
+    if (!editing && !userPrompt.contains("STYLE REFERENCE")
+        && !grooveHasFoundation(juce::String(result.cstyleJson))) {
         const juce::String retryContent = userPrompt +
             "\n\n(IMPORTANT: the drums MUST include a kick (pitch 36) on the downbeats "
             "and a snare (pitch 38) backbeat on beats 2 and 4 (ticks 960 and 2880).)";
@@ -425,5 +550,17 @@ StyleGenResult generateStyle(const juce::String& apiKey,
         }
     }
     return result;
+}
+
+StyleGenResult generateStyleSectionsOnly(const juce::String& apiKey,
+                                         const juce::String& model,
+                                         const juce::String& userPrompt,
+                                         const juce::String& currentStyleJson)
+{
+    const juce::String userContent =
+        userPrompt
+        + "\n\nSTYLE REFERENCE (do not return or rewrite these existing sections):\n"
+        + currentStyleJson;
+    return generateStyle(apiKey, model, userContent, juce::String());
 }
 }
