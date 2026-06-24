@@ -9,6 +9,8 @@ software equivalent of a hardware "arranger keyboard," built with JUCE and C++.
 > Status: actively developed, builds and runs on Windows. Contributors welcome —
 > **especially musicians who know music theory** (see [Contributing](#contributing)).
 
+![Cadenza arranger — main view](screenshots/cadenza-main.png)
+
 ---
 
 ## What it does
@@ -30,6 +32,21 @@ software equivalent of a hardware "arranger keyboard," built with JUCE and C++.
   intros / endings and "polish" a style's notes, using the Claude API. Fully opt-in.
 - 🔊 **General-MIDI playback** via FluidSynth + a SoundFont; loads Yamaha `.sty/.prs`
   styles and the native JSON-based `.cstyle` format.
+
+---
+
+## Screenshots
+
+**Import any MIDI → a playable, chord-following style** — Cadenza auto-detects the
+chord, auto-splits the song into sections, normalizes to C for easy white-key play,
+and can generate fills with AI:
+
+![Import MIDI as Style](screenshots/cadenza-import.png)
+
+**Style page** — sections (Main A–D, fills, ending), the per-part mixer, and the
+AI assist actions (Add Fills / Polish):
+
+![Style page](screenshots/cadenza-style.png)
 
 ---
 
