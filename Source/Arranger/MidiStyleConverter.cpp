@@ -1061,6 +1061,8 @@ juce::String sectionLabel(const juce::String& id)
     if (id == "mainB") return "Main B";
     if (id == "mainC") return "Main C";
     if (id == "mainD") return "Main D";
+    if (id.startsWith("fill") && id.length() >= 6)
+        return "Fill " + id.substring(4, 6).toUpperCase();
     if (id == "ending") return "Ending";
     return "Main A";
 }
@@ -1069,8 +1071,10 @@ void addFoundAtWarning(juce::StringArray& warnings, const MidiStyleSectionSpec& 
 {
     const int start = spec.barStart + 1;
     const int end = spec.barStart + std::max(1, spec.barCount);
-    warnings.add(sectionLabel(spec.sectionId) + ": found at bars "
-                 + juce::String(start) + "-" + juce::String(end));
+    warnings.add(sectionLabel(spec.sectionId)
+                 + (spec.barCount == 1
+                        ? ": found at bar " + juce::String(start)
+                        : ": found at bars " + juce::String(start) + "-" + juce::String(end)));
 }
 
 bool sameRange(const BlockFingerprint& block, const MidiStyleSectionSpec& spec) noexcept
@@ -1093,8 +1097,166 @@ int sectionOrder(const juce::String& id) noexcept
     if (s == "mainB") return 2;
     if (s == "mainC") return 3;
     if (s == "mainD") return 4;
-    if (s == "ending") return 5;
+    if (s.rfind("fill", 0) == 0) return 5;
+    if (s == "ending") return 6;
     return 100;
+}
+
+char mainLetterForSection(const juce::String& id) noexcept
+{
+    const auto s = id.trim().toStdString();
+    if (s.size() == 5 && s.rfind("main", 0) == 0) {
+        const char letter = static_cast<char>(std::toupper(static_cast<unsigned char>(s[4])));
+        if (letter >= 'A' && letter <= 'D')
+            return letter;
+    }
+    return '\0';
+}
+
+struct FillBarMetrics
+{
+    int totalNotes = 0;
+    int drumNotes = 0;
+    int tomNotes = 0;
+    int crashNotes = 0;
+    bool hasDrums = false;
+    bool hasBass = false;
+    bool hasHarmony = false;
+};
+
+bool isTomPitch(int pitch) noexcept
+{
+    return pitch >= 41 && pitch <= 50;
+}
+
+bool isCrashPitch(int pitch) noexcept
+{
+    return pitch == 49 || pitch == 57;
+}
+
+FillBarMetrics fillBarMetrics(ParsedMidi& parsed, int barStart, int barTicks)
+{
+    FillBarMetrics metrics;
+    const int startTick = barStart * barTicks;
+    const int endTick = startTick + barTicks;
+    for (auto& group : parsed.groups) {
+        const auto slot = classifyGroup(group);
+        bool groupHasNotes = false;
+        for (const auto& note : group.notes) {
+            if (!noteOverlaps(note, startTick, endTick))
+                continue;
+            ++metrics.totalNotes;
+            groupHasNotes = true;
+            if (slot == Slot::Drums) {
+                ++metrics.drumNotes;
+                metrics.hasDrums = true;
+                if (isTomPitch(note.pitch))
+                    ++metrics.tomNotes;
+                if (isCrashPitch(note.pitch))
+                    ++metrics.crashNotes;
+            }
+        }
+
+        if (!groupHasNotes)
+            continue;
+        if (slot == Slot::Bass)
+            metrics.hasBass = true;
+        else if (slot == Slot::Chord || slot == Slot::Pad)
+            metrics.hasHarmony = true;
+    }
+    return metrics;
+}
+
+bool looksLikeTransitionFill(ParsedMidi& parsed, int candidateBar, int totalBars, int barTicks)
+{
+    if (candidateBar <= 0 || candidateBar >= totalBars || barTicks <= 0)
+        return false;
+
+    const auto previous = fillBarMetrics(parsed, candidateBar - 1, barTicks);
+    const auto candidate = fillBarMetrics(parsed, candidateBar, barTicks);
+    const auto next = fillBarMetrics(parsed, candidateBar + 1, barTicks);
+
+    if (previous.totalNotes <= 0
+        || !candidate.hasDrums
+        || candidate.totalNotes <= 0
+        || !next.hasDrums
+        || (!next.hasBass && !next.hasHarmony))
+        return false;
+
+    const bool tomCrashActivity = candidate.tomNotes >= 2 || candidate.crashNotes >= 1;
+    const bool drumDensityJump = candidate.drumNotes >= previous.drumNotes + 4
+        || (previous.drumNotes > 0 && candidate.drumNotes >= previous.drumNotes * 2);
+    const bool noteDensityJump = candidate.totalNotes >= previous.totalNotes + 5
+        || (previous.totalNotes > 0 && candidate.totalNotes >= previous.totalNotes * 2);
+    const bool drumBreakOrPickup = candidate.drumNotes >= 4
+        && candidate.drumNotes >= previous.drumNotes + 2
+        && (!candidate.hasBass || !candidate.hasHarmony)
+        && (previous.hasBass || previous.hasHarmony)
+        && (next.hasBass || next.hasHarmony);
+
+    const bool clearSignal = (tomCrashActivity && candidate.drumNotes >= previous.drumNotes + 2)
+        || (tomCrashActivity && noteDensityJump)
+        || drumDensityJump
+        || noteDensityJump
+        || drumBreakOrPickup;
+    if (!clearSignal)
+        return false;
+
+    const bool steadyGroove = candidate.tomNotes == previous.tomNotes
+        && candidate.crashNotes == previous.crashNotes
+        && std::abs(candidate.drumNotes - previous.drumNotes) <= 1
+        && std::abs(candidate.totalNotes - previous.totalNotes) <= 2
+        && candidate.hasBass == previous.hasBass
+        && candidate.hasHarmony == previous.hasHarmony;
+    return !steadyGroove;
+}
+
+std::optional<juce::String> selectedMainEndingAt(const std::vector<MidiStyleSectionSpec>& sections,
+                                                 int endBar)
+{
+    for (const auto& spec : sections) {
+        if (!spec.sectionId.startsWith("main"))
+            continue;
+        if (spec.barStart + std::max(1, spec.barCount) == endBar)
+            return spec.sectionId;
+    }
+    return std::nullopt;
+}
+
+std::vector<MidiStyleSectionSpec> detectMidiFillCandidates(ParsedMidi& parsed,
+                                                           const std::vector<MidiStyleSectionSpec>& selectedSections,
+                                                           int totalBars,
+                                                           int barTicks)
+{
+    std::vector<MidiStyleSectionSpec> fills;
+    for (const auto& mainSpec : selectedSections) {
+        const char nextLetter = mainLetterForSection(mainSpec.sectionId);
+        if (nextLetter == '\0' || mainSpec.barStart <= 0)
+            continue;
+
+        const int candidateBar = mainSpec.barStart - 1;
+        if (!looksLikeTransitionFill(parsed, candidateBar, totalBars, barTicks))
+            continue;
+
+        char fromLetter = nextLetter;
+        if (auto previousMain = selectedMainEndingAt(selectedSections, candidateBar)) {
+            const char previousLetter = mainLetterForSection(*previousMain);
+            if (previousLetter != '\0' && previousLetter != nextLetter)
+                fromLetter = previousLetter;
+        }
+
+        MidiStyleSectionSpec fill;
+        const char fillId[] = { 'f', 'i', 'l', 'l', fromLetter, nextLetter, '\0' };
+        fill.sectionId = fillId;
+        fill.barStart = candidateBar;
+        fill.barCount = 1;
+
+        if (std::none_of(fills.begin(), fills.end(), [&](const auto& existing) {
+                return existing.sectionId == fill.sectionId;
+            }))
+            fills.push_back(std::move(fill));
+    }
+    return fills;
 }
 
 std::optional<int> parseRootName(const juce::String& root)
@@ -1476,6 +1638,12 @@ MidiStyleAutoSplitResult autoSplitMidiFileForStyleImport(const juce::File& midi,
             addFoundAtWarning(result.warnings, spec);
             result.sections.push_back(std::move(spec));
         }
+    }
+
+    auto fills = detectMidiFillCandidates(*parsed, result.sections, totalBars, barTicks);
+    for (auto& fill : fills) {
+        addFoundAtWarning(result.warnings, fill);
+        result.sections.push_back(std::move(fill));
     }
 
     std::stable_sort(result.sections.begin(), result.sections.end(), [](const auto& a, const auto& b) {

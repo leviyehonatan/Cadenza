@@ -102,6 +102,94 @@ void showRightVoiceMenu(juce::Component* anchor, bool hasPlugin,
 }
 }
 
+void AiWorkingOverlay::showWorking(const juce::String& message)
+{
+    m_message = message;
+    m_working = true;
+    m_animFrame = 0;
+    m_hideAtMs = 0;
+    setVisible(true);
+    toFront(false);
+    startTimerHz(6);
+    repaint();
+}
+
+void AiWorkingOverlay::showResult(const juce::String& message)
+{
+    m_message = message;
+    m_working = false;
+    m_animFrame = 0;
+    m_hideAtMs = juce::Time::getMillisecondCounter() + 3500u;
+    setVisible(true);
+    toFront(false);
+    startTimer(120);
+    repaint();
+}
+
+void AiWorkingOverlay::hide()
+{
+    stopTimer();
+    setVisible(false);
+    m_message.clear();
+    m_working = false;
+    m_hideAtMs = 0;
+}
+
+void AiWorkingOverlay::timerCallback()
+{
+    if (m_working) {
+        ++m_animFrame;
+        repaint();
+        return;
+    }
+
+    if (m_hideAtMs != 0 && juce::Time::getMillisecondCounter() >= m_hideAtMs)
+        hide();
+}
+
+void AiWorkingOverlay::paint(juce::Graphics& g)
+{
+    auto bounds = getLocalBounds();
+    g.setColour(juce::Colours::black.withAlpha(0.42f));
+    g.fillRect(bounds);
+
+    auto panel = bounds.withSizeKeepingCentre(juce::jmax(240, juce::jmin(520, bounds.getWidth() - 36)),
+                                             juce::jmax(112, juce::jmin(150, bounds.getHeight() - 36)));
+
+    auto pf = panel.toFloat();
+    g.setColour(CadenzaLookAndFeel::panel().withAlpha(0.98f));
+    g.fillRoundedRectangle(pf, 8.0f);
+    g.setColour(CadenzaLookAndFeel::accent().withAlpha(m_working ? 0.95f : 0.75f));
+    g.drawRoundedRectangle(pf, 8.0f, 2.0f);
+    g.setColour(CadenzaLookAndFeel::cream().withAlpha(0.06f));
+    g.drawLine(pf.getX() + 10.0f, pf.getY() + 1.0f, pf.getRight() - 10.0f, pf.getY() + 1.0f, 1.0f);
+
+    auto content = panel.reduced(24, 18);
+    const auto title = m_working ? juce::String("AI is working") : juce::String("AI result");
+    g.setFont(juce::Font(juce::FontOptions(18.0f, juce::Font::bold)));
+    g.setColour(m_working ? CadenzaLookAndFeel::goldBright() : CadenzaLookAndFeel::accent());
+    g.drawText(title, content.removeFromTop(28), juce::Justification::centred, false);
+
+    if (m_working) {
+        auto dots = content.removeFromTop(24).withSizeKeepingCentre(86, 18);
+        for (int i = 0; i < 3; ++i) {
+            const auto phase = (m_animFrame + i * 2) % 6;
+            const auto radius = 4.0f + (phase < 3 ? (float) phase : (float) (6 - phase));
+            const auto cx = (float) dots.getX() + 18.0f + (float) i * 26.0f;
+            const auto cy = (float) dots.getCentreY();
+            g.setColour(CadenzaLookAndFeel::goldBright().withAlpha(
+                juce::jlimit(0.0f, 1.0f, 0.45f + radius * 0.08f)));
+            g.fillEllipse(cx - radius, cy - radius, radius * 2.0f, radius * 2.0f);
+        }
+    } else {
+        content.removeFromTop(10);
+    }
+
+    g.setFont(juce::Font(juce::FontOptions(14.0f)));
+    g.setColour(CadenzaLookAndFeel::cream());
+    g.drawFittedText(m_message, content, juce::Justification::centred, 3);
+}
+
 NativePanel::NativePanel()
 {
     auto styleCaption = [](juce::Label& l, const juce::String& text) {
@@ -634,6 +722,14 @@ NativePanel::NativePanel()
     m_aiStyle.onClick = [this] { if (m_cb.onAiStyle) m_cb.onAiStyle(); };
     addAndMakeVisible(m_aiStyle);
 
+    m_aiAddFills.setTooltip("Use AI to add one-bar fills and missing intro/ending sections to the editable style");
+    m_aiAddFills.onClick = [this] { if (m_cb.onAiAddFills) m_cb.onAiAddFills(); };
+    addAndMakeVisible(m_aiAddFills);
+
+    m_aiPolish.setTooltip("Use AI to minimally fix wrong notes and stray drum hits in the editable style");
+    m_aiPolish.onClick = [this] { if (m_cb.onAiPolish) m_cb.onAiPolish(); };
+    addAndMakeVisible(m_aiPolish);
+
     m_aiSettings.setTooltip("Set your Anthropic API key and choose the AI model");
     m_aiSettings.onClick = [this] { if (m_cb.onAiSettings) m_cb.onAiSettings(); };
     addAndMakeVisible(m_aiSettings);
@@ -697,6 +793,10 @@ NativePanel::NativePanel()
     m_syncroStop.onClick     = [this] { if (m_cb.setSyncroStop)     m_cb.setSyncroStop(m_syncroStop.getToggleState()); };
     m_autoFill.onClick       = [this] { if (m_cb.setAutoFill)       m_cb.setAutoFill(m_autoFill.getToggleState()); };
     m_fingeredOnBass.onClick = [this] { if (m_cb.setFingeredOnBass) m_cb.setFingeredOnBass(m_fingeredOnBass.getToggleState()); };
+
+    addAndMakeVisible(m_aiOverlay);
+    m_aiOverlay.setInterceptsMouseClicks(false, false);
+    m_aiOverlay.hide();
 }
 
 NativePanel::~NativePanel()
@@ -900,6 +1000,37 @@ void NativePanel::setRecorderState(bool sessionActive, bool armed, const juce::S
     m_recPart.setEnabled(sessionActive && !armed);
     m_recBars.setEnabled(!armed);
     m_recStatus.setText(status, juce::dontSendNotification);
+}
+
+void NativePanel::setAiButtonsBusy(bool busy, const juce::String& activeButtonText)
+{
+    m_aiBusy = busy;
+
+    m_aiStyle.setButtonText(activeButtonText == "AI Style..." ? "Working..." : "AI Style...");
+    m_aiAddFills.setButtonText(activeButtonText == "AI: Add Fills" ? "Working..." : "AI: Add Fills");
+    m_aiPolish.setButtonText(activeButtonText == "AI: Polish" ? "Working..." : "AI: Polish");
+
+    m_aiStyle.setEnabled(!busy);
+    m_aiAddFills.setEnabled(!busy);
+    m_aiPolish.setEnabled(!busy);
+}
+
+void NativePanel::beginAiWorking(const juce::String& message, const juce::String& activeButtonText)
+{
+    setAiButtonsBusy(true, activeButtonText);
+    m_recStatus.setText(message, juce::dontSendNotification);
+    m_aiOverlay.showWorking(message);
+}
+
+void NativePanel::finishAiWorking(const juce::String& resultMessage)
+{
+    setAiButtonsBusy(false);
+    if (resultMessage.isNotEmpty()) {
+        m_recStatus.setText(resultMessage, juce::dontSendNotification);
+        m_aiOverlay.showResult(resultMessage);
+    } else {
+        m_aiOverlay.hide();
+    }
 }
 
 void NativePanel::setMakeEditableAvailable(bool available)
@@ -1635,10 +1766,14 @@ void NativePanel::resized()
     // Style Recorder row: bars + part pickers, transport-style buttons, status.
     setVis(showRec, { &m_recCaption, &m_recNew, &m_recBars, &m_recPart, &m_recArm, &m_recClick,
                       &m_recEdit, &m_recClear, &m_recSave, &m_recExit, &m_recStatus,
-                      &m_recMakeEditable, &m_aiStyle });
+                      &m_recMakeEditable, &m_aiStyle, &m_aiAddFills, &m_aiPolish });
     if (showRec) {
         const int y0 = area.getY();
         auto capRow = area.removeFromTop(20);
+        m_aiPolish.setBounds(capRow.removeFromRight(82));
+        capRow.removeFromRight(6);
+        m_aiAddFills.setBounds(capRow.removeFromRight(104));
+        capRow.removeFromRight(6);
         m_aiStyle.setBounds(capRow.removeFromRight(90));
         capRow.removeFromRight(6);
         m_recMakeEditable.setBounds(capRow.removeFromRight(120));
@@ -1692,5 +1827,9 @@ void NativePanel::resized()
         if (showEditor)
             m_editor->setBounds(area);
     }
+
+    m_aiOverlay.setBounds(getLocalBounds());
+    if (m_aiOverlay.isVisible())
+        m_aiOverlay.toFront(false);
 }
 }

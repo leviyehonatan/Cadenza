@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "Arranger/Style.h"
+
 #include <juce_core/juce_core.h>
 
 #include <string>
@@ -32,6 +34,14 @@ StyleGenResult generateStyle(const juce::String& apiKey,
                              const juce::String& model,
                              const juce::String& userPrompt,
                              const juce::String& currentStyleJson = juce::String());
+
+// Conservative post-generation checks for edit-mode AI actions. These do not
+// call the network and are kept pure so UI code can reject unsafe AI output.
+bool validateAiAddedSectionsOnly(const cadenza::arranger::Style& original,
+                                 const cadenza::arranger::Style& aiStyle);
+
+bool validatePolishKeptStructure(const cadenza::arranger::Style& original,
+                                 const cadenza::arranger::Style& aiStyle);
 
 // The system prompt embedding the .cstyle schema, note roles, channel layout,
 // GM drum map, and genre recipes (a compact form of the cadenza-style-author skill).

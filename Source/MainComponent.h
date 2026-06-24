@@ -25,6 +25,13 @@
 namespace cadenza::ui { class NativePanel; class StylePartEditorWindow; }
 namespace cadenza::ai { struct StyleGenResult; }
 
+enum class AiStyleAction
+{
+    None,
+    AddFillsIntroEnding,
+    Polish
+};
+
 class MainComponent final : public juce::Component,
                             private juce::Timer,
                             private juce::ChangeListener
@@ -124,7 +131,17 @@ private:
     void showAiSettingsDialog();          // API key + model picker
     void showGenerateStyleDialog();       // "describe a style" prompt
     void generateStyleFromText(const juce::String& prompt);   // async API call
+    void generateAiFillsIntroEnding();
+    void polishStyleWithAi();
+    void generateStyleEditAction(const juce::String& prompt,
+                                 const juce::String& status,
+                                 AiStyleAction action);
     void applyGeneratedStyle(const cadenza::ai::StyleGenResult& result);
+    void applyGeneratedStyle(const cadenza::ai::StyleGenResult& result,
+                             std::shared_ptr<const cadenza::arranger::Style> originalStyle,
+                             AiStyleAction action);
+    bool beginAiWorking(const juce::String& workingMessage, const juce::String& activeButtonText);
+    void finishAiWorking(const juce::String& resultMessage);
     void recorderCloseEditor();
     void applySongStepForBar(int bar, bool applySection = true);
     void queueSongSectionForBar(int bar);
@@ -200,6 +217,7 @@ private:
     std::string m_learnCommand;        // command currently waiting for a MIDI-learn press
 
     std::unique_ptr<cadenza::ui::NativePanel> m_panel;
+    bool m_aiInFlight = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

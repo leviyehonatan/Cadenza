@@ -351,6 +351,18 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
         )
         add_test(NAME cadenza_midi_style_converter_tests
                  COMMAND cadenza_midi_style_converter_tests)
+
+        add_executable(cadenza_ai_style_validation_tests
+            tests/AiStyleValidationTests.cpp
+            Source/Ai/StyleGenerator.cpp
+        )
+        target_link_libraries(cadenza_ai_style_validation_tests
+            PRIVATE
+                cadenza_core
+                juce::juce_core
+        )
+        add_test(NAME cadenza_ai_style_validation_tests
+                 COMMAND cadenza_ai_style_validation_tests)
     endif()
 
     add_custom_command(TARGET Cadenza POST_BUILD

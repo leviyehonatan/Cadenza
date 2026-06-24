@@ -387,6 +387,44 @@ void makeAutoNoIntroFixture(juce::MidiFile& midi)
     midi.addTrack(piano);
 }
 
+void addHeavyFillBar(juce::MidiMessageSequence& drums, int barIndex)
+{
+    constexpr int ppq = 480;
+    constexpr int bar = ppq * 4;
+    const int start = barIndex * bar;
+    addNote(drums, 10, start, 80, 36, 116);
+    addNote(drums, 10, start + ppq / 2, 80, 41, 104);
+    addNote(drums, 10, start + ppq, 80, 45, 108);
+    addNote(drums, 10, start + ppq + ppq / 2, 80, 47, 108);
+    addNote(drums, 10, start + ppq * 2, 80, 48, 112);
+    addNote(drums, 10, start + ppq * 2 + ppq / 2, 80, 50, 112);
+    addNote(drums, 10, start + ppq * 3, 120, 49, 118);
+    addNote(drums, 10, start + ppq * 3 + ppq / 2, 80, 57, 116);
+}
+
+void makeAutoFillBeforeMainFixture(juce::MidiFile& midi, bool heavyFill)
+{
+    constexpr int ppq = 480;
+
+    juce::MidiMessageSequence drums;
+    juce::MidiMessageSequence bass;
+    juce::MidiMessageSequence piano;
+    addProgram(bass, 2, 33);
+    addProgram(piano, 3, 0);
+
+    addFullBandBars(drums, bass, piano, 0, 3, 65, 69, 72);
+    if (heavyFill)
+        addHeavyFillBar(drums, 3);
+    else
+        addFullBandBars(drums, bass, piano, 3, 1, 65, 69, 72);
+    addFullBandBars(drums, bass, piano, 4, 8, 60, 64, 67);
+
+    midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(drums);
+    midi.addTrack(bass);
+    midi.addTrack(piano);
+}
+
 void testCmajorMapsPartsAndRoundTrips()
 {
     juce::MidiFile midi;
@@ -805,6 +843,51 @@ void testAutoSplitDoesNotInventIntro()
     expect(intro == result.sections.end(), "auto-split does not invent an intro");
 }
 
+void testAutoSplitExtractsHeavyPreMainFill()
+{
+    juce::MidiFile midi;
+    makeAutoFillBeforeMainFixture(midi, true);
+    const auto file = writeMidi("cadenza-midi-style-auto-split-heavy-fill", midi);
+
+    auto split = cadenza::arranger::autoSplitMidiFileForStyleImport(file, {});
+    const auto fill = std::find_if(split.sections.begin(), split.sections.end(), [](const auto& spec) {
+        return spec.sectionId == "fillAA";
+    });
+    expect(split.ok, "auto-split succeeds for repeated main with a heavy pre-main fill");
+    expect(fill != split.sections.end(), "auto-split emits fillAA for a heavy pre-main transition bar");
+    expect(fill->barStart == 3 && fill->barCount == 1, "fillAA comes from the one bar before mainA");
+
+    auto converted = cadenza::arranger::convertMidiFileToNativeStyleMultiSection(file, split.sections, true);
+    expect(converted.ok && converted.style != nullptr, "auto-split fill specs convert");
+    const auto* fillSection = converted.style->findSection("fillAA");
+    expect(fillSection != nullptr && fillSection->barCount == 1, "converted fillAA is a one-bar section");
+    const auto* drums = fillSection != nullptr ? findPart(*fillSection, "drums") : nullptr;
+    expect(drums != nullptr && !drums->notes.empty()
+               && std::all_of(drums->notes.begin(), drums->notes.end(), [](const auto& note) {
+                   return note.role == NoteRole::Absolute;
+               }),
+           "fill drum notes stay absolute");
+
+    const auto json = cadenza::arranger::saveStyleToJson(*converted.style);
+    const auto loaded = cadenza::arranger::loadStyleFromJson(json);
+    expect(loaded.ok && loaded.style.findSection("fillAA") != nullptr,
+           "fill section round-trips through JSON");
+}
+
+void testAutoSplitDoesNotExtractSteadyPreMainGrooveAsFill()
+{
+    juce::MidiFile midi;
+    makeAutoFillBeforeMainFixture(midi, false);
+    const auto file = writeMidi("cadenza-midi-style-auto-split-no-false-fill", midi);
+
+    auto result = cadenza::arranger::autoSplitMidiFileForStyleImport(file, {});
+    expect(result.ok, "auto-split succeeds for repeated main with steady pre-main groove");
+    const auto fill = std::find_if(result.sections.begin(), result.sections.end(), [](const auto& spec) {
+        return spec.sectionId.startsWith("fill");
+    });
+    expect(fill == result.sections.end(), "auto-split does not treat a steady groove bar as a fill");
+}
+
 void testAutoSplitSectionsConvertAndRoundTrip()
 {
     juce::MidiFile midi;
@@ -874,6 +957,8 @@ int main()
     testAutoSplitFindsDistinctRepeatedMainB();
     testAutoSplitKeepsSectionsChordStable();
     testAutoSplitDoesNotInventIntro();
+    testAutoSplitExtractsHeavyPreMainFill();
+    testAutoSplitDoesNotExtractSteadyPreMainGrooveAsFill();
     testAutoSplitSectionsConvertAndRoundTrip();
     testInspectChordConfidence();
     std::cout << "All MIDI style converter tests passed\n";

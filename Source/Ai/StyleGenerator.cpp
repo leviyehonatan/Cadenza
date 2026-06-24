@@ -1,7 +1,173 @@
 #include "StyleGenerator.h"
 
+#include <algorithm>
+#include <set>
+
 namespace cadenza::ai
 {
+namespace
+{
+bool sameNote(const cadenza::arranger::PatternNote& a,
+              const cadenza::arranger::PatternNote& b) noexcept
+{
+    return a.tick == b.tick
+        && a.duration == b.duration
+        && a.pitch == b.pitch
+        && a.velocity == b.velocity
+        && a.role == b.role
+        && a.scaleDegree == b.scaleDegree;
+}
+
+bool sameAutomation(const cadenza::arranger::AutomationEvent& a,
+                    const cadenza::arranger::AutomationEvent& b) noexcept
+{
+    return a.tick == b.tick
+        && a.type == b.type
+        && a.value == b.value;
+}
+
+bool samePartStructure(const cadenza::arranger::Part& a,
+                       const cadenza::arranger::Part& b) noexcept
+{
+    return a.name == b.name
+        && a.midiChannel == b.midiChannel
+        && a.instrument == b.instrument
+        && a.bankMsb == b.bankMsb
+        && a.bankLsb == b.bankLsb
+        && a.program == b.program
+        && a.volume == b.volume
+        && a.pan == b.pan
+        && a.reverb == b.reverb
+        && a.chorus == b.chorus
+        && a.percussion == b.percussion
+        && a.octaveOffset == b.octaveOffset;
+}
+
+bool sameNotes(const std::vector<cadenza::arranger::PatternNote>& a,
+               const std::vector<cadenza::arranger::PatternNote>& b)
+{
+    return a.size() == b.size()
+        && std::equal(a.begin(), a.end(), b.begin(), sameNote);
+}
+
+bool sameAutomationEvents(const std::vector<cadenza::arranger::AutomationEvent>& a,
+                          const std::vector<cadenza::arranger::AutomationEvent>& b)
+{
+    return a.size() == b.size()
+        && std::equal(a.begin(), a.end(), b.begin(), sameAutomation);
+}
+
+bool sameStyleTiming(const cadenza::arranger::Style& a,
+                     const cadenza::arranger::Style& b) noexcept
+{
+    return a.defaultTempo == b.defaultTempo
+        && a.beatsPerBar == b.beatsPerBar
+        && a.beatUnit == b.beatUnit
+        && a.ticksPerBeat == b.ticksPerBeat;
+}
+
+const cadenza::arranger::Section* findSection(const cadenza::arranger::Style& style,
+                                              const std::string& id) noexcept
+{
+    return style.findSection(id);
+}
+
+bool hasSection(const cadenza::arranger::Style& style, const std::string& id) noexcept
+{
+    return findSection(style, id) != nullptr;
+}
+
+bool isAllowedAddedSectionId(const cadenza::arranger::Style& original, const std::string& id)
+{
+    if (id == "intro" || id == "ending")
+        return !hasSection(original, id);
+
+    if (id == "fillAA") return hasSection(original, "mainA");
+    if (id == "fillBB") return hasSection(original, "mainB");
+    if (id == "fillCC") return hasSection(original, "mainC");
+    if (id == "fillDD") return hasSection(original, "mainD");
+    if (id == "fillAB" || id == "fillBA")
+        return hasSection(original, "mainA") && hasSection(original, "mainB");
+
+    return false;
+}
+
+bool sectionStructureMatches(const cadenza::arranger::Section& a,
+                             const cadenza::arranger::Section& b)
+{
+    if (a.name != b.name || a.barCount != b.barCount || a.parts.size() != b.parts.size())
+        return false;
+
+    for (std::size_t i = 0; i < a.parts.size(); ++i) {
+        if (!samePartStructure(a.parts[i], b.parts[i]))
+            return false;
+        if (!sameAutomationEvents(a.parts[i].automation, b.parts[i].automation))
+            return false;
+    }
+    return true;
+}
+
+bool sectionContentsMatch(const cadenza::arranger::Section& a,
+                          const cadenza::arranger::Section& b)
+{
+    if (!sectionStructureMatches(a, b))
+        return false;
+
+    for (std::size_t i = 0; i < a.parts.size(); ++i)
+        if (!sameNotes(a.parts[i].notes, b.parts[i].notes))
+            return false;
+    return true;
+}
+
+bool styleHasUniqueSectionIds(const cadenza::arranger::Style& style)
+{
+    std::set<std::string> ids;
+    for (const auto& section : style.sections)
+        if (!ids.insert(section.name).second)
+            return false;
+    return true;
+}
+}
+
+bool validateAiAddedSectionsOnly(const cadenza::arranger::Style& original,
+                                 const cadenza::arranger::Style& aiStyle)
+{
+    if (!sameStyleTiming(original, aiStyle)
+        || !styleHasUniqueSectionIds(original)
+        || !styleHasUniqueSectionIds(aiStyle))
+        return false;
+
+    for (const auto& originalSection : original.sections) {
+        const auto* aiSection = findSection(aiStyle, originalSection.name);
+        if (aiSection == nullptr || !sectionContentsMatch(originalSection, *aiSection))
+            return false;
+    }
+
+    for (const auto& aiSection : aiStyle.sections)
+        if (!hasSection(original, aiSection.name) && !isAllowedAddedSectionId(original, aiSection.name))
+            return false;
+
+    return true;
+}
+
+bool validatePolishKeptStructure(const cadenza::arranger::Style& original,
+                                 const cadenza::arranger::Style& aiStyle)
+{
+    if (!sameStyleTiming(original, aiStyle)
+        || original.sections.size() != aiStyle.sections.size()
+        || !styleHasUniqueSectionIds(original)
+        || !styleHasUniqueSectionIds(aiStyle))
+        return false;
+
+    for (const auto& originalSection : original.sections) {
+        const auto* aiSection = findSection(aiStyle, originalSection.name);
+        if (aiSection == nullptr || !sectionStructureMatches(originalSection, *aiSection))
+            return false;
+    }
+
+    return true;
+}
+
 juce::String styleAuthorSystemPrompt()
 {
     // Compact form of the cadenza-style-author skill: enough for the model to emit

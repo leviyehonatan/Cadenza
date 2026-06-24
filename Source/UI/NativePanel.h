@@ -106,6 +106,25 @@ private:
     int m_split = 60;
 };
 
+class AiWorkingOverlay final : public juce::Component,
+                               private juce::Timer
+{
+public:
+    void showWorking(const juce::String& message);
+    void showResult(const juce::String& message);
+    void hide();
+
+    void paint(juce::Graphics& g) override;
+
+private:
+    void timerCallback() override;
+
+    juce::String m_message;
+    bool m_working = false;
+    int m_animFrame = 0;
+    uint32_t m_hideAtMs = 0;
+};
+
 class NativePanel : public juce::Component,
                     private juce::MidiKeyboardState::Listener
 {
@@ -187,6 +206,8 @@ public:
         std::function<void(int)>  onLeftOctave;       // delta -1/+1
         // AI: make a style from text.
         std::function<void()> onAiStyle;       // open the "describe a style" dialog
+        std::function<void()> onAiAddFills;    // edit current style: add fills + missing intro/ending
+        std::function<void()> onAiPolish;      // edit current style: minimal corrective polish
         std::function<void()> onAiSettings;    // open AI settings (API key + model)
     };
 
@@ -233,6 +254,8 @@ public:
     void setOtsLinkEnabled(bool enabled);
     // Reflect the Style Recorder session state (enables/dims its buttons).
     void setRecorderState(bool sessionActive, bool armed, const juce::String& status);
+    void beginAiWorking(const juce::String& message, const juce::String& activeButtonText);
+    void finishAiWorking(const juce::String& resultMessage);
     // Enable/dim the "Make Editable" button (shown when a Yamaha style is loaded).
     void setMakeEditableAvailable(bool available);
     void setRecorderBarCount(int bars);
@@ -254,6 +277,7 @@ public:
 
 private:
     void refreshSectionHighlights();
+    void setAiButtonsBusy(bool busy, const juce::String& activeButtonText = {});
 
     // Card backgrounds drawn behind logical control groups (computed in resized(),
     // painted in paint()). m_chordCard is the recessed "LCD" panel for the chord.
@@ -412,7 +436,11 @@ private:
     juce::TextButton m_recExit  { "Exit" };
     juce::TextButton m_recMakeEditable { "Make Editable" };
     juce::TextButton m_aiStyle { "AI Style..." };
+    juce::TextButton m_aiAddFills { "AI: Add Fills" };
+    juce::TextButton m_aiPolish { "AI: Polish" };
     juce::TextButton m_aiSettings { "AI Settings..." };
+    AiWorkingOverlay m_aiOverlay;
+    bool m_aiBusy = false;
 
     // Style Editor page: embedded piano-roll editor (shown only on kEditorPage).
     std::unique_ptr<StylePartEditorView> m_editor;

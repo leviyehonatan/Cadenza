@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <exception>
 #include <functional>
 #include <map>
 #include <optional>
@@ -135,7 +136,7 @@ int keyNameToPitchClass(const std::string& key) noexcept
 class MidiStyleImportDialog final : public juce::Component
 {
 public:
-    using ConvertCallback = std::function<void(std::vector<cadenza::arranger::MidiStyleSectionSpec>, bool)>;
+    using ConvertCallback = std::function<void(std::vector<cadenza::arranger::MidiStyleSectionSpec>, bool, bool)>;
     using PreviewCallback = std::function<bool(cadenza::arranger::MidiStyleConvertOptions,
                                                cadenza::midi::Chord)>;
     using StopPreviewCallback = std::function<void()>;
@@ -173,6 +174,7 @@ public:
         addAndMakeVisible(m_capturedSections);
         addAndMakeVisible(m_removeSection);
         addAndMakeVisible(m_normalizeToC);
+        addAndMakeVisible(m_aiAddFillsAfterConvert);
         addAndMakeVisible(m_preview);
         addAndMakeVisible(m_prevSection);
         addAndMakeVisible(m_nextSection);
@@ -205,6 +207,10 @@ public:
         m_sectionSlot.addItem("Main C", 4);
         m_sectionSlot.addItem("Main D", 5);
         m_sectionSlot.addItem("Ending", 6);
+        m_sectionSlot.addItem("Fill AA", 7);
+        m_sectionSlot.addItem("Fill AB", 8);
+        m_sectionSlot.addItem("Fill BA", 9);
+        m_sectionSlot.addItem("Fill BB", 10);
         m_sectionSlot.setSelectedId(2, juce::dontSendNotification);
 
         m_detect.setButtonText("Detect");
@@ -224,6 +230,8 @@ public:
         m_cancel.setButtonText("Cancel");
         m_normalizeToC.setButtonText("Play in C (easy white-key chords)");
         m_normalizeToC.setToggleState(true, juce::dontSendNotification);
+        m_aiAddFillsAfterConvert.setButtonText("AI: add fills + intro/ending after convert");
+        m_aiAddFillsAfterConvert.setToggleState(false, juce::dontSendNotification);
 
         applyThemeColours();
 
@@ -246,7 +254,9 @@ public:
                     fallback.sectionId = "mainA";
                     sections.push_back(std::move(fallback));
                 }
-                m_onConvert(std::move(sections), m_normalizeToC.getToggleState());
+                m_onConvert(std::move(sections),
+                            m_normalizeToC.getToggleState(),
+                            m_aiAddFillsAfterConvert.getToggleState());
             }
             if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
                 dw->exitModalState(1);
@@ -260,7 +270,7 @@ public:
         configureRangeControls();
         refreshDetection();
         refreshCapturedSectionList();
-        setSize(680, 564);
+        setSize(680, 592);
     }
 
     ~MidiStyleImportDialog() override
@@ -318,6 +328,7 @@ public:
 
         r.removeFromTop(10);
         m_normalizeToC.setBounds(r.removeFromTop(28));
+        m_aiAddFillsAfterConvert.setBounds(r.removeFromTop(28));
         m_normalizeHint.setBounds(r.removeFromTop(34));
 
         r.removeFromTop(8);
@@ -362,6 +373,7 @@ private:
         m_capturedSummary.setColour(juce::TextEditor::textColourId, value);
         m_capturedSummary.setColour(juce::TextEditor::outlineColourId, dim.withAlpha(0.35f));
         m_normalizeToC.setColour(juce::ToggleButton::textColourId, text);
+        m_aiAddFillsAfterConvert.setColour(juce::ToggleButton::textColourId, text);
     }
 
     void configureRangeControls()
@@ -470,6 +482,10 @@ private:
             case 4: return "mainC";
             case 5: return "mainD";
             case 6: return "ending";
+            case 7: return "fillAA";
+            case 8: return "fillAB";
+            case 9: return "fillBA";
+            case 10: return "fillBB";
             case 2:
             default: return "mainA";
         }
@@ -490,14 +506,10 @@ private:
     {
         const int start = spec.barStart + 1;
         const int end = spec.barStart + std::max(1, spec.barCount);
-        juce::String label;
-        if (spec.sectionId == "intro") label = "Intro";
-        else if (spec.sectionId == "mainB") label = "Main B";
-        else if (spec.sectionId == "mainC") label = "Main C";
-        else if (spec.sectionId == "mainD") label = "Main D";
-        else if (spec.sectionId == "ending") label = "Ending";
-        else label = "Main A";
-        auto text = label + ": bars " + juce::String(start) + "-" + juce::String(end)
+        const auto rangeText = spec.barCount == 1
+            ? "bar " + juce::String(start)
+            : "bars " + juce::String(start) + "-" + juce::String(end);
+        auto text = sectionLabelForSpec(spec.sectionId) + ": " + rangeText
             + "  " + spec.overrideRoot + " " + spec.overrideQuality;
         const auto hint = m_autoHints.find(spec.sectionId.toStdString());
         if (hint != m_autoHints.end())
@@ -542,6 +554,8 @@ private:
         if (id == "mainB") return "Main B";
         if (id == "mainC") return "Main C";
         if (id == "mainD") return "Main D";
+        if (id.startsWith("fill") && id.length() >= 6)
+            return "Fill " + id.substring(4, 6).toUpperCase();
         if (id == "ending") return "Ending";
         return "Main A";
     }
@@ -553,6 +567,10 @@ private:
         for (const auto& warning : warnings)
             if (warning.startsWith(prefix))
                 return "found at bars " + warning.fromFirstOccurrenceOf(prefix, false, false).trim();
+        const auto singlePrefix = sectionLabelForSpec(spec.sectionId) + ": found at bar ";
+        for (const auto& warning : warnings)
+            if (warning.startsWith(singlePrefix))
+                return "found at bar " + warning.fromFirstOccurrenceOf(singlePrefix, false, false).trim();
         return "auto";
     }
 
@@ -711,6 +729,7 @@ private:
     juce::ComboBox m_capturedSections;
     juce::TextEditor m_capturedSummary;
     juce::ToggleButton m_normalizeToC;
+    juce::ToggleButton m_aiAddFillsAfterConvert;
     juce::TextButton m_addToStyle;
     juce::TextButton m_autoSplit;
     juce::TextButton m_removeSection;
@@ -798,6 +817,23 @@ juce::String jsString(const juce::String& value)
 juce::String boolLiteral(bool value)
 {
     return value ? "true" : "false";
+}
+
+juce::String aiAddFillsPrompt()
+{
+    return "Add arranger fill sections to this style: a 1-bar drum-led 'fillAA' for mainA and 'fillBB' for mainB (and fillCC/"
+           "fillDD if those Mains exist), plus direct transition fills 'fillAB'/'fillBA' where both Mains exist. Also add a "
+           "short 'intro' (1-2 bars) and 'ending' (1-2 bars) ONLY if they are missing. Base fills on each Main's groove and "
+           "instruments. KEEP every existing section, its notes, ids, tempo, time signature, and instruments unchanged. "
+           "Return the COMPLETE updated style JSON only.";
+}
+
+juce::String aiPolishPrompt()
+{
+    return "Review this arranger style and FIX obvious problems: notes that sound out of key or wrong against the section's "
+           "chord, and stray/random or misplaced drum hits. Keep the overall groove, all section ids, the number of sections, "
+           "tempo, time signature, and instrument assignments. Do not rewrite the style; make minimal corrective edits. "
+           "Return the COMPLETE updated style JSON only.";
 }
 }
 
@@ -2031,7 +2067,8 @@ void MainComponent::openMidiStyleImportChooser()
                     auto* dialog = new MidiStyleImportDialog(
                         midiFile, info,
                         [dialogSafe, midiFile](std::vector<cadenza::arranger::MidiStyleSectionSpec> sections,
-                                               bool normalizeToC) {
+                                               bool normalizeToC,
+                                               bool aiAddFillsAfterConvert) {
                             auto* owner = dialogSafe.getComponent();
                             if (owner == nullptr)
                                 return;
@@ -2068,6 +2105,8 @@ void MainComponent::openMidiStyleImportChooser()
                                     if (owner->m_panel)
                                         owner->m_panel->setRecorderState(true, false, status);
                                     juce::Logger::writeToLog("[Cadenza] " + status);
+                                    if (aiAddFillsAfterConvert)
+                                        owner->generateAiFillsIntroEnding();
                                 } else {
                                     const auto status = "MIDI style import save/load failed: "
                                         + out.getFullPathName();
@@ -2992,6 +3031,13 @@ void MainComponent::generateStyleFromText(const juce::String& prompt)
     if (!m_settings) return;
     const juce::String key   = juce::String(m_settings->state().anthropicApiKey);
     const juce::String model = juce::String(m_settings->state().aiModel);
+    if (key.trim().isEmpty()) {
+        if (m_panel)
+            m_panel->finishAiWorking("AI skipped: add your Anthropic API key in AI Settings.");
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon, "AI Style",
+            "First add your Anthropic API key in AI Settings (on the Setting page).");
+        return;
+    }
 
     // If an editable style is loaded, the instruction EDITS it (unless it starts
     // with "new ", which forces a fresh style). Otherwise it creates from scratch.
@@ -3002,13 +3048,25 @@ void MainComponent::generateStyleFromText(const juce::String& prompt)
         if (auto snap = m_recorder.snapshotStyle())
             currentStyleJson = juce::String(cadenza::arranger::saveStyleToJson(*snap, true));
 
+    const juce::String work = "AI is working - generating style... (this can take a few seconds)";
+    if (!beginAiWorking(work, "AI Style..."))
+        return;
+
     if (m_panel)
-        m_panel->setRecorderState(m_recorder.sessionActive(), false,
-            (editing ? "Editing style with AI (" : "Generating style with AI (") + model + ")...");
+        m_panel->setRecorderState(m_recorder.sessionActive(), false, work + " Model: " + model);
 
     juce::Component::SafePointer<MainComponent> safe(this);
     std::thread([safe, key, model, prompt, currentStyleJson] {
-        auto result = cadenza::ai::generateStyle(key, model, prompt, currentStyleJson);
+        cadenza::ai::StyleGenResult result;
+        try {
+            result = cadenza::ai::generateStyle(key, model, prompt, currentStyleJson);
+        } catch (const std::exception& e) {
+            result.ok = false;
+            result.error = e.what();
+        } catch (...) {
+            result.ok = false;
+            result.error = "unknown error.";
+        }
         juce::MessageManager::callAsync([safe, result] {
             if (auto* self = safe.getComponent())
                 self->applyGeneratedStyle(result);
@@ -3018,10 +3076,81 @@ void MainComponent::generateStyleFromText(const juce::String& prompt)
 
 void MainComponent::applyGeneratedStyle(const cadenza::ai::StyleGenResult& result)
 {
-    if (!result.ok) {
+    applyGeneratedStyle(result, nullptr, AiStyleAction::None);
+}
+
+void MainComponent::generateAiFillsIntroEnding()
+{
+    generateStyleEditAction(aiAddFillsPrompt(), "AI: generating fills...", AiStyleAction::AddFillsIntroEnding);
+}
+
+void MainComponent::polishStyleWithAi()
+{
+    generateStyleEditAction(aiPolishPrompt(), "AI: polishing style...", AiStyleAction::Polish);
+}
+
+void MainComponent::generateStyleEditAction(const juce::String& prompt,
+                                            const juce::String& status,
+                                            AiStyleAction action)
+{
+    if (!m_settings || m_settings->state().anthropicApiKey.empty()) {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon, "AI Style",
+            "First add your Anthropic API key in AI Settings (on the Setting page).");
         if (m_panel)
-            m_panel->setRecorderState(m_recorder.sessionActive(), false,
-                "AI failed: " + juce::String(result.error));
+            m_panel->finishAiWorking("AI skipped: add your Anthropic API key in AI Settings.");
+        return;
+    }
+
+    if (!m_recorder.sessionActive()) {
+        if (m_panel)
+            m_panel->setRecorderState(false, false,
+                "AI needs an editable .cstyle loaded; import, record, or Make Editable first.");
+        return;
+    }
+
+    auto originalStyle = m_recorder.snapshotStyle();
+    if (originalStyle == nullptr)
+        return;
+
+    const juce::String key = juce::String(m_settings->state().anthropicApiKey);
+    const juce::String model = juce::String(m_settings->state().aiModel);
+    const juce::String currentStyleJson = juce::String(cadenza::arranger::saveStyleToJson(*originalStyle, true));
+
+    const bool polishing = action == AiStyleAction::Polish;
+    const juce::String work = polishing
+        ? "AI is working - polishing style... (this can take a few seconds)"
+        : "AI is working - generating fills... (this can take a few seconds)";
+    if (!beginAiWorking(work, polishing ? "AI: Polish" : "AI: Add Fills"))
+        return;
+
+    if (m_panel)
+        m_panel->setRecorderState(true, false, status + " (" + model + ")...");
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    std::thread([safe, key, model, prompt, currentStyleJson, originalStyle, action] {
+        cadenza::ai::StyleGenResult result;
+        try {
+            result = cadenza::ai::generateStyle(key, model, prompt, currentStyleJson);
+        } catch (const std::exception& e) {
+            result.ok = false;
+            result.error = e.what();
+        } catch (...) {
+            result.ok = false;
+            result.error = "unknown error.";
+        }
+        juce::MessageManager::callAsync([safe, result, originalStyle, action] {
+            if (auto* self = safe.getComponent())
+                self->applyGeneratedStyle(result, originalStyle, action);
+        });
+    }).detach();
+}
+
+void MainComponent::applyGeneratedStyle(const cadenza::ai::StyleGenResult& result,
+                                        std::shared_ptr<const cadenza::arranger::Style> originalStyle,
+                                        AiStyleAction action)
+{
+    if (!result.ok) {
+        finishAiWorking("AI failed: " + juce::String(result.error));
         juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
             "AI Style", juce::String(result.error));
         return;
@@ -3029,9 +3158,24 @@ void MainComponent::applyGeneratedStyle(const cadenza::ai::StyleGenResult& resul
 
     auto loaded = cadenza::arranger::loadStyleFromJson(result.cstyleJson);
     if (!loaded.ok) {
+        finishAiWorking("AI returned an invalid style; kept your original.");
         juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
             "AI Style", "The AI returned an invalid style: " + juce::String(loaded.error));
         return;
+    }
+
+    if (action == AiStyleAction::AddFillsIntroEnding) {
+        if (originalStyle == nullptr
+            || !cadenza::ai::validateAiAddedSectionsOnly(*originalStyle, loaded.style)) {
+            finishAiWorking("AI fill generation changed existing sections; kept your original.");
+            return;
+        }
+    } else if (action == AiStyleAction::Polish) {
+        if (originalStyle == nullptr
+            || !cadenza::ai::validatePolishKeptStructure(*originalStyle, loaded.style)) {
+            finishAiWorking("AI polish changed the style structure; kept your original.");
+            return;
+        }
     }
 
     // Persist it as a real .cstyle and load it through the normal path (so it
@@ -3046,17 +3190,46 @@ void MainComponent::applyGeneratedStyle(const cadenza::ai::StyleGenResult& resul
 
     const int tokens = result.inputTokens + result.outputTokens;
     if (loadAndApplyStyleFile(file)) {
-        if (m_panel) {
+        if (m_panel)
             m_panel->setActivePage(cadenza::ui::NativePanel::kEditorPage);
-            m_panel->setRecorderState(true, false,
-                "AI style \"" + name + "\" loaded (" + juce::String(tokens) + " tokens) - edit & Save");
-        }
+
+        juce::String resultText = "AI: style generated";
+        if (action == AiStyleAction::AddFillsIntroEnding)
+            resultText = "AI: fills added";
+        else if (action == AiStyleAction::Polish)
+            resultText = "AI: style polished";
+
+        finishAiWorking(resultText + " (used " + juce::String(tokens) + " tokens) - \""
+                        + name + "\" loaded; edit & Save");
         juce::Logger::writeToLog("[Cadenza] AI style generated: " + name
                                  + " (" + juce::String(tokens) + " tokens, saved " + file.getFullPathName() + ")");
     } else {
+        finishAiWorking("AI failed: could not load the generated style.");
         juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
             "AI Style", "Could not load the generated style.");
     }
+}
+
+bool MainComponent::beginAiWorking(const juce::String& workingMessage, const juce::String& activeButtonText)
+{
+    if (m_aiInFlight) {
+        if (m_panel)
+            m_panel->setRecorderState(m_recorder.sessionActive(), false,
+                "AI is already working - please wait for the current request to finish.");
+        return false;
+    }
+
+    m_aiInFlight = true;
+    if (m_panel)
+        m_panel->beginAiWorking(workingMessage, activeButtonText);
+    return true;
+}
+
+void MainComponent::finishAiWorking(const juce::String& resultMessage)
+{
+    m_aiInFlight = false;
+    if (m_panel)
+        m_panel->finishAiWorking(resultMessage);
 }
 
 void MainComponent::recorderReloadEditor()
@@ -3657,6 +3830,8 @@ void MainComponent::buildNativePanel()
     cb.onModulation = [this](int v)   { sendModToManual(v); };
 
     cb.onAiStyle    = [this] { showGenerateStyleDialog(); };
+    cb.onAiAddFills = [this] { generateAiFillsIntroEnding(); };
+    cb.onAiPolish   = [this] { polishStyleWithAi(); };
     cb.onAiSettings = [this] { showAiSettingsDialog(); };
 
     cb.onStoreRegistration  = [this](int slot) { captureRegistration(slot); };
