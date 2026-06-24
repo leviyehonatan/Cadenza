@@ -766,6 +766,199 @@ int totalBarsFor(const ParsedMidi& parsed, int barTicks) noexcept
         return 1;
     return std::max(1, (parsed.lastTick + barTicks - 1) / barTicks);
 }
+
+int sectionOrder(const juce::String& id) noexcept
+{
+    const auto s = id.trim().toStdString();
+    if (s == "intro") return 0;
+    if (s == "mainA") return 1;
+    if (s == "mainB") return 2;
+    if (s == "mainC") return 3;
+    if (s == "mainD") return 4;
+    if (s == "ending") return 5;
+    return 100;
+}
+
+std::optional<int> parseRootName(const juce::String& root)
+{
+    const auto text = root.trim().toLowerCase();
+    if (text.isEmpty())
+        return std::nullopt;
+    if (text == "c") return 0;
+    if (text == "c#" || text == "db") return 1;
+    if (text == "d") return 2;
+    if (text == "d#" || text == "eb") return 3;
+    if (text == "e") return 4;
+    if (text == "f") return 5;
+    if (text == "f#" || text == "gb") return 6;
+    if (text == "g") return 7;
+    if (text == "g#" || text == "ab") return 8;
+    if (text == "a") return 9;
+    if (text == "a#" || text == "bb") return 10;
+    if (text == "b") return 11;
+    return std::nullopt;
+}
+
+std::optional<juce::String> qualityOverrideSuffix(const juce::String& quality)
+{
+    const auto q = quality.trim().toLowerCase();
+    if (q.isEmpty())
+        return std::nullopt;
+    if (q == "maj" || q == "major")
+        return juce::String();
+    if (q == "min" || q == "minor")
+        return "m";
+    return quality.trim();
+}
+
+struct BuiltSection
+{
+    Section section;
+    juce::StringArray warnings;
+    bool ok = false;
+};
+
+BuiltSection buildSectionFromRange(ParsedMidi& parsed,
+                                   int barTicks,
+                                   int totalBars,
+                                   const MidiStyleSectionSpec& spec,
+                                   bool normalizeToC)
+{
+    BuiltSection built;
+    const int barStart = std::clamp(spec.barStart, 0, std::max(0, totalBars - 1));
+    const int barCount = std::clamp(std::max(1, spec.barCount), 1, std::max(1, totalBars - barStart));
+    const int startTick = barStart * barTicks;
+    const int endTick = startTick + barCount * barTicks;
+
+    std::vector<SourceGroup*> drums;
+    std::vector<SourceGroup*> basses;
+    std::vector<SourceGroup*> chords;
+    std::vector<SourceGroup*> pads;
+    std::vector<SourceGroup*> phrases;
+
+    for (auto& group : parsed.groups) {
+        switch (classifyGroup(group)) {
+            case Slot::Drums: drums.push_back(&group); break;
+            case Slot::Bass: basses.push_back(&group); break;
+            case Slot::Chord: chords.push_back(&group); break;
+            case Slot::Pad: pads.push_back(&group); break;
+            case Slot::Phrase: phrases.push_back(&group); break;
+            case Slot::Drop: break;
+        }
+    }
+
+    auto byStrength = [](const SourceGroup* a, const SourceGroup* b) {
+        return strength(*a) > strength(*b);
+    };
+    for (auto* list : { &drums, &basses, &chords, &pads, &phrases })
+        std::sort(list->begin(), list->end(), byStrength);
+
+    std::vector<SourceGroup*> harmonic;
+    harmonic.insert(harmonic.end(), basses.begin(), basses.end());
+    harmonic.insert(harmonic.end(), chords.begin(), chords.end());
+    harmonic.insert(harmonic.end(), pads.begin(), pads.end());
+
+    auto detected = detectSourceChord(harmonic, startTick, endTick);
+    const auto overrideRoot = parseRootName(spec.overrideRoot);
+    const auto overrideQuality = qualityOverrideSuffix(spec.overrideQuality);
+    if (overrideRoot)
+        detected.root = pc(*overrideRoot);
+    if (overrideQuality)
+        detected.suffix = overrideQuality->toStdString();
+    detected.fallback = !overrideRoot && !overrideQuality && detected.fallback;
+    if (detected.fallback)
+        built.warnings.add("Could not confidently detect source chord for "
+                           + (spec.sectionId.isNotEmpty() ? spec.sectionId : "mainA")
+                           + "; using C major fallback");
+    if (spec.overrideRoot.isNotEmpty() && !overrideRoot)
+        built.warnings.add("Ignored unknown root override for "
+                           + (spec.sectionId.isNotEmpty() ? spec.sectionId : "mainA")
+                           + ": " + spec.overrideRoot);
+
+    const std::string sourceRoot = rootName(detected.root);
+    const std::string sourceChord = detected.suffix;
+    const int normalizedRoot = normalizeToC ? 0 : detected.root;
+    const int transposeToNormalizedRoot = normalizeToC ? nearestTransposeToC(detected.root) : 0;
+    const std::string normalizedSourceRoot = rootName(normalizedRoot);
+
+    Section section;
+    section.name = spec.sectionId.isNotEmpty() ? spec.sectionId.toStdString() : "mainA";
+    section.barCount = barCount;
+
+    auto makePart = [&](const std::string& name, SourceGroup* seed) {
+        Part part;
+        const auto& info = slotInfo(name);
+        part.name = name;
+        part.midiChannel = info.channel;
+        part.percussion = info.percussion;
+        if (seed != nullptr)
+            copyProgramState(part, seed->state);
+        if (!part.percussion && !part.program)
+            part.program = cadenza::midi::defaultGmProgramForRole(name);
+        if (!part.percussion && part.instrument.empty() && part.program)
+            part.instrument = cadenza::midi::gmInstrumentName(*part.program);
+        part.yamahaPolicy = makePolicy(name, normalizedSourceRoot, sourceChord);
+        return part;
+    };
+
+    if (!drums.empty()) {
+        auto part = makePart("drums", drums.front());
+        for (auto* group : drums)
+            appendGroup(part, *group, startTick, endTick, detected.root, sourceChord, 0);
+        sortPart(part);
+        if (!part.notes.empty() || !part.automation.empty())
+            section.parts.push_back(std::move(part));
+    }
+
+    if (!basses.empty()) {
+        auto part = makePart("bass", basses.front());
+        appendGroup(part, *basses.front(), startTick, endTick, normalizedRoot, sourceChord, transposeToNormalizedRoot);
+        if (basses.size() > 1)
+            built.warnings.add("Dropped extra bass MIDI tracks beyond the bass slot in " + juce::String(section.name));
+        sortPart(part);
+        if (!part.notes.empty() || !part.automation.empty())
+            section.parts.push_back(std::move(part));
+    }
+
+    for (int i = 0; i < 2 && i < static_cast<int>(chords.size()); ++i) {
+        auto part = makePart(i == 0 ? "chord1" : "chord2", chords[static_cast<std::size_t>(i)]);
+        appendGroup(part, *chords[static_cast<std::size_t>(i)], startTick, endTick, normalizedRoot, sourceChord, transposeToNormalizedRoot);
+        sortPart(part);
+        if (!part.notes.empty() || !part.automation.empty())
+            section.parts.push_back(std::move(part));
+    }
+    if (chords.size() > 2)
+        built.warnings.add("Dropped extra chord MIDI tracks beyond chord2 in " + juce::String(section.name));
+
+    if (!pads.empty()) {
+        auto part = makePart("pad", pads.front());
+        appendGroup(part, *pads.front(), startTick, endTick, normalizedRoot, sourceChord, transposeToNormalizedRoot);
+        sortPart(part);
+        if (!part.notes.empty() || !part.automation.empty())
+            section.parts.push_back(std::move(part));
+        if (pads.size() > 1)
+            built.warnings.add("Dropped extra pad MIDI tracks beyond the pad slot in " + juce::String(section.name));
+    }
+
+    for (int i = 0; i < 2 && i < static_cast<int>(phrases.size()); ++i) {
+        auto part = makePart(i == 0 ? "phrase1" : "phrase2", phrases[static_cast<std::size_t>(i)]);
+        appendGroup(part, *phrases[static_cast<std::size_t>(i)], startTick, endTick, normalizedRoot, sourceChord, transposeToNormalizedRoot);
+        sortPart(part);
+        if (!part.notes.empty() || !part.automation.empty())
+            section.parts.push_back(std::move(part));
+    }
+    if (phrases.size() > 2)
+        built.warnings.add("Dropped extra phrase MIDI tracks beyond phrase2 in " + juce::String(section.name));
+
+    if (section.parts.empty()) {
+        built.warnings.add("Selected MIDI bar range for " + juce::String(section.name) + " contains no mappable notes");
+        return built;
+    }
+
+    built.section = std::move(section);
+    built.ok = true;
+    return built;
+}
 }
 
 MidiStyleImportInfo inspectMidiFileForStyleImport(const juce::File& midi,
@@ -813,6 +1006,23 @@ MidiStyleImportInfo inspectMidiFileForStyleImport(const juce::File& midi,
 MidiStyleConvertResult convertMidiFileToNativeStyle(const juce::File& midi,
                                                     const MidiStyleConvertOptions& options)
 {
+    MidiStyleSectionSpec spec;
+    spec.sectionId = options.sectionName.isNotEmpty() ? options.sectionName : "mainA";
+    spec.barStart = options.barStart;
+    spec.barCount = options.barCount;
+    if (options.overrideSourceRoot)
+        spec.overrideRoot = rootName(*options.overrideSourceRoot);
+    if (options.overrideSourceChord)
+        spec.overrideQuality = options.overrideSourceChord->isEmpty()
+            ? "maj"
+            : (*options.overrideSourceChord == "m" ? "min" : *options.overrideSourceChord);
+    return convertMidiFileToNativeStyleMultiSection(midi, { spec }, options.normalizeToC);
+}
+
+MidiStyleConvertResult convertMidiFileToNativeStyleMultiSection(const juce::File& midi,
+                                                                const std::vector<MidiStyleSectionSpec>& sections,
+                                                                bool normalizeToC)
+{
     MidiStyleConvertResult result;
     auto parsed = parseMidi(midi, result.warnings);
     if (!parsed)
@@ -825,52 +1035,6 @@ MidiStyleConvertResult convertMidiFileToNativeStyle(const juce::File& midi,
         return result;
     }
     const int totalBars = totalBarsFor(*parsed, barTicks);
-    const int barStart = std::clamp(options.barStart, 0, std::max(0, totalBars - 1));
-    const int barCount = std::clamp(std::max(1, options.barCount), 1, std::max(1, totalBars - barStart));
-    const int startTick = barStart * barTicks;
-    const int endTick = startTick + barCount * barTicks;
-
-    std::vector<SourceGroup*> drums;
-    std::vector<SourceGroup*> basses;
-    std::vector<SourceGroup*> chords;
-    std::vector<SourceGroup*> pads;
-    std::vector<SourceGroup*> phrases;
-
-    for (auto& group : parsed->groups) {
-        switch (classifyGroup(group)) {
-            case Slot::Drums: drums.push_back(&group); break;
-            case Slot::Bass: basses.push_back(&group); break;
-            case Slot::Chord: chords.push_back(&group); break;
-            case Slot::Pad: pads.push_back(&group); break;
-            case Slot::Phrase: phrases.push_back(&group); break;
-            case Slot::Drop: break;
-        }
-    }
-
-    auto byStrength = [](const SourceGroup* a, const SourceGroup* b) {
-        return strength(*a) > strength(*b);
-    };
-    for (auto* list : { &drums, &basses, &chords, &pads, &phrases })
-        std::sort(list->begin(), list->end(), byStrength);
-
-    std::vector<SourceGroup*> harmonic;
-    harmonic.insert(harmonic.end(), basses.begin(), basses.end());
-    harmonic.insert(harmonic.end(), chords.begin(), chords.end());
-    harmonic.insert(harmonic.end(), pads.begin(), pads.end());
-
-    auto detected = detectSourceChord(harmonic, startTick, endTick);
-    if (options.overrideSourceRoot)
-        detected.root = pc(*options.overrideSourceRoot);
-    if (options.overrideSourceChord)
-        detected.suffix = options.overrideSourceChord->toStdString();
-    detected.fallback = !options.overrideSourceRoot && !options.overrideSourceChord && detected.fallback;
-    if (detected.fallback)
-        result.warnings.add("Could not confidently detect source chord; using C major fallback");
-    const std::string sourceRoot = rootName(detected.root);
-    const std::string sourceChord = detected.suffix;
-    const int normalizedRoot = options.normalizeToC ? 0 : detected.root;
-    const int transposeToNormalizedRoot = options.normalizeToC ? nearestTransposeToC(detected.root) : 0;
-    const std::string normalizedSourceRoot = rootName(normalizedRoot);
 
     auto style = std::make_unique<Style>();
     style->schema = "cadenza.style.v1";
@@ -882,88 +1046,32 @@ MidiStyleConvertResult convertMidiFileToNativeStyle(const juce::File& midi,
     style->beatUnit = parsed->beatUnit;
     style->ticksPerBeat = parsed->ppq;
 
-    Section section;
-    section.name = options.sectionName.isNotEmpty() ? options.sectionName.toStdString() : "mainA";
-    section.barCount = barCount;
+    auto requested = sections;
+    if (requested.empty())
+        requested.push_back({ "mainA", 0, 4, {}, {} });
+    std::stable_sort(requested.begin(), requested.end(), [](const auto& a, const auto& b) {
+        const int ao = sectionOrder(a.sectionId);
+        const int bo = sectionOrder(b.sectionId);
+        return ao == bo ? a.sectionId.compare(b.sectionId) < 0 : ao < bo;
+    });
 
-    auto makePart = [&](const std::string& name, SourceGroup* seed) {
-        Part part;
-        const auto& info = slotInfo(name);
-        part.name = name;
-        part.midiChannel = info.channel;
-        part.percussion = info.percussion;
-        if (seed != nullptr)
-            copyProgramState(part, seed->state);
-        if (!part.percussion && !part.program)
-            part.program = cadenza::midi::defaultGmProgramForRole(name);
-        if (!part.percussion && part.instrument.empty() && part.program)
-            part.instrument = cadenza::midi::gmInstrumentName(*part.program);
-        part.yamahaPolicy = makePolicy(name, part.percussion ? sourceRoot : normalizedSourceRoot, sourceChord);
-        return part;
-    };
-
-    if (!drums.empty()) {
-        auto part = makePart("drums", drums.front());
-        for (auto* group : drums)
-            appendGroup(part, *group, startTick, endTick, detected.root, sourceChord, 0);
-        sortPart(part);
-        if (!part.notes.empty() || !part.automation.empty())
-            section.parts.push_back(std::move(part));
+    for (const auto& spec : requested) {
+        auto built = buildSectionFromRange(*parsed, barTicks, totalBars, spec, normalizeToC);
+        result.warnings.addArray(built.warnings);
+        if (!built.ok)
+            continue;
+        style->sections.push_back(std::move(built.section));
     }
 
-    if (!basses.empty()) {
-        auto part = makePart("bass", basses.front());
-        appendGroup(part, *basses.front(), startTick, endTick, normalizedRoot, sourceChord, transposeToNormalizedRoot);
-        if (basses.size() > 1)
-            result.warnings.add("Dropped extra bass MIDI tracks beyond the bass slot");
-        sortPart(part);
-        if (!part.notes.empty() || !part.automation.empty())
-            section.parts.push_back(std::move(part));
-    }
-
-    const std::pair<const char*, std::vector<SourceGroup*>*> chordSlots[] = {
-        { "chord1", &chords },
-        { "chord2", &chords },
-    };
-    for (int i = 0; i < 2 && i < static_cast<int>(chords.size()); ++i) {
-        auto part = makePart(chordSlots[i].first, chords[static_cast<std::size_t>(i)]);
-        appendGroup(part, *chords[static_cast<std::size_t>(i)], startTick, endTick, normalizedRoot, sourceChord, transposeToNormalizedRoot);
-        sortPart(part);
-        if (!part.notes.empty() || !part.automation.empty())
-            section.parts.push_back(std::move(part));
-    }
-    if (chords.size() > 2)
-        result.warnings.add("Dropped extra chord MIDI tracks beyond chord2");
-
-    if (!pads.empty()) {
-        auto part = makePart("pad", pads.front());
-        appendGroup(part, *pads.front(), startTick, endTick, normalizedRoot, sourceChord, transposeToNormalizedRoot);
-        sortPart(part);
-        if (!part.notes.empty() || !part.automation.empty())
-            section.parts.push_back(std::move(part));
-        if (pads.size() > 1)
-            result.warnings.add("Dropped extra pad MIDI tracks beyond the pad slot");
-    }
-
-    for (int i = 0; i < 2 && i < static_cast<int>(phrases.size()); ++i) {
-        auto part = makePart(i == 0 ? "phrase1" : "phrase2", phrases[static_cast<std::size_t>(i)]);
-        appendGroup(part, *phrases[static_cast<std::size_t>(i)], startTick, endTick, normalizedRoot, sourceChord, transposeToNormalizedRoot);
-        sortPart(part);
-        if (!part.notes.empty() || !part.automation.empty())
-            section.parts.push_back(std::move(part));
-    }
-    if (phrases.size() > 2)
-        result.warnings.add("Dropped extra phrase MIDI tracks beyond phrase2");
-
-    if (section.parts.empty()) {
-        result.warnings.add("Selected MIDI bar range contains no mappable notes");
+    if (style->sections.empty()) {
+        if (result.warnings.isEmpty())
+            result.warnings.add("Selected MIDI bar ranges contain no mappable notes");
         return result;
     }
 
     style->parseWarnings.reserve(static_cast<std::size_t>(result.warnings.size()));
     for (const auto& warning : result.warnings)
         style->parseWarnings.push_back(warning.toStdString());
-    style->sections.push_back(std::move(section));
 
     auto loaded = loadStyleFromJson(saveStyleToJson(*style));
     if (!loaded.ok) {

@@ -61,6 +61,14 @@ const Part* findPart(const Style& style, const std::string& name)
     return nullptr;
 }
 
+const Part* findPart(const cadenza::arranger::Section& section, const std::string& name)
+{
+    for (const auto& part : section.parts)
+        if (part.name == name)
+            return &part;
+    return nullptr;
+}
+
 void makeCmajorFixture(juce::MidiFile& midi)
 {
     constexpr int ppq = 480;
@@ -139,6 +147,52 @@ void makeFsharpMinorFixture(juce::MidiFile& midi)
     addNote(piano, 3, 0, bar * 4, 73, 80);
 
     midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(drums);
+    midi.addTrack(bass);
+    midi.addTrack(piano);
+}
+
+void makeTwoSectionFixture(juce::MidiFile& midi)
+{
+    constexpr int ppq = 480;
+    constexpr int bar = ppq * 4;
+
+    juce::MidiMessageSequence meta;
+    auto tempo = juce::MidiMessage::tempoMetaEvent(500000);
+    tempo.setTimeStamp(0);
+    meta.addEvent(tempo);
+    auto ts = juce::MidiMessage::timeSignatureMetaEvent(4, 4);
+    ts.setTimeStamp(0);
+    meta.addEvent(ts);
+
+    juce::MidiMessageSequence drums;
+    for (int b = 0; b < 8; ++b) {
+        addNote(drums, 10, b * bar, 120, 36, 110);
+        addNote(drums, 10, b * bar + ppq, 120, 38, 96);
+    }
+
+    juce::MidiMessageSequence bass;
+    addProgram(bass, 2, 33);
+    for (int b = 0; b < 4; ++b)
+        addNote(bass, 2, b * bar, ppq * 4, 36, 104);
+    for (int b = 4; b < 8; ++b)
+        addNote(bass, 2, b * bar, ppq * 4, 47, 104);
+
+    juce::MidiMessageSequence piano;
+    addProgram(piano, 3, 0);
+    for (int b = 0; b < 4; ++b) {
+        addNote(piano, 3, b * bar, ppq * 4, 60, 88);
+        addNote(piano, 3, b * bar, ppq * 4, 64, 82);
+        addNote(piano, 3, b * bar, ppq * 4, 67, 80);
+    }
+    for (int b = 4; b < 8; ++b) {
+        addNote(piano, 3, b * bar, ppq * 4, 59, 88);
+        addNote(piano, 3, b * bar, ppq * 4, 63, 82);
+        addNote(piano, 3, b * bar, ppq * 4, 66, 80);
+    }
+
+    midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(meta);
     midi.addTrack(drums);
     midi.addTrack(bass);
     midi.addTrack(piano);
@@ -305,6 +359,70 @@ void testNormalizeFsharpMinorToC()
            "normalization preserves chord note roles");
 }
 
+void testMultiSectionImportNormalizesEachSectionAndRoundTrips()
+{
+    juce::MidiFile midi;
+    makeTwoSectionFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-two-section", midi);
+
+    std::vector<cadenza::arranger::MidiStyleSectionSpec> sections;
+    sections.push_back({ "mainB", 4, 4, "B", "maj" });
+    sections.push_back({ "mainA", 0, 4, "C", "maj" });
+
+    auto result = cadenza::arranger::convertMidiFileToNativeStyleMultiSection(file, sections, true);
+    expect(result.ok && result.style != nullptr, "two-section fixture converts");
+    expect(result.style->sections.size() == 2, "two sections are emitted");
+    const auto* mainA = result.style->findSection("mainA");
+    const auto* mainB = result.style->findSection("mainB");
+    expect(mainA != nullptr && mainB != nullptr, "mainA and mainB sections are present");
+    expect(result.style->sections[0].name == "mainA" && result.style->sections[1].name == "mainB",
+           "sections are ordered by arranger slot");
+    expect(mainA->barCount == 4 && mainB->barCount == 4, "each section keeps its own bar count");
+
+    const auto* mainADrums = findPart(*mainA, "drums");
+    const auto* mainABass = findPart(*mainA, "bass");
+    const auto* mainAChord = findPart(*mainA, "chord1");
+    const auto* mainBDrums = findPart(*mainB, "drums");
+    const auto* mainBBass = findPart(*mainB, "bass");
+    const auto* mainBChord = findPart(*mainB, "chord1");
+    expect(mainADrums != nullptr && mainBDrums != nullptr
+               && mainADrums->midiChannel == mainBDrums->midiChannel,
+           "drum parts align to the native channel layout");
+    expect(mainABass != nullptr && mainBBass != nullptr
+               && mainABass->midiChannel == 11 && mainBBass->midiChannel == 11,
+           "bass parts align to channel 11 in both sections");
+    expect(mainAChord != nullptr && mainBChord != nullptr
+               && mainAChord->midiChannel == 12 && mainBChord->midiChannel == 12,
+           "chord parts align to channel 12 in both sections");
+    expect(mainAChord->notes.size() >= 3
+               && mainAChord->notes[0].role == NoteRole::ChordRoot
+               && mainAChord->notes[1].role == NoteRole::Chord3
+               && mainAChord->notes[2].role == NoteRole::Chord5,
+           "mainA chord roles are assigned");
+    expect(mainBChord->notes.size() >= 3
+               && mainBChord->notes[0].role == NoteRole::ChordRoot
+               && mainBChord->notes[1].role == NoteRole::Chord3
+               && mainBChord->notes[2].role == NoteRole::Chord5,
+           "mainB chord roles are assigned");
+    expect(mainABass->yamahaPolicy && mainABass->yamahaPolicy->sourceRoot.value_or("") == "C",
+           "mainA normalized policy references C");
+    expect(mainBBass->yamahaPolicy && mainBBass->yamahaPolicy->sourceRoot.value_or("") == "C",
+           "mainB normalized policy references C");
+    expect(mainADrums->yamahaPolicy && mainADrums->yamahaPolicy->sourceRoot.value_or("") == "C"
+               && mainBDrums->yamahaPolicy && mainBDrums->yamahaPolicy->sourceRoot.value_or("") == "C",
+           "normalized drum policies also reference C while pitches stay absolute");
+    expect(mainBChord->notes[0].pitch == 60
+               && mainBChord->notes[1].pitch == 64
+               && mainBChord->notes[2].pitch == 67,
+           "mainB B major tones transpose up to C major");
+
+    const auto json = cadenza::arranger::saveStyleToJson(*result.style);
+    const auto loaded = cadenza::arranger::loadStyleFromJson(json);
+    expect(loaded.ok && loaded.style.findSection("mainA") != nullptr
+               && loaded.style.findSection("mainB") != nullptr,
+           "multi-section style round-trips through JSON");
+}
+
 void testOverrideSourceChord()
 {
     juce::MidiFile midi;
@@ -457,6 +575,7 @@ int main()
     testCmajorMapsPartsAndRoundTrips();
     testAminorSourceChord();
     testNormalizeFsharpMinorToC();
+    testMultiSectionImportNormalizesEachSectionAndRoundTrips();
     testOverrideSourceChord();
     testInspectReadsEarliestTempo();
     testSmpteRejects();

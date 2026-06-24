@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace cadenza::arranger
 {
@@ -69,4 +70,17 @@ struct MidiStyleConvertResult
 
 MidiStyleConvertResult convertMidiFileToNativeStyle(const juce::File& midi,
                                                     const MidiStyleConvertOptions& options);
+
+struct MidiStyleSectionSpec
+{
+    juce::String sectionId;
+    int barStart = 0;
+    int barCount = 4;
+    juce::String overrideRoot;
+    juce::String overrideQuality;
+};
+
+MidiStyleConvertResult convertMidiFileToNativeStyleMultiSection(const juce::File& midi,
+                                                                const std::vector<MidiStyleSectionSpec>& sections,
+                                                                bool normalizeToC);
 }

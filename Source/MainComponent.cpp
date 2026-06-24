@@ -134,7 +134,7 @@ int keyNameToPitchClass(const std::string& key) noexcept
 class MidiStyleImportDialog final : public juce::Component
 {
 public:
-    using ConvertCallback = std::function<void(cadenza::arranger::MidiStyleConvertOptions)>;
+    using ConvertCallback = std::function<void(std::vector<cadenza::arranger::MidiStyleSectionSpec>, bool)>;
     using PreviewCallback = std::function<bool(cadenza::arranger::MidiStyleConvertOptions,
                                                cadenza::midi::Chord)>;
     using StopPreviewCallback = std::function<void()>;
@@ -162,6 +162,13 @@ public:
         addAndMakeVisible(m_barCount);
         addAndMakeVisible(m_root);
         addAndMakeVisible(m_quality);
+        addAndMakeVisible(m_slotLabel);
+        addAndMakeVisible(m_sectionSlot);
+        addAndMakeVisible(m_addToStyle);
+        addAndMakeVisible(m_sectionsLabel);
+        addAndMakeVisible(m_capturedSummary);
+        addAndMakeVisible(m_capturedSections);
+        addAndMakeVisible(m_removeSection);
         addAndMakeVisible(m_normalizeToC);
         addAndMakeVisible(m_preview);
         addAndMakeVisible(m_prevSection);
@@ -175,6 +182,7 @@ public:
         m_countLabel.setText("Bars", juce::dontSendNotification);
         m_rootLabel.setText("Root", juce::dontSendNotification);
         m_qualityLabel.setText("Quality", juce::dontSendNotification);
+        m_slotLabel.setText("Section", juce::dontSendNotification);
 
         m_startBar.setSliderStyle(juce::Slider::IncDecButtons);
         m_startBar.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 64, 22);
@@ -188,8 +196,22 @@ public:
         const char* qualities[] = { "maj", "min", "7", "maj7", "min7", "sus4", "dim", "aug" };
         for (int i = 0; i < 8; ++i)
             m_quality.addItem(qualities[i], i + 1);
+        m_sectionSlot.addItem("Intro", 1);
+        m_sectionSlot.addItem("Main A", 2);
+        m_sectionSlot.addItem("Main B", 3);
+        m_sectionSlot.addItem("Main C", 4);
+        m_sectionSlot.addItem("Main D", 5);
+        m_sectionSlot.addItem("Ending", 6);
+        m_sectionSlot.setSelectedId(2, juce::dontSendNotification);
 
         m_detect.setButtonText("Detect");
+        m_addToStyle.setButtonText("Add to style");
+        m_removeSection.setButtonText("Remove");
+        m_sectionsLabel.setText("Style sections", juce::dontSendNotification);
+        m_capturedSummary.setReadOnly(true);
+        m_capturedSummary.setMultiLine(true);
+        m_capturedSummary.setScrollbarsShown(true);
+        m_capturedSummary.setCaretVisible(false);
         m_preview.setButtonText("Preview");
         m_prevSection.setButtonText("Prev");
         m_nextSection.setButtonText("Next");
@@ -207,10 +229,18 @@ public:
         m_root.onChange = [this] { updateNormalizeHint(); };
         m_quality.onChange = [this] { updateNormalizeHint(); };
         m_normalizeToC.onClick = [this] { updateNormalizeHint(); };
+        m_addToStyle.onClick = [this] { addCurrentRangeToStyle(); };
+        m_removeSection.onClick = [this] { removeSelectedCapturedSection(); };
         m_convert.onClick = [this] {
             stopPreview();
             if (m_onConvert) {
-                m_onConvert(currentConvertOptions(m_normalizeToC.getToggleState()));
+                auto sections = m_capturedSpecs;
+                if (sections.empty()) {
+                    auto fallback = currentSectionSpec();
+                    fallback.sectionId = "mainA";
+                    sections.push_back(std::move(fallback));
+                }
+                m_onConvert(std::move(sections), m_normalizeToC.getToggleState());
             }
             if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
                 dw->exitModalState(1);
@@ -223,7 +253,8 @@ public:
 
         configureRangeControls();
         refreshDetection();
-        setSize(640, 390);
+        refreshCapturedSectionList();
+        setSize(680, 540);
     }
 
     ~MidiStyleImportDialog() override
@@ -258,6 +289,22 @@ public:
         row.removeFromLeft(16);
         m_qualityLabel.setBounds(row.removeFromLeft(64));
         m_quality.setBounds(row.removeFromLeft(120));
+
+        r.removeFromTop(10);
+        row = r.removeFromTop(34);
+        m_slotLabel.setBounds(row.removeFromLeft(96));
+        m_sectionSlot.setBounds(row.removeFromLeft(140));
+        row.removeFromLeft(12);
+        m_addToStyle.setBounds(row.removeFromLeft(122));
+
+        r.removeFromTop(8);
+        m_sectionsLabel.setBounds(r.removeFromTop(22));
+        m_capturedSummary.setBounds(r.removeFromTop(58));
+        r.removeFromTop(6);
+        row = r.removeFromTop(32);
+        m_capturedSections.setBounds(row.removeFromLeft(430));
+        row.removeFromLeft(10);
+        m_removeSection.setBounds(row.removeFromLeft(96));
 
         r.removeFromTop(10);
         m_normalizeToC.setBounds(r.removeFromTop(28));
@@ -296,6 +343,12 @@ private:
         m_countLabel.setColour(juce::Label::textColourId, text);
         m_rootLabel.setColour(juce::Label::textColourId, text);
         m_qualityLabel.setColour(juce::Label::textColourId, text);
+        m_slotLabel.setColour(juce::Label::textColourId, text);
+        m_sectionsLabel.setColour(juce::Label::textColourId, text);
+        m_capturedSummary.setColour(juce::TextEditor::backgroundColourId,
+                                    cadenza::ui::CadenzaLookAndFeel::panelRaised());
+        m_capturedSummary.setColour(juce::TextEditor::textColourId, value);
+        m_capturedSummary.setColour(juce::TextEditor::outlineColourId, dim.withAlpha(0.35f));
         m_normalizeToC.setColour(juce::ToggleButton::textColourId, text);
     }
 
@@ -383,10 +436,89 @@ private:
         cadenza::arranger::MidiStyleConvertOptions options;
         options.barStart = juce::roundToInt(m_startBar.getValue()) - 1;
         options.barCount = juce::roundToInt(m_barCount.getValue());
+        options.sectionName = currentSectionId();
         options.overrideSourceRoot = std::max(0, m_root.getSelectedId() - 1);
         options.overrideSourceChord = midiImportQualitySuffix(m_quality.getText());
         options.normalizeToC = normalizeToC;
         return options;
+    }
+
+    juce::String currentSectionId() const
+    {
+        switch (m_sectionSlot.getSelectedId()) {
+            case 1: return "intro";
+            case 3: return "mainB";
+            case 4: return "mainC";
+            case 5: return "mainD";
+            case 6: return "ending";
+            case 2:
+            default: return "mainA";
+        }
+    }
+
+    cadenza::arranger::MidiStyleSectionSpec currentSectionSpec() const
+    {
+        cadenza::arranger::MidiStyleSectionSpec spec;
+        spec.sectionId = currentSectionId();
+        spec.barStart = juce::roundToInt(m_startBar.getValue()) - 1;
+        spec.barCount = juce::roundToInt(m_barCount.getValue());
+        spec.overrideRoot = m_root.getText();
+        spec.overrideQuality = m_quality.getText();
+        return spec;
+    }
+
+    juce::String capturedSectionText(const cadenza::arranger::MidiStyleSectionSpec& spec) const
+    {
+        const int start = spec.barStart + 1;
+        const int end = spec.barStart + std::max(1, spec.barCount);
+        juce::String label;
+        if (spec.sectionId == "intro") label = "Intro";
+        else if (spec.sectionId == "mainB") label = "Main B";
+        else if (spec.sectionId == "mainC") label = "Main C";
+        else if (spec.sectionId == "mainD") label = "Main D";
+        else if (spec.sectionId == "ending") label = "Ending";
+        else label = "Main A";
+        return label + ": bars " + juce::String(start) + "-" + juce::String(end)
+            + "  " + spec.overrideRoot + " " + spec.overrideQuality;
+    }
+
+    void refreshCapturedSectionList()
+    {
+        const auto selectedId = m_capturedSections.getSelectedId();
+        m_capturedSections.clear(juce::dontSendNotification);
+        for (int i = 0; i < static_cast<int>(m_capturedSpecs.size()); ++i)
+            m_capturedSections.addItem(capturedSectionText(m_capturedSpecs[static_cast<std::size_t>(i)]), i + 1);
+        juce::StringArray lines;
+        for (const auto& spec : m_capturedSpecs)
+            lines.add(capturedSectionText(spec));
+        m_capturedSummary.setText(lines.isEmpty() ? "Current range will convert as Main A" : lines.joinIntoString("\n"),
+                                  juce::dontSendNotification);
+        if (!m_capturedSpecs.empty())
+            m_capturedSections.setSelectedId(std::clamp(selectedId, 1, static_cast<int>(m_capturedSpecs.size())),
+                                             juce::dontSendNotification);
+        m_removeSection.setEnabled(!m_capturedSpecs.empty());
+    }
+
+    void addCurrentRangeToStyle()
+    {
+        auto spec = currentSectionSpec();
+        const auto sectionId = spec.sectionId;
+        auto it = std::find_if(m_capturedSpecs.begin(), m_capturedSpecs.end(),
+                               [&](const auto& existing) { return existing.sectionId == sectionId; });
+        if (it != m_capturedSpecs.end())
+            *it = std::move(spec);
+        else
+            m_capturedSpecs.push_back(std::move(spec));
+        refreshCapturedSectionList();
+    }
+
+    void removeSelectedCapturedSection()
+    {
+        const int index = m_capturedSections.getSelectedId() - 1;
+        if (index < 0 || index >= static_cast<int>(m_capturedSpecs.size()))
+            return;
+        m_capturedSpecs.erase(m_capturedSpecs.begin() + index);
+        refreshCapturedSectionList();
     }
 
     void updateNormalizeHint()
@@ -476,17 +608,25 @@ private:
     juce::Label m_countLabel;
     juce::Label m_rootLabel;
     juce::Label m_qualityLabel;
+    juce::Label m_slotLabel;
+    juce::Label m_sectionsLabel;
     juce::Slider m_startBar;
     juce::Slider m_barCount;
     juce::ComboBox m_root;
     juce::ComboBox m_quality;
+    juce::ComboBox m_sectionSlot;
+    juce::ComboBox m_capturedSections;
+    juce::TextEditor m_capturedSummary;
     juce::ToggleButton m_normalizeToC;
+    juce::TextButton m_addToStyle;
+    juce::TextButton m_removeSection;
     juce::TextButton m_preview;
     juce::TextButton m_prevSection;
     juce::TextButton m_nextSection;
     juce::TextButton m_detect;
     juce::TextButton m_convert;
     juce::TextButton m_cancel;
+    std::vector<cadenza::arranger::MidiStyleSectionSpec> m_capturedSpecs;
 };
 
 // Section to start a freshly-loaded style on. Yamaha styles run sparse (Main A)
@@ -1795,12 +1935,14 @@ void MainComponent::openMidiStyleImportChooser()
                     juce::Component::SafePointer<MainComponent> dialogSafe(self);
                     auto* dialog = new MidiStyleImportDialog(
                         midiFile, info,
-                        [dialogSafe, midiFile](cadenza::arranger::MidiStyleConvertOptions options) {
+                        [dialogSafe, midiFile](std::vector<cadenza::arranger::MidiStyleSectionSpec> sections,
+                                               bool normalizeToC) {
                             auto* owner = dialogSafe.getComponent();
                             if (owner == nullptr)
                                 return;
 
-                            auto converted = cadenza::arranger::convertMidiFileToNativeStyle(midiFile, options);
+                            auto converted = cadenza::arranger::convertMidiFileToNativeStyleMultiSection(
+                                midiFile, sections, normalizeToC);
                             if (converted.ok && converted.style != nullptr) {
                                 auto dir = importedStylesDir().getChildFile("MIDI Imports");
                                 dir.createDirectory();
