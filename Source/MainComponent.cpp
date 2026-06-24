@@ -6,6 +6,7 @@
 #include "Audio/MidiChannel.h"
 #include "Midi/LiveMelodyVoice.h"
 #include "Midi/GmInstruments.h"
+#include "Midi/ChordRecognizer.h"
 #include "Arranger/OtsRecall.h"
 #include "Arranger/SectionButtons.h"
 #include "Arranger/SectionFlow.h"
@@ -105,20 +106,54 @@ juce::String midiImportConfidenceLabel(cadenza::arranger::MidiStyleChordConfiden
     return "Low - please check";
 }
 
+cadenza::midi::ChordQuality midiImportQualityForSuffix(const juce::String& suffix) noexcept
+{
+    if (suffix == "m") return cadenza::midi::ChordQuality::Minor;
+    if (suffix == "7") return cadenza::midi::ChordQuality::Dominant7;
+    if (suffix == "Maj7" || suffix == "maj7") return cadenza::midi::ChordQuality::Major7;
+    if (suffix == "m7") return cadenza::midi::ChordQuality::Minor7;
+    if (suffix == "sus4") return cadenza::midi::ChordQuality::Sus4;
+    if (suffix == "dim") return cadenza::midi::ChordQuality::Diminished;
+    if (suffix == "aug") return cadenza::midi::ChordQuality::Augmented;
+    return cadenza::midi::ChordQuality::Major;
+}
+
+int keyNameToPitchClass(const std::string& key) noexcept
+{
+    static const std::string names[12] = {
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+    };
+    for (int i = 0; i < 12; ++i)
+        if (names[i] == key)
+            return i;
+    if (key == "Eb") return 3;
+    if (key == "Bb") return 10;
+    return 0;
+}
+
 class MidiStyleImportDialog final : public juce::Component
 {
 public:
     using ConvertCallback = std::function<void(cadenza::arranger::MidiStyleConvertOptions)>;
+    using PreviewCallback = std::function<bool(cadenza::arranger::MidiStyleConvertOptions,
+                                               cadenza::midi::Chord)>;
+    using StopPreviewCallback = std::function<void()>;
 
     MidiStyleImportDialog(juce::File midiFile,
                           cadenza::arranger::MidiStyleImportInfo initialInfo,
-                          ConvertCallback callback)
+                          ConvertCallback callback,
+                          PreviewCallback previewCallback,
+                          StopPreviewCallback stopPreviewCallback)
         : m_midiFile(std::move(midiFile)),
           m_info(std::move(initialInfo)),
-          m_onConvert(std::move(callback))
+          m_onConvert(std::move(callback)),
+          m_onPreview(std::move(previewCallback)),
+          m_onStopPreview(std::move(stopPreviewCallback))
     {
+        addAndMakeVisible(m_fileHeading);
         addAndMakeVisible(m_summary);
         addAndMakeVisible(m_detected);
+        addAndMakeVisible(m_normalizeHint);
         addAndMakeVisible(m_startLabel);
         addAndMakeVisible(m_countLabel);
         addAndMakeVisible(m_rootLabel);
@@ -128,10 +163,14 @@ public:
         addAndMakeVisible(m_root);
         addAndMakeVisible(m_quality);
         addAndMakeVisible(m_normalizeToC);
+        addAndMakeVisible(m_preview);
+        addAndMakeVisible(m_prevSection);
+        addAndMakeVisible(m_nextSection);
         addAndMakeVisible(m_detect);
         addAndMakeVisible(m_convert);
         addAndMakeVisible(m_cancel);
 
+        m_fileHeading.setText("Importing: " + m_midiFile.getFileName(), juce::dontSendNotification);
         m_startLabel.setText("Start bar", juce::dontSendNotification);
         m_countLabel.setText("Bars", juce::dontSendNotification);
         m_rootLabel.setText("Root", juce::dontSendNotification);
@@ -151,35 +190,45 @@ public:
             m_quality.addItem(qualities[i], i + 1);
 
         m_detect.setButtonText("Detect");
+        m_preview.setButtonText("Preview");
+        m_prevSection.setButtonText("Prev");
+        m_nextSection.setButtonText("Next");
         m_convert.setButtonText("Convert");
         m_cancel.setButtonText("Cancel");
-        m_normalizeToC.setButtonText("Play in C (normalize) - easier to play");
+        m_normalizeToC.setButtonText("Play in C (easy white-key chords)");
         m_normalizeToC.setToggleState(true, juce::dontSendNotification);
 
         applyThemeColours();
 
         m_detect.onClick = [this] { refreshDetection(); };
+        m_preview.onClick = [this] { togglePreview(); };
+        m_prevSection.onClick = [this] { stepSection(-1); };
+        m_nextSection.onClick = [this] { stepSection(1); };
+        m_root.onChange = [this] { updateNormalizeHint(); };
+        m_quality.onChange = [this] { updateNormalizeHint(); };
+        m_normalizeToC.onClick = [this] { updateNormalizeHint(); };
         m_convert.onClick = [this] {
+            stopPreview();
             if (m_onConvert) {
-                cadenza::arranger::MidiStyleConvertOptions options;
-                options.barStart = juce::roundToInt(m_startBar.getValue()) - 1;
-                options.barCount = juce::roundToInt(m_barCount.getValue());
-                options.overrideSourceRoot = std::max(0, m_root.getSelectedId() - 1);
-                options.overrideSourceChord = midiImportQualitySuffix(m_quality.getText());
-                options.normalizeToC = m_normalizeToC.getToggleState();
-                m_onConvert(options);
+                m_onConvert(currentConvertOptions(m_normalizeToC.getToggleState()));
             }
             if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
                 dw->exitModalState(1);
         };
         m_cancel.onClick = [this] {
+            stopPreview();
             if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
                 dw->exitModalState(0);
         };
 
         configureRangeControls();
         refreshDetection();
-        setSize(460, 312);
+        setSize(640, 390);
+    }
+
+    ~MidiStyleImportDialog() override
+    {
+        stopPreview();
     }
 
     void paint(juce::Graphics& g) override
@@ -190,7 +239,8 @@ public:
     void resized() override
     {
         auto r = getLocalBounds().reduced(16);
-        m_summary.setBounds(r.removeFromTop(42));
+        m_fileHeading.setBounds(r.removeFromTop(26));
+        m_summary.setBounds(r.removeFromTop(34));
         m_detected.setBounds(r.removeFromTop(28));
         r.removeFromTop(8);
 
@@ -211,6 +261,15 @@ public:
 
         r.removeFromTop(10);
         m_normalizeToC.setBounds(r.removeFromTop(28));
+        m_normalizeHint.setBounds(r.removeFromTop(34));
+
+        r.removeFromTop(8);
+        row = r.removeFromTop(32);
+        m_preview.setBounds(row.removeFromLeft(104));
+        row.removeFromLeft(10);
+        m_prevSection.setBounds(row.removeFromLeft(72));
+        row.removeFromLeft(8);
+        m_nextSection.setBounds(row.removeFromLeft(72));
 
         r.removeFromTop(10);
         row = r.removeFromTop(32);
@@ -227,9 +286,12 @@ private:
         const auto text = cadenza::ui::CadenzaLookAndFeel::textMain();
         const auto value = cadenza::ui::CadenzaLookAndFeel::cream();
         const auto accent = cadenza::ui::CadenzaLookAndFeel::accent();
+        const auto dim = cadenza::ui::CadenzaLookAndFeel::textDim();
 
+        m_fileHeading.setColour(juce::Label::textColourId, value);
         m_summary.setColour(juce::Label::textColourId, value);
         m_detected.setColour(juce::Label::textColourId, accent);
+        m_normalizeHint.setColour(juce::Label::textColourId, dim);
         m_startLabel.setColour(juce::Label::textColourId, text);
         m_countLabel.setColour(juce::Label::textColourId, text);
         m_rootLabel.setColour(juce::Label::textColourId, text);
@@ -267,6 +329,8 @@ private:
     {
         clampBarCountToAvailable();
         refreshDetection();
+        if (m_previewing)
+            startPreview();
     }
 
     void refreshDetection()
@@ -277,6 +341,7 @@ private:
             juce::roundToInt(m_startBar.getValue()) - 1,
             juce::roundToInt(m_barCount.getValue()));
         applyInfoToLabels(true);
+        updateStepButtons();
     }
 
     void applyInfoToLabels(bool updateSelectors)
@@ -310,13 +375,103 @@ private:
             m_root.setSelectedId(midiImportRootIndex(root) + 1, juce::dontSendNotification);
             m_quality.setSelectedId(midiImportQualityId(quality), juce::dontSendNotification);
         }
+        updateNormalizeHint();
+    }
+
+    cadenza::arranger::MidiStyleConvertOptions currentConvertOptions(bool normalizeToC) const
+    {
+        cadenza::arranger::MidiStyleConvertOptions options;
+        options.barStart = juce::roundToInt(m_startBar.getValue()) - 1;
+        options.barCount = juce::roundToInt(m_barCount.getValue());
+        options.overrideSourceRoot = std::max(0, m_root.getSelectedId() - 1);
+        options.overrideSourceChord = midiImportQualitySuffix(m_quality.getText());
+        options.normalizeToC = normalizeToC;
+        return options;
+    }
+
+    void updateNormalizeHint()
+    {
+        const auto root = m_root.getText().isNotEmpty()
+            ? m_root.getText()
+            : juce::String(midiImportRootName(std::max(0, m_root.getSelectedId() - 1)));
+        const auto quality = m_quality.getText().isNotEmpty() ? m_quality.getText() : "maj";
+        if (m_normalizeToC.getToggleState()) {
+            m_normalizeHint.setText(
+                "You'll play this style in C (easy). Use Transpose to reach the song's key (" + root + ").",
+                juce::dontSendNotification);
+        } else {
+            m_normalizeHint.setText(
+                "You'll play this style in the song's key: " + root + " " + quality + ".",
+                juce::dontSendNotification);
+        }
+    }
+
+    cadenza::midi::Chord selectedPreviewChord() const
+    {
+        cadenza::midi::Chord chord;
+        chord.rootPitchClass = std::max(0, m_root.getSelectedId() - 1) % 12;
+        chord.quality = midiImportQualityForSuffix(midiImportQualitySuffix(m_quality.getText()));
+        return chord;
+    }
+
+    void togglePreview()
+    {
+        if (m_previewing)
+            stopPreview();
+        else
+            startPreview();
+    }
+
+    void startPreview()
+    {
+        if (!m_onPreview)
+            return;
+        m_previewing = m_onPreview(currentConvertOptions(false), selectedPreviewChord());
+        m_preview.setButtonText(m_previewing ? "Stop" : "Preview");
+    }
+
+    void stopPreview()
+    {
+        if (!m_previewing)
+            return;
+        if (m_onStopPreview)
+            m_onStopPreview();
+        m_previewing = false;
+        m_preview.setButtonText("Preview");
+    }
+
+    void stepSection(int direction)
+    {
+        const int total = std::max(1, m_info.totalBars);
+        const int count = std::max(1, juce::roundToInt(m_barCount.getValue()));
+        const int current = std::clamp(juce::roundToInt(m_startBar.getValue()), 1, total);
+        const int maxStart = std::max(1, total - count + 1);
+        const int next = std::clamp(current + direction * count, 1, maxStart);
+        if (next == current)
+            return;
+        m_startBar.setValue(next, juce::sendNotificationSync);
+    }
+
+    void updateStepButtons()
+    {
+        const int total = std::max(1, m_info.totalBars);
+        const int count = std::max(1, juce::roundToInt(m_barCount.getValue()));
+        const int current = std::clamp(juce::roundToInt(m_startBar.getValue()), 1, total);
+        const int maxStart = std::max(1, total - count + 1);
+        m_prevSection.setEnabled(current > 1);
+        m_nextSection.setEnabled(current < maxStart);
     }
 
     juce::File m_midiFile;
     cadenza::arranger::MidiStyleImportInfo m_info;
     ConvertCallback m_onConvert;
+    PreviewCallback m_onPreview;
+    StopPreviewCallback m_onStopPreview;
+    bool m_previewing = false;
+    juce::Label m_fileHeading;
     juce::Label m_summary;
     juce::Label m_detected;
+    juce::Label m_normalizeHint;
     juce::Label m_startLabel;
     juce::Label m_countLabel;
     juce::Label m_rootLabel;
@@ -326,6 +481,9 @@ private:
     juce::ComboBox m_root;
     juce::ComboBox m_quality;
     juce::ToggleButton m_normalizeToC;
+    juce::TextButton m_preview;
+    juce::TextButton m_prevSection;
+    juce::TextButton m_nextSection;
     juce::TextButton m_detect;
     juce::TextButton m_convert;
     juce::TextButton m_cancel;
@@ -1530,6 +1688,83 @@ void MainComponent::openStyleFileChooser()
         });
 }
 
+bool MainComponent::previewMidiStyleImport(const juce::File& file,
+                                           const cadenza::arranger::MidiStyleConvertOptions& options,
+                                           const cadenza::midi::Chord& sourceChord)
+{
+    stopMidiStyleImportPreview();
+
+    auto previewOptions = options;
+    previewOptions.normalizeToC = false;
+    if (previewOptions.sectionName.isEmpty())
+        previewOptions.sectionName = "mainA";
+
+    auto converted = cadenza::arranger::convertMidiFileToNativeStyle(file, previewOptions);
+    if (!converted.ok || converted.style == nullptr) {
+        juce::String status = "MIDI style preview failed";
+        if (!converted.warnings.isEmpty())
+            status += ": " + converted.warnings.joinIntoString("; ");
+        if (m_panel)
+            m_panel->setRecorderState(false, false, status);
+        juce::Logger::writeToLog("[Cadenza] " + status);
+        return false;
+    }
+
+    m_midiImportPreviewPreviousStyle = m_styleEngine.currentStyle();
+    m_midiImportPreviewPreviousSection = m_styleEngine.currentSection();
+    m_midiImportPreviewPreviousMain = m_currentMain;
+    m_midiImportPreviewWasPlaying = m_audio.transport().playing();
+    m_midiImportPreviewActive = true;
+
+    auto previewStyle = std::shared_ptr<const cadenza::arranger::Style>(std::move(converted.style));
+    const auto previewSection = previewOptions.sectionName.toStdString();
+
+    m_audio.stop();
+    m_styleEngine.allNotesOff();
+    m_audio.allNotesOff();
+    m_styleEngine.setGlobalTranspose(0);
+    m_styleEngine.setKeyTonic(0);
+    m_styleEngine.setChord(sourceChord);
+    m_styleEngine.setStyle(std::move(previewStyle));
+    m_styleEngine.setSection(previewSection);
+    m_audio.play();
+    return true;
+}
+
+void MainComponent::stopMidiStyleImportPreview()
+{
+    if (!m_midiImportPreviewActive)
+        return;
+
+    const auto previousStyle = std::move(m_midiImportPreviewPreviousStyle);
+    const auto previousSection = m_midiImportPreviewPreviousSection;
+    const auto previousMain = m_midiImportPreviewPreviousMain;
+    const bool wasPlaying = m_midiImportPreviewWasPlaying;
+
+    m_midiImportPreviewActive = false;
+    m_midiImportPreviewPreviousSection.clear();
+    m_midiImportPreviewPreviousMain.clear();
+    m_midiImportPreviewWasPlaying = false;
+
+    m_audio.stop();
+    m_styleEngine.allNotesOff();
+    m_audio.allNotesOff();
+    m_styleEngine.setStyle(previousStyle);
+    if (previousStyle != nullptr && !previousSection.empty())
+        m_styleEngine.setSection(previousSection);
+    m_currentMain = previousMain.empty() ? m_currentMain : previousMain;
+
+    m_styleEngine.setGlobalTranspose(m_state.transpose());
+    m_styleEngine.setKeyTonic(keyNameToPitchClass(m_state.key()));
+    if (auto chord = cadenza::midi::parseChordSymbol(m_state.chord()))
+        m_styleEngine.setChord(*chord);
+    else
+        m_styleEngine.setChord({});
+
+    if (wasPlaying && previousStyle != nullptr)
+        m_audio.play();
+}
+
 void MainComponent::openMidiStyleImportChooser()
 {
     const auto startDir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
@@ -1611,6 +1846,16 @@ void MainComponent::openMidiStyleImportChooser()
                                     owner->m_panel->setRecorderState(false, false, status);
                                 juce::Logger::writeToLog("[Cadenza] " + status);
                             }
+                        },
+                        [dialogSafe, midiFile](cadenza::arranger::MidiStyleConvertOptions options,
+                                               cadenza::midi::Chord sourceChord) {
+                            if (auto* owner = dialogSafe.getComponent())
+                                return owner->previewMidiStyleImport(midiFile, options, sourceChord);
+                            return false;
+                        },
+                        [dialogSafe] {
+                            if (auto* owner = dialogSafe.getComponent())
+                                owner->stopMidiStyleImportPreview();
                         });
 
                     juce::DialogWindow::LaunchOptions opts;

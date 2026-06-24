@@ -11,6 +11,7 @@
 #include "Arranger/StyleLibraryIndex.h"
 #include "Arranger/SongPlayer.h"
 #include "Arranger/StyleRecorder.h"
+#include "Arranger/MidiStyleConverter.h"
 
 #include <atomic>
 #include "Settings/SettingsStore.h"
@@ -94,6 +95,10 @@ private:
     void startFadeOut();                           // fade the master out, then stop
     void executeControlCommand(const std::string& command);  // run a MIDI-mapped command
     bool loadAndApplyStyleFile(const juce::File& file);
+    bool previewMidiStyleImport(const juce::File& file,
+                                const cadenza::arranger::MidiStyleConvertOptions& options,
+                                const cadenza::midi::Chord& sourceChord);
+    void stopMidiStyleImportPreview();
     bool loadAndApplySongFile(const juce::File& file);
     bool selectStyleById(const std::string& styleId);
     bool analyzeAudioFile(const juce::File& file);
@@ -168,6 +173,11 @@ private:
     // Live sections: one-shot returns / ending stops are sequenced inside the
     // StyleEngine (sample-tight); we only track the last Main as the return target.
     std::string m_currentMain = "mainA";
+    std::shared_ptr<const cadenza::arranger::Style> m_midiImportPreviewPreviousStyle;
+    std::string m_midiImportPreviewPreviousSection;
+    std::string m_midiImportPreviewPreviousMain;
+    bool m_midiImportPreviewActive = false;
+    bool m_midiImportPreviewWasPlaying = false;
 
     // Last Main that OTS Link applied, so a fill returning to the same Main
     // doesn't re-trigger the OTS (which would undo manual voice tweaks).
