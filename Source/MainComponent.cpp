@@ -154,6 +154,7 @@ public:
         addAndMakeVisible(m_fileHeading);
         addAndMakeVisible(m_summary);
         addAndMakeVisible(m_detected);
+        addAndMakeVisible(m_chordWarning);
         addAndMakeVisible(m_normalizeHint);
         addAndMakeVisible(m_startLabel);
         addAndMakeVisible(m_countLabel);
@@ -211,6 +212,7 @@ public:
         m_autoSplit.setButtonText("Auto-split into sections");
         m_removeSection.setButtonText("Remove");
         m_sectionsLabel.setText("Style sections", juce::dontSendNotification);
+        m_chordWarning.setVisible(false);
         m_capturedSummary.setReadOnly(true);
         m_capturedSummary.setMultiLine(true);
         m_capturedSummary.setScrollbarsShown(true);
@@ -258,7 +260,7 @@ public:
         configureRangeControls();
         refreshDetection();
         refreshCapturedSectionList();
-        setSize(680, 540);
+        setSize(680, 564);
     }
 
     ~MidiStyleImportDialog() override
@@ -277,6 +279,8 @@ public:
         m_fileHeading.setBounds(r.removeFromTop(26));
         m_summary.setBounds(r.removeFromTop(34));
         m_detected.setBounds(r.removeFromTop(28));
+        if (m_chordWarning.isVisible())
+            m_chordWarning.setBounds(r.removeFromTop(24));
         r.removeFromTop(8);
 
         auto row = r.removeFromTop(34);
@@ -344,6 +348,8 @@ private:
         m_fileHeading.setColour(juce::Label::textColourId, value);
         m_summary.setColour(juce::Label::textColourId, value);
         m_detected.setColour(juce::Label::textColourId, accent);
+        m_chordWarning.setColour(juce::Label::textColourId,
+                                 cadenza::ui::CadenzaLookAndFeel::led().withMultipliedAlpha(0.92f));
         m_normalizeHint.setColour(juce::Label::textColourId, dim);
         m_startLabel.setColour(juce::Label::textColourId, text);
         m_countLabel.setColour(juce::Label::textColourId, text);
@@ -429,6 +435,13 @@ private:
                     ? cadenza::ui::CadenzaLookAndFeel::goldBright()
                     : cadenza::ui::CadenzaLookAndFeel::accent();
         m_detected.setColour(juce::Label::textColourId, detectedColour);
+        m_chordWarning.setText(
+            m_info.rangeChangesChord
+                ? "WARNING: range changes chords - use ONE chord per style section. Try fewer bars (1-2)."
+                : juce::String(),
+            juce::dontSendNotification);
+        m_chordWarning.setVisible(m_info.rangeChangesChord);
+        resized();
 
         if (updateSelectors) {
             m_root.setSelectedId(midiImportRootIndex(root) + 1, juce::dontSendNotification);
@@ -682,6 +695,7 @@ private:
     juce::Label m_fileHeading;
     juce::Label m_summary;
     juce::Label m_detected;
+    juce::Label m_chordWarning;
     juce::Label m_normalizeHint;
     juce::Label m_startLabel;
     juce::Label m_countLabel;
@@ -2004,7 +2018,7 @@ void MainComponent::openMidiStyleImportChooser()
 
             const auto midiFile = chooser.getResult();
             if (midiFile.existsAsFile()) {
-                auto info = cadenza::arranger::inspectMidiFileForStyleImport(midiFile, 0, 4);
+                auto info = cadenza::arranger::inspectMidiFileForStyleImport(midiFile, 0, 2);
                 if (!info.ok) {
                     juce::String status = "MIDI style import failed";
                     if (!info.warnings.isEmpty())

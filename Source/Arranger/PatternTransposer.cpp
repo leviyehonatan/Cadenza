@@ -311,6 +311,20 @@ int fitToChordTones(int pitch, int rootPc, cadenza::midi::ChordQuality quality) 
     return snapToMask(pitch, rootPc, mask);
 }
 
+std::optional<int> fitChordRoleFromAnchor(int anchor,
+                                          NoteRole role,
+                                          const TransposeContext& ctx,
+                                          const YamahaChannelPolicy& policy) noexcept
+{
+    const int interval = chordIntervalForRole(ctx.chord.quality, role);
+    const int targetPc = (ctx.chord.rootPitchClass + interval) % 12;
+    const int anchorPc = ((anchor % 12) + 12) % 12;
+    int chordToneDelta = ((targetPc - anchorPc) % 12 + 12) % 12;
+    if (chordToneDelta > 6)
+        chordToneDelta -= 12;
+    return pitchWithPolicyLimits(anchor + chordToneDelta, ctx, policy);
+}
+
 std::optional<int> transposeNote(const PatternNote& note,
                                  const TransposeContext& ctx,
                                  const YamahaChannelPolicy* policy)
@@ -373,13 +387,7 @@ std::optional<int> transposeNote(const PatternNote& note,
         // This avoids octave inversions when the root delta and a quality change
         // (for example C major -> G minor) cross the nearest-tone fold boundary.
         const int anchor = note.pitch + rootDeltaForPolicy(ctx, *policy);
-        const int interval = chordIntervalForRole(ctx.chord.quality, note.role);
-        const int targetPc = (ctx.chord.rootPitchClass + interval) % 12;
-        const int anchorPc = ((anchor % 12) + 12) % 12;
-        int chordToneDelta = ((targetPc - anchorPc) % 12 + 12) % 12;
-        if (chordToneDelta > 6)
-            chordToneDelta -= 12;
-        return pitchWithPolicyLimits(anchor + chordToneDelta, ctx, *policy);
+        return fitChordRoleFromAnchor(anchor, note.role, ctx, *policy);
     }
 
     if (policy->bassOn && note.role == NoteRole::ChordRoot) {
@@ -406,6 +414,10 @@ std::optional<int> transposeNote(const PatternNote& note,
     }
 
     if (policy->ntr == YamahaNtr::RootTransposition && policy->ntt == YamahaNtt::Melody) {
+        if (policy->source == YamahaPolicySource::Fallback && isChordRole(note.role)) {
+            const int anchor = note.pitch + rootDeltaForPolicy(ctx, *policy);
+            return fitChordRoleFromAnchor(anchor, note.role, ctx, *policy);
+        }
         return pitchWithPolicyLimits(note.pitch + rootDeltaForPolicy(ctx, *policy), ctx, *policy);
     }
 

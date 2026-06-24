@@ -484,6 +484,31 @@ struct DetectedChord
     juce::String confidenceReason = "No confident chord evidence";
 };
 
+struct PerBarChord
+{
+    int barStart = 0;
+    DetectedChord chord;
+};
+
+struct ChordStability
+{
+    std::vector<PerBarChord> bars;
+    int distinctChordCount = 0;
+    bool changesChord = false;
+};
+
+bool isClearChord(const DetectedChord& chord) noexcept
+{
+    return !chord.fallback && chord.confidence != MidiStyleChordConfidence::Low;
+}
+
+bool sameClearChord(const DetectedChord& a, const DetectedChord& b) noexcept
+{
+    return pc(a.root - b.root) == 0 && a.suffix == b.suffix;
+}
+
+std::vector<SourceGroup*> harmonicGroups(ParsedMidi& parsed);
+
 DetectedChord detectSourceChord(const std::vector<SourceGroup*>& harmonic,
                                 int startTick,
                                 int endTick)
@@ -556,6 +581,39 @@ DetectedChord detectSourceChord(const std::vector<SourceGroup*>& harmonic,
         return detected;
     }
     return {};
+}
+
+ChordStability detectChordStability(ParsedMidi& parsed,
+                                    int barStart,
+                                    int barCount,
+                                    int barTicks)
+{
+    ChordStability result;
+    if (barTicks <= 0 || barCount <= 0)
+        return result;
+
+    auto harmonic = harmonicGroups(parsed);
+    std::vector<DetectedChord> distinct;
+    for (int b = 0; b < barCount; ++b) {
+        const int currentBar = barStart + b;
+        const int startTick = currentBar * barTicks;
+        const int endTick = startTick + barTicks;
+        auto detected = detectSourceChord(harmonic, startTick, endTick);
+        result.bars.push_back({ currentBar, detected });
+
+        if (!isClearChord(detected))
+            continue;
+
+        const auto duplicate = std::find_if(distinct.begin(), distinct.end(), [&](const auto& existing) {
+            return sameClearChord(existing, detected);
+        });
+        if (duplicate == distinct.end())
+            distinct.push_back(std::move(detected));
+    }
+
+    result.distinctChordCount = static_cast<int>(distinct.size());
+    result.changesChord = result.distinctChordCount > 1;
+    return result;
 }
 
 std::vector<SourceGroup*> groupsForSlots(ParsedMidi& parsed,
@@ -949,10 +1007,39 @@ bool groupIsRepeatedFullBand(const BlockGroup& group,
     int full = 0;
     for (const int index : group.memberIndexes) {
         const auto& block = blocks[static_cast<std::size_t>(index)];
-        if (block.fullBand && block.barCount == preferredBlockBars)
+        if (block.fullBand && block.barCount > 0 && block.barCount <= preferredBlockBars)
             ++full;
     }
     return full >= 2;
+}
+
+int chordStableRunLength(ParsedMidi& parsed,
+                         int barStart,
+                         int maxBars,
+                         int totalBars,
+                         int barTicks)
+{
+    if (barTicks <= 0 || maxBars <= 1 || barStart >= totalBars)
+        return 1;
+
+    auto harmonic = harmonicGroups(parsed);
+    DetectedChord reference;
+    bool hasReference = false;
+    int count = 0;
+    for (; count < maxBars && barStart + count < totalBars; ++count) {
+        const int currentBar = barStart + count;
+        const auto detected = detectSourceChord(harmonic, currentBar * barTicks, (currentBar + 1) * barTicks);
+        if (isClearChord(detected)) {
+            if (hasReference && !sameClearChord(reference, detected))
+                break;
+            if (!hasReference) {
+                reference = detected;
+                hasReference = true;
+            }
+        }
+    }
+
+    return std::max(1, count);
 }
 
 MidiStyleSectionSpec specForBlock(const juce::String& sectionId, const BlockFingerprint& block)
@@ -1096,7 +1183,14 @@ BuiltSection buildSectionFromRange(ParsedMidi& parsed,
         detected.root = pc(*overrideRoot);
     if (overrideQuality)
         detected.suffix = overrideQuality->toStdString();
-    detected.fallback = !overrideRoot && !overrideQuality && detected.fallback;
+    const bool hasValidOverride = overrideRoot || overrideQuality;
+    if (!hasValidOverride && detected.confidence == MidiStyleChordConfidence::Low) {
+        detected.root = 0;
+        detected.suffix.clear();
+        detected.fallback = true;
+    } else {
+        detected.fallback = !hasValidOverride && detected.fallback;
+    }
     if (detected.fallback)
         built.warnings.add("Could not confidently detect source chord for "
                            + (spec.sectionId.isNotEmpty() ? spec.sectionId : "mainA")
@@ -1230,6 +1324,19 @@ MidiStyleImportInfo inspectMidiFileForStyleImport(const juce::File& midi,
     if (detected.fallback)
         info.warnings.add("Could not confidently detect source chord; using C major fallback");
 
+    const auto stability = detectChordStability(*parsed, clampedStart, clampedCount, barTicks);
+    info.rangeChangesChord = stability.changesChord;
+    info.distinctChordCount = stability.distinctChordCount;
+    for (const auto& bar : stability.bars) {
+        if (isClearChord(bar.chord)) {
+            info.perBarChords.add("Bar " + juce::String(bar.barStart + 1) + ": "
+                                  + juce::String(rootName(bar.chord.root)) + " "
+                                  + qualityLabelForSuffix(bar.chord.suffix));
+        } else {
+            info.perBarChords.add("Bar " + juce::String(bar.barStart + 1) + ": unclear");
+        }
+    }
+
     info.ok = true;
     return info;
 }
@@ -1257,13 +1364,16 @@ MidiStyleAutoSplitResult autoSplitMidiFileForStyleImport(const juce::File& midi,
     int blockBars = std::clamp(std::max(1, options.blockBars), 1, std::max(1, totalBars));
     if (totalBars < blockBars * 2 && totalBars >= 2)
         blockBars = 2;
+    blockBars = std::min(blockBars, 4);
 
     std::vector<BlockFingerprint> blocks;
-    for (int start = 0; start < totalBars; start += blockBars) {
-        const int count = std::min(blockBars, totalBars - start);
+    for (int start = 0; start < totalBars;) {
+        const int count = chordStableRunLength(*parsed, start, std::min(blockBars, totalBars - start),
+                                               totalBars, barTicks);
         if (count <= 0)
             break;
         blocks.push_back(fingerprintBlock(*parsed, start, count, barTicks));
+        start += count;
     }
 
     if (blocks.empty()) {

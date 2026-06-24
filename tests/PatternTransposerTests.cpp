@@ -158,9 +158,39 @@ void rootTranspositionMelodyUsesRootDelta()
 
     expect(transposeNote(n, ctxFor(5, ChordQuality::Minor), &policy).value() == 69, "melody C source to F shifts +5");
     expect(transposeNote(n, ctxFor(2, ChordQuality::Dominant7), &policy).value() == 66, "melody C source to D shifts +2");
+    expect(transposeNote(n, ctxFor(9, ChordQuality::Minor), &policy).value() == 61,
+           "real CASM RT+Melody chord-role note keeps root-shift behavior");
 
     n.pitch = 126;
     expect(transposeNote(n, ctxFor(5, ChordQuality::Major), &policy).value() == 127, "melody shift clamps high");
+}
+
+void fallbackRootTranspositionMelodyFitsChordRoles()
+{
+    auto policy = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Melody, "C");
+    policy.source = YamahaPolicySource::Fallback;
+
+    auto third = noteOf(NoteRole::Chord3, 64);
+    expect(transposeNote(third, ctxFor(9, ChordQuality::Minor), &policy).value() == 60,
+           "fallback RT+Melody Chord3 E4 over Am fits to C4");
+
+    auto seventh = noteOf(NoteRole::Chord7, 71);
+    expect(transposeNote(seventh, ctxFor(7, ChordQuality::Dominant7), &policy).value() == 65,
+           "fallback RT+Melody Chord7 B4 over G7 fits to F4");
+}
+
+void fallbackRootTranspositionColorTonesStayInKey()
+{
+    auto melody = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Melody, "C");
+    melody.source = YamahaPolicySource::Fallback;
+    auto chord = policyOf(YamahaNtr::RootTransposition, YamahaNtt::Chord, "C");
+    chord.source = YamahaPolicySource::Fallback;
+    auto color = noteOf(NoteRole::ChordColor, 64);
+
+    expect(transposeNote(color, ctxFor(9, ChordQuality::Minor), &melody).value() == 60,
+           "fallback RT+Melody ChordColor still fits the played chord scale");
+    expect(transposeNote(color, ctxFor(9, ChordQuality::Minor), &chord).value() == 60,
+           "fallback RT+Chord ChordColor still fits the played chord scale");
 }
 
 void rootFixedChordPolicyKeepsChordRoles()
@@ -540,6 +570,8 @@ int main()
     rangeClipping();
     rootFixedBypassKeepsPhrasePitch();
     rootTranspositionMelodyUsesRootDelta();
+    fallbackRootTranspositionMelodyFitsChordRoles();
+    fallbackRootTranspositionColorTonesStayInKey();
     rootFixedChordPolicyKeepsChordRoles();
     bassOnChordRootFollowsRoot();
     unknownPolicyUsesCurrentBehavior();

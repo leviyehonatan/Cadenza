@@ -53,6 +53,9 @@ struct MidiStyleImportInfo
     int totalBars = 1;
     MidiStyleRecommendedRange recommendedRange;
     MidiStyleDetectedChord detectedChord;
+    bool rangeChangesChord = false;
+    int distinctChordCount = 0;
+    juce::StringArray perBarChords;
     juce::StringArray warnings;
     bool ok = false;
 };

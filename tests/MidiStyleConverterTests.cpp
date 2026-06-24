@@ -248,6 +248,25 @@ void makeBassDrumsOnlyFixture(juce::MidiFile& midi)
     midi.addTrack(bass);
 }
 
+void makeGPowerShapeFixture(juce::MidiFile& midi)
+{
+    constexpr int ppq = 480;
+    constexpr int bar = ppq * 4;
+
+    juce::MidiMessageSequence bass;
+    addProgram(bass, 2, 33);
+    addNote(bass, 2, 0, bar * 4, 43, 104);
+
+    juce::MidiMessageSequence piano;
+    addProgram(piano, 3, 0);
+    addNote(piano, 3, 0, bar * 4, 55, 88);
+    addNote(piano, 3, 0, bar * 4, 62, 82);
+
+    midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(bass);
+    midi.addTrack(piano);
+}
+
 void addFullBandBars(juce::MidiMessageSequence& drums,
                      juce::MidiMessageSequence& bass,
                      juce::MidiMessageSequence& piano,
@@ -304,6 +323,46 @@ void makeAutoTwoDistinctRepeatedMainsFixture(juce::MidiFile& midi)
 
     addFullBandBars(drums, bass, piano, 0, 8, 60, 64, 67);
     addFullBandBars(drums, bass, piano, 8, 8, 65, 69, 72);
+
+    midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(drums);
+    midi.addTrack(bass);
+    midi.addTrack(piano);
+}
+
+void makeTwoBarChordChangeFixture(juce::MidiFile& midi)
+{
+    constexpr int ppq = 480;
+
+    juce::MidiMessageSequence drums;
+    juce::MidiMessageSequence bass;
+    juce::MidiMessageSequence piano;
+    addProgram(bass, 2, 33);
+    addProgram(piano, 3, 0);
+
+    addFullBandBars(drums, bass, piano, 0, 2, 60, 64, 67);
+    addFullBandBars(drums, bass, piano, 2, 2, 65, 69, 72);
+
+    midi.setTicksPerQuarterNote(ppq);
+    midi.addTrack(drums);
+    midi.addTrack(bass);
+    midi.addTrack(piano);
+}
+
+void makeAutoTwoBarChordChangesFixture(juce::MidiFile& midi)
+{
+    constexpr int ppq = 480;
+
+    juce::MidiMessageSequence drums;
+    juce::MidiMessageSequence bass;
+    juce::MidiMessageSequence piano;
+    addProgram(bass, 2, 33);
+    addProgram(piano, 3, 0);
+
+    addFullBandBars(drums, bass, piano, 0, 2, 60, 64, 67);
+    addFullBandBars(drums, bass, piano, 2, 2, 65, 69, 72);
+    addFullBandBars(drums, bass, piano, 4, 2, 60, 64, 67);
+    addFullBandBars(drums, bass, piano, 6, 2, 65, 69, 72);
 
     midi.setTicksPerQuarterNote(ppq);
     midi.addTrack(drums);
@@ -604,6 +663,38 @@ void testFallbackWarning()
            "fallback policy stores C major");
 }
 
+void testLowConfidenceSourceChordFallsBackUnlessOverridden()
+{
+    juce::MidiFile midi;
+    makeGPowerShapeFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-low-confidence-power", midi);
+
+    auto info = cadenza::arranger::inspectMidiFileForStyleImport(file, 0, 4);
+    expect(info.ok, "power-shape fixture inspects");
+    expect(info.detectedChord.confidence == cadenza::arranger::MidiStyleChordConfidence::Low,
+           "no-third power shape reports low source-chord confidence");
+
+    cadenza::arranger::MidiStyleConvertOptions options;
+    options.normalizeToC = false;
+    auto result = cadenza::arranger::convertMidiFileToNativeStyle(file, options);
+    expect(result.ok && result.style != nullptr, "low-confidence power-shape fixture converts");
+    expect(result.warnings.joinIntoString(" ").containsIgnoreCase("C major fallback"),
+           "low-confidence source chord warns and falls back to C major");
+    const auto* bass = findPart(*result.style, "bass");
+    expect(bass != nullptr && bass->yamahaPolicy
+               && bass->yamahaPolicy->sourceRoot.value_or("") == "C"
+               && bass->yamahaPolicy->sourceChord.value_or("") == "",
+           "low-confidence source chord is not silently stored as G power");
+
+    options.overrideSourceRoot = 7;
+    auto overridden = cadenza::arranger::convertMidiFileToNativeStyle(file, options);
+    expect(overridden.ok && overridden.style != nullptr, "low-confidence fixture converts with root override");
+    const auto* overriddenBass = findPart(*overridden.style, "bass");
+    expect(overriddenBass != nullptr && overriddenBass->yamahaPolicy
+               && overriddenBass->yamahaPolicy->sourceRoot.value_or("") == "G",
+           "valid override wins even when detected confidence is low");
+}
+
 void testInspectAutoRangeSkipsSparseIntro()
 {
     juce::MidiFile midi;
@@ -615,6 +706,30 @@ void testInspectAutoRangeSkipsSparseIntro()
     expect(info.recommendedRange.barStart == 4,
            "auto-range starts in the full-band region instead of bar 1");
     expect(info.recommendedRange.barCount == 4, "auto-range keeps requested four-bar length");
+}
+
+void testInspectReportsChordChangingRange()
+{
+    juce::MidiFile midi;
+    makeTwoBarChordChangeFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-chord-changing-range", midi);
+
+    auto info = cadenza::arranger::inspectMidiFileForStyleImport(file, 0, 4);
+    expect(info.ok, "chord-changing range inspects");
+    expect(info.rangeChangesChord, "four-bar range with two clear chords reports a chord change");
+    expect(info.distinctChordCount >= 2, "chord-changing range reports multiple distinct chords");
+}
+
+void testInspectReportsSingleChordRange()
+{
+    juce::MidiFile midi;
+    makeCmajorFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-single-chord-range", midi);
+
+    auto info = cadenza::arranger::inspectMidiFileForStyleImport(file, 0, 4);
+    expect(info.ok, "single-chord range inspects");
+    expect(!info.rangeChangesChord, "four-bar range on one clear chord does not report a change");
+    expect(info.distinctChordCount == 1, "single-chord range reports one distinct chord");
 }
 
 void testAutoSplitFindsMainAfterSparseIntro()
@@ -656,6 +771,24 @@ void testAutoSplitFindsDistinctRepeatedMainB()
     expect(mainA != result.sections.end() && mainB != result.sections.end(),
            "auto-split emits mainA and mainB");
     expect(mainA->barStart != mainB->barStart, "mainB comes from a distinct timeline block");
+}
+
+void testAutoSplitKeepsSectionsChordStable()
+{
+    juce::MidiFile midi;
+    makeAutoTwoBarChordChangesFixture(midi);
+    const auto file = writeMidi("cadenza-midi-style-auto-split-chord-stable", midi);
+
+    auto result = cadenza::arranger::autoSplitMidiFileForStyleImport(file, {});
+    expect(result.ok, "auto-split succeeds when chords change every two bars");
+    expect(!result.sections.empty(), "auto-split emits sections for two-bar chord runs");
+
+    for (const auto& spec : result.sections) {
+        auto info = cadenza::arranger::inspectMidiFileForStyleImport(file, spec.barStart, spec.barCount);
+        expect(info.ok, "auto-split emitted section inspects");
+        expect(!info.rangeChangesChord, "auto-split emitted section stays on one chord");
+        expect(spec.barCount <= 2, "auto-split emitted section is capped to the two-bar chord run");
+    }
 }
 
 void testAutoSplitDoesNotInventIntro()
@@ -733,9 +866,13 @@ int main()
     testInspectReadsEarliestTempo();
     testSmpteRejects();
     testFallbackWarning();
+    testLowConfidenceSourceChordFallsBackUnlessOverridden();
     testInspectAutoRangeSkipsSparseIntro();
+    testInspectReportsChordChangingRange();
+    testInspectReportsSingleChordRange();
     testAutoSplitFindsMainAfterSparseIntro();
     testAutoSplitFindsDistinctRepeatedMainB();
+    testAutoSplitKeepsSectionsChordStable();
     testAutoSplitDoesNotInventIntro();
     testAutoSplitSectionsConvertAndRoundTrip();
     testInspectChordConfidence();
