@@ -17,6 +17,18 @@ constexpr int kMenuSetDefault  = 900004;
 // the on-screen tint lines up with where the host actually routes chord notes.
 constexpr int kKeyboardSplitNote = 60;
 
+juce::String formatTransposeValue(int semitones)
+{
+    static constexpr const char* noteNames[] = {
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+    };
+
+    const int pitchClass = ((semitones % 12) + 12) % 12;
+    const auto signedValue = (semitones > 0 ? juce::String("+") : juce::String())
+                           + juce::String(semitones);
+    return signedValue + "  (" + noteNames[pitchClass] + ")";
+}
+
 void showInstrumentMenu(juce::Component* anchor, int channel,
                         std::function<void(int)> onPick,
                         std::function<void()> onLoadPlugin,
@@ -267,7 +279,7 @@ NativePanel::NativePanel()
     addAndMakeVisible(m_transposeVal);
     m_transposeVal.setJustificationType(juce::Justification::centred);
     m_transposeVal.setColour(juce::Label::textColourId, CadenzaLookAndFeel::cream());
-    m_transposeVal.setText("0", juce::dontSendNotification);
+    m_transposeVal.setText(formatTransposeValue(0), juce::dontSendNotification);
 
     styleCaption(m_octaveCaption, "Octave (live melody)");
     addAndMakeVisible(m_octaveCaption);
@@ -836,7 +848,7 @@ void NativePanel::setChord(const juce::String& chord)
 
 void NativePanel::setTranspose(int semitones)
 {
-    m_transposeVal.setText((semitones > 0 ? "+" : "") + juce::String(semitones), juce::dontSendNotification);
+    m_transposeVal.setText(formatTransposeValue(semitones), juce::dontSendNotification);
 }
 
 void NativePanel::setOctave(int octaves)
@@ -1201,7 +1213,7 @@ void NativePanel::paint(juce::Graphics& g)
             g.drawText(value, col, juce::Justification::centredLeft, false);
         };
         readout("BPM", m_bpmVal.getText(), 58);
-        readout("TRANSPOSE", m_transposeVal.getText(), 92);
+        readout("TRANSPOSE", m_transposeVal.getText(), 112);
         readout("TIME SIGNATURE", "4/4", 116);
 
         auto cpu = r.removeFromLeft(56);
@@ -1491,7 +1503,7 @@ void NativePanel::resized()
             auto tr = col.removeFromTop(28);
             m_transposeCaption.setBounds(tr.removeFromLeft(70));
             m_transposeDown.setBounds(tr.removeFromLeft(30)); tr.removeFromLeft(3);
-            m_transposeVal.setBounds(tr.removeFromLeft(40));  tr.removeFromLeft(3);
+            m_transposeVal.setBounds(tr.removeFromLeft(72));  tr.removeFromLeft(3);
             m_transposeUp.setBounds(tr.removeFromLeft(30));   tr.removeFromLeft(gap * 2);
             m_octaveCaption.setBounds(tr.removeFromLeft(58));
             m_octaveDown.setBounds(tr.removeFromLeft(30));    tr.removeFromLeft(3);
