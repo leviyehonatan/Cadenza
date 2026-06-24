@@ -821,11 +821,40 @@ juce::String boolLiteral(bool value)
 
 juce::String aiAddFillsPrompt()
 {
-    return "Return ONLY a JSON object of NEW sections to ADD to this style: "
-           "{\"sections\":{\"fillAA\":{..},\"fillBB\":{..},\"fillAB\":{..},\"intro\":{..},\"ending\":{..}}}. "
-           "Include fillXX for each existing Main, transition fills fillAB/fillBA where both Mains exist, and intro/ending "
-           "ONLY if missing. Each section uses the same schema as the style's sections (barCount + parts + notes, drums "
-           "absolute). Do NOT include existing sections. Output JSON only.";
+    return R"PROMPT(Return ONLY a JSON object of NEW sections to ADD to this style:
+{"sections":{"fillAA":{..},"fillBB":{..},"fillAB":{..},"intro":{..},"ending":{..}}}.
+Include fillXX for each existing Main, transition fills fillAB/fillBA where both Mains exist, and intro/ending ONLY if missing.
+Each section uses the same schema as the style's sections (barCount + parts + notes, drums absolute).
+Do NOT include existing sections. Output JSON only.
+
+FILL-WRITING:
+- Timing is ticksPerBeat=960. In 4/4: bar=3840, beat=960, 8th=480, 16th=240.
+- Drums must use role "absolute" and GM drum pitches. Reuse each Main section's drum kit/instrument/programs and the existing bass/harmony instruments.
+- A fill is a 1-bar drum-led section that builds tension and announces the section change. It should clearly differ from the steady groove with more movement, crescendo, toms/snare rolls, or pickups, then resolve with CRASH 49 + KICK 36 on beat 1 (tick 0) so the new section lands hard.
+- Build velocity through the bar from about 70/80 up to about 118. Ghost notes can be softer.
+- Transition fills such as fillAB/fillBA may be slightly busier than self-fills such as fillAA/fillBB, but both should still feel genre-aware and playable.
+
+FILL RECIPES (choose and adapt to the style):
+- Rock/pop: stay steady through beats 1-2, then play a descending tom roll over beats 3-4 using toms 48,47,45,43,41 as 8ths/16ths, for example ticks 1920,2160,2400,2640,2880,3120,3360,3600, rising roughly velocity 80->116. Put CRASH 49 + KICK 36 at tick 0 as the resolving downbeat.
+- Funk: busy 16th SNARE 38 with ghost notes around velocity 55 and accents around 110, syncopated kick, a couple of toms near the end, and crash on the resolving downbeat.
+- Disco/dance: keep four-on-the-floor kick, add tom hits plus OPEN HAT 46 on the &s through beat 4, snare 16ths in beat 4, and crash on the resolving downbeat.
+- Ballad: sparse. Use a soft tom or snare pickup on beat 4 around velocity 70-90 plus a cymbal swell/crash on the downbeat.
+
+INTRO/ENDING:
+- Intro should be a short 1-2 bar pickup/build using the style's kit plus a light bass/chord lead-in.
+- Ending should be a final cadence: a fill into a strong downbeat hit with CRASH 49 + KICK 36 plus a sustained chord-root/chord-3/chord-5, then space.
+
+WORKED EXAMPLE - sections-only output shape. Adapt this to the current style's tempo, genre, kit, and instruments; do not copy it verbatim if the style calls for a different feel:
+{"sections":{"fillAA":{"barCount":1,"parts":[
+  {"name":"drums","channel":10,"instrument":"Standard Kit","program":0,"notes":[
+    {"tick":0,"duration":120,"pitch":49,"velocity":116,"role":"absolute"},
+    {"tick":0,"duration":120,"pitch":36,"velocity":116,"role":"absolute"},
+    {"tick":1920,"duration":120,"pitch":48,"velocity":92,"role":"absolute"},
+    {"tick":2160,"duration":120,"pitch":47,"velocity":96,"role":"absolute"},
+    {"tick":2400,"duration":120,"pitch":45,"velocity":100,"role":"absolute"},
+    {"tick":2640,"duration":120,"pitch":43,"velocity":104,"role":"absolute"},
+    {"tick":2880,"duration":120,"pitch":41,"velocity":110,"role":"absolute"},
+    {"tick":3360,"duration":120,"pitch":38,"velocity":114,"role":"absolute"} ]}]}}})PROMPT";
 }
 
 juce::String aiPolishPrompt()
