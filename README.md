@@ -1,5 +1,7 @@
 # Cadenza
 
+[![Windows build](https://github.com/Piskocis/Cadenza/actions/workflows/windows.yml/badge.svg)](https://github.com/Piskocis/Cadenza/actions/workflows/windows.yml)
+
 **A free, open-source software arranger workstation for Windows.**
 
 Play chords with your left hand and Cadenza plays a full backing band — drums, bass,
