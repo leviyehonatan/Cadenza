@@ -48,6 +48,7 @@ bool SettingsStore::load()
     m_state.syncroStopOnRelease = root.get("syncroStopOnRelease").asBool(m_state.syncroStopOnRelease);
     m_state.autoFillEnabled = root.get("autoFillEnabled").asBool(m_state.autoFillEnabled);
     m_state.otsLinkEnabled = root.get("otsLinkEnabled").asBool(m_state.otsLinkEnabled);
+    m_state.setupAssistantSeen = root.get("setupAssistantSeen").asBool(m_state.setupAssistantSeen);
     m_state.eqLowDb  = root.get("eqLowDb").asInt(m_state.eqLowDb);
     m_state.eqMidDb  = root.get("eqMidDb").asInt(m_state.eqMidDb);
     m_state.eqHighDb = root.get("eqHighDb").asInt(m_state.eqHighDb);
@@ -180,6 +181,7 @@ bool SettingsStore::save() const
     root["syncroStopOnRelease"] = J::Value::boolean(m_state.syncroStopOnRelease);
     root["autoFillEnabled"] = J::Value::boolean(m_state.autoFillEnabled);
     root["otsLinkEnabled"] = J::Value::boolean(m_state.otsLinkEnabled);
+    root["setupAssistantSeen"] = J::Value::boolean(m_state.setupAssistantSeen);
     root["eqLowDb"]  = J::Value::number(m_state.eqLowDb);
     root["eqMidDb"]  = J::Value::number(m_state.eqMidDb);
     root["eqHighDb"] = J::Value::number(m_state.eqHighDb);

@@ -13,6 +13,7 @@
 #include "UI/CadenzaLookAndFeel.h"
 #include "UI/NativePanel.h"
 #include "UI/StylePartEditor.h"
+#include "UI/FirstLaunchAssistant.h"
 #include "Ai/StyleGenerator.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -1099,6 +1100,15 @@ MainComponent::MainComponent()
     startTimerHz(20);
 
     resized();
+
+    // First-launch Quick Start: shown once, after the window is on screen, so a
+    // new user isn't dropped straight into the dense arranger UI with no guidance.
+    if (m_settings && !m_settings->state().setupAssistantSeen) {
+        juce::Component::SafePointer<MainComponent> safe(this);
+        juce::MessageManager::callAsync([safe] {
+            if (auto* self = safe.getComponent()) self->showFirstLaunchAssistant();
+        });
+    }
 }
 
 MainComponent::~MainComponent()
@@ -1150,6 +1160,105 @@ void MainComponent::showAudioSettings()
     opts.useNativeTitleBar = true;
     opts.resizable = false;
     opts.launchAsync();
+}
+
+namespace
+{
+// A DialogWindow whose title-bar close (X) routes to a callback, so closing the
+// Quick Start panel marks it "seen" exactly like the "Get Started" button does.
+class FirstLaunchWindow final : public juce::DialogWindow
+{
+public:
+    explicit FirstLaunchWindow(std::function<void()> onClose)
+        : juce::DialogWindow("Welcome to Cadenza", juce::Colour(0xff20242e),
+                             /*escapeCloses*/ true, /*nativeTitleBar*/ true),
+          m_onClose(std::move(onClose)) {}
+
+    void closeButtonPressed() override { if (m_onClose) m_onClose(); }
+
+private:
+    std::function<void()> m_onClose;
+};
+}
+
+void MainComponent::showFirstLaunchAssistant()
+{
+    if (m_firstLaunchWindow != nullptr)
+        return;   // already open
+
+    // Live status provider — the assistant polls this so its dots update as the
+    // user fixes things (loads a SoundFont, picks an audio device, etc.).
+    auto provider = [this]() {
+        cadenza::ui::FirstLaunchInputs in;
+        auto* dev = m_audio.deviceManager().getCurrentAudioDevice();
+        in.audioReady      = dev != nullptr;
+        in.audioDeviceName = dev ? dev->getName().toStdString() : std::string();
+        in.synthAvailable  = m_audio.supportsSoundFonts();
+
+        const auto sfPath = m_settings ? m_settings->state().lastSoundFontPath : std::string();
+        in.soundFontLoaded = m_audio.supportsSoundFonts() && !sfPath.empty();
+        in.soundFontName   = sfPath.empty()
+            ? std::string()
+            : juce::File(juce::String(sfPath)).getFileName().toStdString();
+
+        const auto style = m_styleEngine.currentStyle();
+        in.styleLoaded = style != nullptr;
+        in.styleName   = style ? style->name : std::string();
+
+        const auto midis = juce::MidiInput::getAvailableDevices();
+        in.midiConnected   = !midis.isEmpty();
+        in.midiDeviceName  = midis.isEmpty() ? std::string() : midis[0].name.toStdString();
+        return in;
+    };
+
+    cadenza::ui::FirstLaunchAssistant::Callbacks cb;
+    cb.openAudioSettings = [this] { showAudioSettings(); };
+    cb.chooseSoundFont   = [this] { openSoundFontFileChooser(); };
+    cb.loadStyle         = [this] { openStyleFileChooser(); };
+    cb.testSound         = [this] { playTestChord(); };
+    cb.requestClose      = [this] { closeFirstLaunchAssistant(); };
+
+    auto* content = new cadenza::ui::FirstLaunchAssistant(std::move(cb), std::move(provider));
+
+    auto window = std::make_unique<FirstLaunchWindow>([this] { closeFirstLaunchAssistant(); });
+    window->setContentOwned(content, true);
+    window->centreAroundComponent(this, content->getWidth(), content->getHeight());
+    window->setVisible(true);
+    m_firstLaunchWindow = std::move(window);
+}
+
+void MainComponent::closeFirstLaunchAssistant()
+{
+    if (m_settings) {
+        m_settings->state().setupAssistantSeen = true;
+        saveSettings();
+    }
+    // Defer destroying the window — this can be called from inside the window's own
+    // closeButtonPressed(), so we must not delete it synchronously.
+    juce::Component::SafePointer<MainComponent> safe(this);
+    juce::MessageManager::callAsync([safe] {
+        if (auto* self = safe.getComponent()) self->m_firstLaunchWindow.reset();
+    });
+}
+
+void MainComponent::playTestChord()
+{
+    if (!m_audio.supportsSoundFonts()) {
+        juce::Logger::writeToLog("[Cadenza] Test Sound: synth is the silent Null fallback - no audio.");
+        return;
+    }
+    // A short C-major triad on the manual right-hand channel so the user hears
+    // something immediately. This is a direct synth note, not arranger playback.
+    static constexpr int kTestNotes[3] = { 60, 64, 67 };
+    for (int n : kTestNotes)
+        m_audio.noteOn(1, n, 100);
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    juce::Timer::callAfterDelay(700, [safe] {
+        if (auto* self = safe.getComponent())
+            for (int n : kTestNotes)
+                self->m_audio.noteOff(1, n);
+    });
 }
 
 namespace {

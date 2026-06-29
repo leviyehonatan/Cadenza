@@ -84,6 +84,7 @@ struct Settings
     bool syncroStopOnRelease = true;
     bool autoFillEnabled = true;     // pressing a Main while playing fills into it
     bool otsLinkEnabled = false;     // auto-recall OTS 1-4 when Main A-D starts
+    bool setupAssistantSeen = false; // has the first-launch Quick Start been shown?
 
     // Master 3-band EQ gains in dB. Default adds low-end body + a little air so
     // the GM mix isn't flat/thin; the player can retune these.

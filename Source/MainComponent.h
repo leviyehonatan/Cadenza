@@ -65,6 +65,11 @@ private:
     void openSongFileChooser();
     void openChordAnalysisChooser();
     void openPluginFileChooser();
+
+    // First-launch Quick Start assistant.
+    void showFirstLaunchAssistant();
+    void closeFirstLaunchAssistant();
+    void playTestChord();             // a short C-major triad so the user confirms sound
     void choosePartInstrument(int channel);   // load a VST3 instrument onto a mixer channel
     void chooseMasterInstrument();            // load/open/clear the master multitimbral instrument
     void chooseRightLayerInstrument(int layer); // load a VST3 instrument onto a Right 1/2/3 layer
@@ -222,6 +227,9 @@ private:
 
     std::unique_ptr<cadenza::ui::NativePanel> m_panel;
     bool m_aiInFlight = false;
+
+    // First-launch "Quick Start" assistant (shown once; see setupAssistantSeen).
+    std::unique_ptr<juce::DialogWindow> m_firstLaunchWindow;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

@@ -71,6 +71,7 @@ add_library(cadenza_core STATIC
     Source/UI/StylePartBarWorkflow.cpp
     Source/UI/StylePartNoteWorkflow.cpp
     Source/UI/StylePartPianoRollGeometry.cpp
+    Source/UI/FirstLaunchChecklist.cpp
 )
 
 target_include_directories(cadenza_core
@@ -123,6 +124,7 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_part_workflow_tests tests/StylePartBarWorkflowTests.cpp)
     cadenza_add_test(cadenza_note_workflow_tests tests/StylePartNoteWorkflowTests.cpp)
     cadenza_add_test(cadenza_audio_chord_tests tests/AudioChordAnalysisTests.cpp)
+    cadenza_add_test(cadenza_first_launch_tests tests/FirstLaunchChecklistTests.cpp)
 endif()
 
 # ============================================================
@@ -266,6 +268,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
             Source/Arranger/StyleEngine.cpp
             Source/UI/CadenzaLookAndFeel.cpp
             Source/UI/NativePanel.cpp
+            Source/UI/FirstLaunchAssistant.cpp
             Source/UI/StylePartEditor.cpp
             Source/UI/StylePartPatternImport.cpp
             Source/UI/StylePartPianoRoll.cpp
