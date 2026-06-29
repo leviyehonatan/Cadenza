@@ -164,6 +164,7 @@ public:
         std::function<void(int)> onMasterChanged;             // master output volume 0..127
         std::function<void(int)> onDrumsChanged;              // drum channel volume 0..127
         std::function<void(int)> onReverbChanged;             // master reverb amount 0..100
+        std::function<void(bool)> onPolishedMaster;           // Polished Master DSP on/off
         std::function<void(int)> onSplitChanged;              // keyboard split MIDI note
         // Right 1/2/3 layered right-hand voices (layer 0..2).
         std::function<void(int, bool)> onRightEnabled;        // layer, on/off
@@ -239,6 +240,7 @@ public:
     void setMasterVolume(int percent);                   // init the Master knob (no callback)
     void setDrumsLevel(int volume);                      // init the Drums knob (no callback)
     void setReverbAmount(int percent);                   // init the Reverb knob (no callback)
+    void setPolishedMaster(bool on);                     // init the Polished Master toggle (no callback)
     void setSplitPoint(int midiNote);                    // init the split marker (no callback)
     // Init a Right 1/2/3 voice strip (no callback): layer 0..2.
     void setRightVoice(int layer, bool enabled, int program, int volume, int octave);
@@ -421,6 +423,7 @@ private:
     // One Touch Settings (per-style right-hand voice presets).
     juce::Label        m_otsCaption;
     juce::ToggleButton m_otsLink { "OTS Link" };
+    juce::ToggleButton m_polished { "Polished Master" };
     std::array<std::unique_ptr<juce::TextButton>, 4> m_otsButtons;
 
     // Style Recorder (record your own style patterns).

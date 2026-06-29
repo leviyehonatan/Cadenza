@@ -482,6 +482,15 @@ NativePanel::NativePanel()
     addAndMakeVisible(m_reverb);
     eqLabel(m_reverbCap, "Reverb");
 
+    // Polished Master toggle: cleaner brickwall limiter + light glue/air/width.
+    m_polished.setColour(juce::ToggleButton::textColourId, CadenzaLookAndFeel::textDim());
+    m_polished.setTooltip("Polished Master: cleaner, slightly louder, less harsh master output "
+                          "(clean brickwall limiter + gentle glue). Toggle off to A/B the raw chain.");
+    m_polished.onClick = [this] {
+        if (m_cb.onPolishedMaster) m_cb.onPolishedMaster(m_polished.getToggleState());
+    };
+    addAndMakeVisible(m_polished);
+
     // --- Right 1/2/3 layered right-hand voices ---
     styleCaption(m_rightCaption, "Voices (Left + Right 1-3)");
     addAndMakeVisible(m_rightCaption);
@@ -1112,6 +1121,11 @@ void NativePanel::setReverbAmount(int percent)
     m_reverb.setValue(percent, juce::dontSendNotification);
 }
 
+void NativePanel::setPolishedMaster(bool on)
+{
+    m_polished.setToggleState(on, juce::dontSendNotification);
+}
+
 void NativePanel::setRightVoice(int layer, bool enabled, int program, int volume, int octave)
 {
     if (layer < 0 || layer >= 3)
@@ -1701,7 +1715,7 @@ void NativePanel::resized()
     // Master EQ row: caption + 3 labelled knobs.
     setVis(showEQ, { &m_eqCaption, &m_eqLowCap, &m_eqMidCap, &m_eqHighCap, &m_compCap,
                      &m_masterCap, &m_drumsCap, &m_reverbCap, &m_eqLow, &m_eqMid, &m_eqHigh,
-                     &m_comp, &m_master, &m_drums, &m_reverb });
+                     &m_comp, &m_master, &m_drums, &m_reverb, &m_polished });
     if (showEQ) {
         const int y0 = area.getY();
         auto r = area.removeFromTop(64);
@@ -1721,6 +1735,9 @@ void NativePanel::resized()
         placeKnob(m_master, m_masterCap);
         placeKnob(m_drums, m_drumsCap);
         placeKnob(m_reverb, m_reverbCap);
+        // Polished Master toggle sits to the right of the knobs (Effect/Sound page).
+        if (r.getWidth() > 40)
+            m_polished.setBounds(r.removeFromLeft(std::min(160, r.getWidth())).withTrimmedTop(24).withHeight(24));
         cardHere(area, y0);
         area.removeFromTop(gap);
     }

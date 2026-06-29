@@ -63,6 +63,7 @@ add_library(cadenza_core STATIC
     Source/Audio/MidiChannel.cpp
     Source/Audio/MixerModel.cpp
     Source/Audio/MasterCompressor.cpp
+    Source/Audio/PolishedMaster.cpp
     Source/Audio/VoiceMap.cpp
     Source/Audio/Transport.cpp
     Source/Audio/TransportCommandMailbox.cpp
@@ -125,6 +126,7 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_note_workflow_tests tests/StylePartNoteWorkflowTests.cpp)
     cadenza_add_test(cadenza_audio_chord_tests tests/AudioChordAnalysisTests.cpp)
     cadenza_add_test(cadenza_first_launch_tests tests/FirstLaunchChecklistTests.cpp)
+    cadenza_add_test(cadenza_polished_master_tests tests/PolishedMasterTests.cpp)
 endif()
 
 # ============================================================

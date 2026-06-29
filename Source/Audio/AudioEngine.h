@@ -7,6 +7,7 @@
 #include "MasterCompressor.h"
 #include "MasterEq.h"
 #include "MasterGlue.h"
+#include "PolishedMaster.h"
 #include "Metronome.h"
 #include "PluginHost.h"
 #include "SynthEngine.h"
@@ -74,6 +75,11 @@ public:
     void setMasterVolume(int percent) { m_masterGain.store(juce::jlimit(0, 127, percent) / 100.0f); }
     // Master reverb amount 0..100 (maps to FluidSynth reverb level 0..~1.0).
     void setReverbLevel(int percent) { if (m_synth) m_synth->setReverbLevel(juce::jlimit(0, 100, percent) / 100.0); }
+    // "Polished Master": optional final-stage polish (clean brickwall limiter +
+    // light glue/air/width) applied after the master volume. When off, the chain
+    // uses the original tanh soft-limiter unchanged.
+    void setPolishedMaster(bool on) { m_polishedMaster.setEnabled(on); }
+    bool polishedMaster() const { return m_polishedMaster.enabled(); }
     const char* synthEngineName() const noexcept;
     bool supportsSoundFonts() const noexcept;
 
@@ -133,6 +139,7 @@ private:
     MasterEq         m_masterEq;
     MasterCompressor m_masterComp;
     MasterGlue       m_masterGlue;
+    PolishedMaster   m_polishedMaster;
     std::atomic<float> m_masterGain { 1.0f };   // master output volume (100% = unity)
 
     // Fade-out state. m_fadeActive / m_fadeSeconds are written by the message

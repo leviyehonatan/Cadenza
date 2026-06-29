@@ -903,6 +903,7 @@ MainComponent::MainComponent()
         m_audio.setCompAmount(st.compAmount);
         m_audio.setMasterVolume(st.masterVolume);
         m_audio.setReverbLevel(st.reverbLevel);
+        m_audio.setPolishedMaster(st.polishedMaster);
         m_midi.setSplitPoint(st.splitNote);
         m_styleEngine.setHumanizeAmount(st.humanizeAmount);
         // Restore the saved MIDI input selection ("" = auto: main port, skip aux
@@ -4050,6 +4051,14 @@ void MainComponent::buildNativePanel()
         }
     };
 
+    cb.onPolishedMaster = [this](bool on) {
+        m_audio.setPolishedMaster(on);
+        if (m_settings) {
+            m_settings->state().polishedMaster = on;
+            saveSettings();
+        }
+    };
+
     cb.onDrumsChanged = [this](int volume) {
         // Quick drum-channel level (cadenza channel 10): mirror the drum mixer strip.
         if (!m_mixer.has(10)) return;
@@ -4261,6 +4270,7 @@ void MainComponent::buildNativePanel()
         m_panel->setCompAmount(st.compAmount);
         m_panel->setMasterVolume(st.masterVolume);
         m_panel->setReverbAmount(st.reverbLevel);
+        m_panel->setPolishedMaster(st.polishedMaster);
         m_panel->setSplitPoint(st.splitNote);
         for (int i = 0; i < 3; ++i) {
             const auto& L = st.rightLayers[i];

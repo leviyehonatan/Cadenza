@@ -50,6 +50,7 @@ void AudioEngine::prepareToPlay(int samplesPerBlock, double sampleRate)
     // cleanly by the final soft-limiter, so the mix stays loud without breathing.
     m_masterComp.setEnabled(false);
     m_masterGlue.prepare(sampleRate);
+    m_polishedMaster.prepare(sampleRate);   // enabled state is set from settings
 
     m_currentSampleRate = sampleRate;
     m_currentBlockSize  = samplesPerBlock > 0 ? samplesPerBlock : 512;
@@ -129,13 +130,22 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
                 m_fadeGain = 1.0f;   // fade cancelled — back to full level
             }
 
+            // When Polished Master is on, the brickwall limiter in m_polishedMaster
+            // (run just after this loop) owns peak control, so we apply only the
+            // master gain + fade here. Otherwise keep the original tanh soft-limiter.
+            const bool polished = m_polishedMaster.enabled();
             float fade = m_fadeGain;
             for (int s = 0; s < ns; ++s) {
-                for (int c = 0; c < nc; ++c)
-                    chans[c][s] = softLimit(chans[c][s] * gain * fade);
+                for (int c = 0; c < nc; ++c) {
+                    const float v = chans[c][s] * gain * fade;
+                    chans[c][s] = polished ? v : softLimit(v);
+                }
                 fade *= fadeStep;
             }
             m_fadeGain = fade;
+
+            if (polished)
+                m_polishedMaster.process(chans, nc, ns);
 
             if (m_fadeActive.load() && m_fadeGain <= 0.001f) {
                 stopFromAudioThread();
