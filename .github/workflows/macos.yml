@@ -1,0 +1,36 @@
+name: macOS build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Clone JUCE 8.0.13
+        run: git clone --depth 1 --branch 8.0.13 https://github.com/juce-framework/JUCE.git lib/JUCE
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Configure
+        run: cmake -S . -B build-mac -G Ninja -DCADENZA_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build-mac --parallel
+
+      - name: Run core tests
+        run: ctest --test-dir build-mac --output-on-failure -R "cadenza_"
+
+      - name: Upload Cadenza Workstation.app artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cadenza-Workstation-macOS
+          path: build-mac/Cadenza Workstation/Cadenza Workstation.app

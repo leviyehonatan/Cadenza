@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.22)
 
 project(Cadenza VERSION 1.0.0 LANGUAGES C CXX)
 
+# macOS port: needs resources/Cadenza.icns (app icon)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -158,6 +160,8 @@ if(MSVC)
     # parser on a malformed .sty) into catchable C++ exceptions so the batch
     # scan survives a bad file instead of aborting the whole run.
     target_compile_options(style-scan PRIVATE /EHa)
+elseif(APPLE)
+    target_compile_options(style-scan PRIVATE -fexceptions)
 endif()
 
 if(CADENZA_BUILD_TESTS)
@@ -254,6 +258,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
         PRODUCT_NAME "Cadenza Workstation"
         COMPANY_NAME "Cadenza"
     )
+
+if(APPLE)
+    set_target_properties(Cadenza PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.cadenza.workstation"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}"
+        MACOSX_BUNDLE_ICON_FILE "Cadenza.icns"
+    )
+endif()
 
     target_sources(Cadenza
         PRIVATE
@@ -373,7 +387,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
     add_custom_command(TARGET Cadenza POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/resources"
-            "$<TARGET_FILE_DIR:Cadenza>/resources"
+            "$<IF:$<BOOL:${APPLE}>,$<TARGET_BUNDLE_CONTENT_DIR:Cadenza>/Resources,$<TARGET_FILE_DIR:Cadenza>/resources>"
         COMMENT "Copying Cadenza resources next to the executable"
     )
 else()
