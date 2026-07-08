@@ -6,6 +6,17 @@ if ! xcode-select -p &>/dev/null; then
   exit 1
 fi
 
+if ! pkg-config --exists fluidsynth 2>/dev/null && ! pkg-config --exists fluid-synth 2>/dev/null; then
+  if command -v brew &>/dev/null; then
+    echo "FluidSynth not found. Installing via Homebrew..."
+    brew install fluid-synth
+  else
+    echo "WARNING: FluidSynth not found and Homebrew is not installed."
+    echo "The app will build but with NullSynthEngine (no sound)."
+    echo "Install FluidSynth manually or install Homebrew from https://brew.sh"
+  fi
+fi
+
 if [ ! -d "lib/JUCE" ]; then
   echo "Cloning JUCE 8.0.13..."
   git clone --depth 1 --branch 8.0.13 https://github.com/juce-framework/JUCE.git lib/JUCE

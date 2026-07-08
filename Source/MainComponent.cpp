@@ -1729,22 +1729,49 @@ void MainComponent::resized()
 
 juce::File MainComponent::findResourcesRoot()
 {
-    const auto exeResources = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
-        .getParentDirectory()
-        .getChildFile("resources");
+    const auto exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
+        .getParentDirectory();
 
+#if JUCE_MAC
+    if (exeDir.getChildFile("../Resources").isDirectory()) {
+        const auto bundleResources = exeDir.getChildFile("../Resources");
+        if (bundleResources.getChildFile("factory").isDirectory()
+            || bundleResources.getChildFile("sf2").isDirectory())
+            return bundleResources;
+    }
+#endif
+
+    const auto exeResources = exeDir.getChildFile("resources");
     if (exeResources.getChildFile("factory").isDirectory()
         || exeResources.getChildFile("sf2").isDirectory())
         return exeResources;
 
     const auto workingResources = juce::File::getCurrentWorkingDirectory()
         .getChildFile("resources");
-
     if (workingResources.getChildFile("factory").isDirectory()
         || workingResources.getChildFile("sf2").isDirectory())
         return workingResources;
 
     return juce::File::getCurrentWorkingDirectory();
+}
+
+static juce::File defaultVst3Directory()
+{
+#if JUCE_MAC
+    const auto sysVst3 = juce::File("/Library/Audio/Plug-Ins/VST3");
+    if (sysVst3.isDirectory())
+        return sysVst3;
+    const auto userVst3 = juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+        .getChildFile("Library/Audio/Plug-Ins/VST3");
+    if (userVst3.isDirectory())
+        return userVst3;
+    return juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+#else
+    juce::File vst3Dir("C:\\Program Files\\Common Files\\VST3");
+    if (vst3Dir.isDirectory())
+        return vst3Dir;
+    return juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+#endif
 }
 
 
@@ -2338,11 +2365,10 @@ void MainComponent::chooseMasterInstrument()
         if (choice == 2) { self->m_audio.showMasterInstrumentEditor(); return; }
         if (choice == 3) { self->m_audio.clearMasterInstrument(); return; }
 
-        juce::File vst3Dir("C:\\Program Files\\Common Files\\VST3");
+        juce::File vst3Dir = defaultVst3Directory();
         self->m_masterPluginChooser = std::make_unique<juce::FileChooser>(
             "Choose a multitimbral instrument (SampleTank, Sound Canvas, Kontakt)",
-            vst3Dir.isDirectory() ? vst3Dir
-                                  : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+            vst3Dir,
             "*.vst3");
         self->m_masterPluginChooser->launchAsync(
             juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
@@ -2368,11 +2394,10 @@ void MainComponent::chooseMasterInstrument()
 
 void MainComponent::choosePartInstrument(int channel)
 {
-    juce::File vst3Dir("C:\\Program Files\\Common Files\\VST3");
+    const auto vst3Dir = defaultVst3Directory();
     m_partPluginChooser = std::make_unique<juce::FileChooser>(
         "Choose a VST3 instrument for this part",
-        vst3Dir.isDirectory() ? vst3Dir
-                              : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+        vst3Dir,
         "*.vst3");
 
     juce::Component::SafePointer<MainComponent> safe(this);
@@ -2406,11 +2431,10 @@ void MainComponent::chooseRightLayerInstrument(int layer)
 {
     if (!m_settings || layer < 0 || layer >= 3)
         return;
-    juce::File vst3Dir("C:\\Program Files\\Common Files\\VST3");
+    const auto vst3Dir = defaultVst3Directory();
     m_partPluginChooser = std::make_unique<juce::FileChooser>(
         "Choose a VST3 instrument for Right " + juce::String(layer + 1),
-        vst3Dir.isDirectory() ? vst3Dir
-                              : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+        vst3Dir,
         "*.vst3");
 
     juce::Component::SafePointer<MainComponent> safe(this);
@@ -2480,8 +2504,8 @@ bool MainComponent::loadAndApplySoundFontFile(const juce::File& file, bool persi
 
 void MainComponent::exportPlaybackDiagnostics()
 {
-    const auto diagnosticsDir = juce::File::getCurrentWorkingDirectory()
-        .getChildFile("diagnostics");
+    const auto diagnosticsDir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+        .getChildFile("Cadenza Diagnostics");
     const auto result = m_styleEngine.exportCurrentSectionDiagnostics(
         diagnosticsDir.getFullPathName().toStdString());
 
@@ -3824,11 +3848,7 @@ void MainComponent::timerCallback()
 
 void MainComponent::openPluginFileChooser()
 {
-    // Default to the project root so the bundled VST3/ and NeuralPi/ folders are visible.
-    const auto projectRoot = findResourcesRoot().getParentDirectory();
-    const auto startDir = projectRoot.isDirectory()
-        ? projectRoot
-        : juce::File::getSpecialLocation(juce::File::globalApplicationsDirectory);
+    const auto startDir = defaultVst3Directory();
 
     m_pluginChooser = std::make_unique<juce::FileChooser>(
         "Choose a VST3 plugin (.vst3)", startDir, "*.vst3");

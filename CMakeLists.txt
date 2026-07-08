@@ -289,6 +289,11 @@ endif()
             Source/UI/StylePartPatternImport.cpp
             Source/UI/StylePartPianoRoll.cpp
             Source/Ai/StyleGenerator.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/resources/Cadenza.icns
+    )
+    set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/resources/Cadenza.icns
+        PROPERTIES MACOSX_PACKAGE_LOCATION "Resources"
     )
 
     target_compile_definitions(Cadenza
@@ -390,6 +395,13 @@ endif()
             "$<IF:$<BOOL:${APPLE}>,$<TARGET_BUNDLE_CONTENT_DIR:Cadenza>/Resources,$<TARGET_FILE_DIR:Cadenza>/resources>"
         COMMENT "Copying Cadenza resources next to the executable"
     )
+    if(APPLE)
+        add_custom_command(TARGET Cadenza POST_BUILD
+            COMMAND plutil -replace CFBundleIconFile -string "Cadenza.icns"
+                "$<TARGET_BUNDLE_CONTENT_DIR:Cadenza>/Info.plist"
+            COMMENT "Setting app icon in Info.plist"
+        )
+    endif()
 else()
     message(WARNING "lib/JUCE was not found, so the native host target is skipped. Clone JUCE into lib/JUCE to build Cadenza.exe.")
 endif()
